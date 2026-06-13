@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>AnyRouter 状态</title>
+    <link rel="stylesheet" href="./styles.css">
+  </head>
+  <body>
+    <main class="shell">
+      <header class="topbar">
+        <div class="brand">
+          <span class="mark" aria-hidden="true"></span>
+          <div>
+            <h1>AnyRouter 状态</h1>
+            <p>社区真实使用观测</p>
+          </div>
+        </div>
+        <div class="updated" id="updated">等待数据</div>
+      </header>
+
+      <section class="summary" aria-live="polite">
+        <div>
+          <div class="state" id="state">加载中</div>
+          <div class="stateDetail" id="stateDetail">正在读取最近观测结果</div>
+        </div>
+        <div class="windowTabs" role="tablist" aria-label="时间窗口">
+          <button class="active" data-window="5m" type="button">5 分钟</button>
+          <button data-window="15m" type="button">15 分钟</button>
+          <button data-window="60m" type="button">60 分钟</button>
+        </div>
+      </section>
+
+      <section class="metrics" aria-label="状态指标">
+        <article>
+          <span>可用性</span>
+          <strong id="availability">--</strong>
+        </article>
+        <article>
+          <span>样本数</span>
+          <strong id="sampleCount">--</strong>
+        </article>
+        <article>
+          <span>p50 延迟</span>
+          <strong id="p50">--</strong>
+        </article>
+        <article>
+          <span>p90 延迟</span>
+          <strong id="p90">--</strong>
+        </article>
+        <article>
+          <span>置信度</span>
+          <strong id="confidence">--</strong>
+        </article>
+      </section>
+
+      <section class="panel">
+        <div class="panelHeader">
+          <h2>主要错误类型</h2>
+          <span id="failureCount">失败样本 --</span>
+        </div>
+        <div id="errors" class="errorList"></div>
+      </section>
+
+      <footer>
+        数据来自自愿安装插件的 Claude Code 用户；页面只展示聚合后的社区观测结果。
+      </footer>
+    </main>
+    <script src="./config.js"></script>
+    <script src="./app.js" type="module"></script>
+  </body>
+</html>

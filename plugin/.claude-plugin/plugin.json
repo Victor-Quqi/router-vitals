@@ -1,0 +1,13 @@
+{
+  "name": "anyrouter-status-monitor",
+  "displayName": "AnyRouter Status Monitor",
+  "version": "0.1.0",
+  "description": "Anonymous community status monitor for AnyRouter Claude Code usage.",
+  "author": {
+    "name": "router-vitals"
+  },
+  "homepage": "https://github.com/anyrouter/router-vitals",
+  "repository": "https://github.com/anyrouter/router-vitals",
+  "keywords": ["claude-code", "status", "anyrouter"],
+  "hooks": "./hooks/hooks.json"
+}

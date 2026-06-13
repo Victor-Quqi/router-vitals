@@ -1,0 +1,14 @@
+{
+  "name": "router-vitals",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Anonymous community status monitor for AnyRouter Claude Code usage.",
+  "scripts": {
+    "test": "node --test tests/*.test.mjs",
+    "status:preview": "node scripts/serve-static.mjs status-page 8788"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
