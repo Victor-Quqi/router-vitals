@@ -47,7 +47,9 @@ export async function handleRequest(request, env) {
   if (request.method === "OPTIONS") return new Response(null, { status: 204, headers: JSON_HEADERS });
 
   const url = new URL(request.url);
-  if (request.method === "GET" && url.pathname === "/v1/config") return json(DEFAULT_REMOTE_CONFIG);
+  if (request.method === "GET" && (url.pathname === "/v1/config" || url.pathname === "/config.json")) {
+    return json({ ...DEFAULT_REMOTE_CONFIG, apiBaseUrl: url.origin });
+  }
   if (request.method === "GET" && url.pathname === "/v1/status") return handleStatus(url, env);
   if (request.method === "POST" && url.pathname === "/v1/report") return handleReport(request, env);
 

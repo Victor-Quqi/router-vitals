@@ -31,6 +31,13 @@ test("config endpoint exposes fixed AnyRouter hosts", async () => {
   const response = await handleRequest(new Request("https://api.example.test/v1/config"), {});
   const body = await response.json();
   assert.deepEqual(body.targetBaseUrlHosts, ["anyrouter.top", "a-ocnfniawgw.cn-shanghai.fcapp.run"]);
+  assert.equal(body.apiBaseUrl, "https://api.example.test");
+});
+
+test("config endpoint is also available as config.json", async () => {
+  const response = await handleRequest(new Request("https://api.example.test/config.json"), {});
+  const body = await response.json();
+  assert.equal(body.apiBaseUrl, "https://api.example.test");
 });
 
 test("status aggregation returns insufficient data under sample floor", () => {
