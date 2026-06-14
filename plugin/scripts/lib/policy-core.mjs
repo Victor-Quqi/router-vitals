@@ -5,8 +5,8 @@ export const TARGET_HOSTS = Object.freeze([
   "a-ocnfniawgw.cn-shanghai.fcapp.run"
 ]);
 
-export const DEFAULT_API_BASE_URL = "https://api.status.example.com";
-export const DEFAULT_CONFIG_URL = "https://config.status.example.com/config.json";
+export const DEFAULT_API_BASE_URL = "https://router-vitals-api.v1756251285.workers.dev";
+export const DEFAULT_CONFIG_URL = "https://router-vitals-api.v1756251285.workers.dev/config.json";
 
 export const ERROR_TYPES = Object.freeze([
   "none",
