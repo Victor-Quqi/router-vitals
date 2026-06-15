@@ -8,6 +8,5 @@
   },
   "homepage": "https://github.com/Victor-Quqi/router-vitals",
   "repository": "https://github.com/Victor-Quqi/router-vitals",
-  "keywords": ["claude-code", "status", "anyrouter"],
-  "hooks": "./hooks/hooks.json"
+  "keywords": ["claude-code", "status", "anyrouter"]
 }
