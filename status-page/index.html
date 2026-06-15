@@ -25,11 +25,19 @@
 
       <section class="summary" aria-live="polite">
         <div>
-          <div class="state" id="state">加载中</div>
+          <div class="stateLine">
+            <div class="state" id="state">加载中</div>
+            <button
+              class="help stateHelp"
+              type="button"
+              aria-label="总状态判断说明"
+              data-tip="少于 5 条为样本不足；成功率 >= 95% 为可用，50% 到 95% 以下为不稳定，低于 50% 为不可用。"
+            >?</button>
+          </div>
           <div class="stateDetail" id="stateDetail">正在读取最近观测结果</div>
         </div>
         <div class="windowTabs" role="tablist" aria-label="时间窗口">
-          <button class="active" data-window="90m" type="button">近90分钟</button>
+          <button class="active" data-window="60m" type="button">近60分钟</button>
           <button data-window="24h" type="button">近24小时</button>
           <button data-window="7d" type="button">近7天</button>
           <button data-window="30d" type="button">近30天</button>

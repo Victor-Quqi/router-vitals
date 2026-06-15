@@ -8,11 +8,11 @@ const labels = {
 };
 
 const windowLabels = {
+  "60m": "近60分钟",
   "90m": "近90分钟",
   "24h": "近24小时",
   "7d": "近7天",
-  "30d": "近30天",
-  "60m": "近60分钟"
+  "30d": "近30天"
 };
 
 const errorLabels = {
@@ -31,7 +31,7 @@ const modelLabels = {
   unknown: "unknown"
 };
 
-let activeWindow = "90m";
+let activeWindow = "60m";
 
 for (const button of document.querySelectorAll("[data-window]")) {
   button.addEventListener("click", () => {

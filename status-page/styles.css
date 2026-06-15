@@ -122,6 +122,16 @@ article span {
   letter-spacing: 0;
 }
 
+.stateLine {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.stateHelp {
+  flex: 0 0 auto;
+}
+
 .stateDetail {
   margin-top: 10px;
   color: var(--muted);

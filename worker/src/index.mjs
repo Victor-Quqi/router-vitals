@@ -88,7 +88,7 @@ export async function handleReport(request, env) {
 export async function handleStatus(url, env) {
   if (!env?.DB) return json({ error: "db_not_configured" }, 503);
 
-  const windowValue = url.searchParams.get("window") || "90m";
+  const windowValue = url.searchParams.get("window") || "60m";
   const minutes = parseStatusWindow(windowValue);
   if (!minutes) return json({ error: "invalid_window" }, 400);
 

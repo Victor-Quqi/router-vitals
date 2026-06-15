@@ -1,4 +1,4 @@
-export const PLUGIN_VERSION = "0.1.4";
+export const PLUGIN_VERSION = "0.1.5";
 
 export const TARGET_HOSTS = Object.freeze([
   "anyrouter.top",
@@ -48,7 +48,7 @@ export const DEFAULT_REMOTE_CONFIG = Object.freeze({
   sampleRateSuccess: 1,
   sampleRateFailure: 1,
   minPluginVersion: "0.1.0",
-  statusWindows: ["90m", "24h", "7d", "30d"]
+  statusWindows: ["60m", "24h", "7d", "30d"]
 });
 
 const STATUS_WINDOWS = Object.freeze(["5m", "15m", "60m", "90m", "24h", "7d", "30d"]);
