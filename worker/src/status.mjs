@@ -61,8 +61,8 @@ export function buildStatusFromRows(
       stateThresholds: {
         insufficient_data: "sampleCount < 5",
         down: "availability < 50%",
-        unstable: "50% <= availability < 95%",
-        available: "availability >= 95%"
+        unstable: "50% <= availability < 90%",
+        available: "availability >= 90%"
       }
     }
   };
@@ -229,7 +229,7 @@ function getErrorDetail(details, type) {
 function getState({ total, availability }) {
   if (total < 5 || availability === null) return "insufficient_data";
   if (availability < 0.5) return "down";
-  if (availability < 0.95) return "unstable";
+  if (availability < 0.9) return "unstable";
   return "available";
 }
 

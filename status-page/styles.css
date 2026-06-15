@@ -222,6 +222,7 @@ article em {
   background: #0b0d12;
   color: var(--text);
   content: attr(data-tip);
+  font-weight: 400;
   font-size: 12px;
   line-height: 1.45;
   opacity: 0;
@@ -269,25 +270,34 @@ article em {
   grid-template-columns: 14px minmax(220px, 320px) 1fr minmax(56px, auto);
   align-items: center;
   gap: 12px;
+  width: 100%;
   padding: 12px 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
   cursor: pointer;
-  list-style: none;
 }
 
-.errorSummary::-webkit-details-marker {
-  display: none;
+.errorSummary:focus-visible {
+  outline: 2px solid var(--blue);
+  outline-offset: 3px;
 }
 
-.errorSummary::before {
-  content: "▸";
+.disclosureIcon {
+  width: 8px;
+  height: 8px;
+  border-right: 2px solid currentColor;
+  border-bottom: 2px solid currentColor;
   color: var(--muted);
-  font-size: 13px;
-  line-height: 1;
-  transition: transform 120ms ease;
+  transform: rotate(-45deg);
+  transition: transform 160ms ease, color 160ms ease;
 }
 
-.errorItem[open] > .errorSummary::before {
-  transform: rotate(90deg);
+.errorItem.expanded .disclosureIcon {
+  color: var(--text);
+  transform: rotate(45deg);
 }
 
 .errorName {
@@ -311,10 +321,22 @@ article em {
 .errorDetail {
   display: grid;
   gap: 8px;
-  padding: 0 0 14px;
+  max-height: 0;
+  overflow: hidden;
+  opacity: 0;
+  padding: 0;
   color: var(--muted);
   font-size: 13px;
   line-height: 1.45;
+  transform: translateY(-4px);
+  transition: max-height 180ms ease, opacity 160ms ease, padding 180ms ease, transform 180ms ease;
+}
+
+.errorItem.expanded .errorDetail {
+  max-height: 280px;
+  opacity: 1;
+  padding: 0 0 14px 26px;
+  transform: translateY(0);
 }
 
 .errorDetail p {

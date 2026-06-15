@@ -185,21 +185,31 @@ function renderErrors(errors) {
   }
 
   for (const error of errors.slice(0, 5)) {
-    const item = document.createElement("details");
+    const item = document.createElement("div");
     item.className = "errorItem";
     const errorKey = getErrorKey(error);
-    item.open = openErrorKeys.has(errorKey);
-    item.addEventListener("toggle", () => {
-      if (item.open) openErrorKeys.add(errorKey);
-      else openErrorKeys.delete(errorKey);
-    });
+    const expanded = openErrorKeys.has(errorKey);
+    item.classList.toggle("expanded", expanded);
     const meta = errorLabels[error.type] || {
       title: "未识别错误",
       detail: "错误信息不足，暂未归类。"
     };
 
-    const summary = document.createElement("summary");
+    const summary = document.createElement("button");
+    summary.type = "button";
     summary.className = "errorSummary";
+    summary.setAttribute("aria-expanded", expanded ? "true" : "false");
+    summary.addEventListener("click", () => {
+      const nextExpanded = !item.classList.contains("expanded");
+      item.classList.toggle("expanded", nextExpanded);
+      summary.setAttribute("aria-expanded", nextExpanded ? "true" : "false");
+      if (nextExpanded) openErrorKeys.add(errorKey);
+      else openErrorKeys.delete(errorKey);
+    });
+
+    const indicator = document.createElement("span");
+    indicator.className = "disclosureIcon";
+    indicator.setAttribute("aria-hidden", "true");
 
     const name = document.createElement("div");
     name.className = "errorName";
@@ -218,7 +228,7 @@ function renderErrors(errors) {
     const ratio = document.createElement("span");
     ratio.textContent = `${Math.round((error.ratio || 0) * 100)}%`;
 
-    summary.append(name, bar, ratio);
+    summary.append(indicator, name, bar, ratio);
     item.append(summary, buildErrorDetail(error));
     root.append(item);
   }
