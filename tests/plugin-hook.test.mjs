@@ -48,11 +48,15 @@ test("plugin hook uploads only for matched AnyRouter sessions", async () => {
       ANYROUTER_STATUS_CONFIG_URL: `http://127.0.0.1:${server.address().port}/config.json`
     };
 
-    await runHook("UserPromptSubmit", { session_id: "session-a", model: { id: "claude-sonnet-4" } }, {
+    await runHook("SessionStart", { session_id: "session-a", model: "claude-sonnet-4" }, {
       ...commonEnv,
       ANTHROPIC_BASE_URL: "https://anyrouter.top"
     });
-    await runHook("Stop", { session_id: "session-a", model: { id: "claude-sonnet-4" } }, {
+    await runHook("UserPromptSubmit", { session_id: "session-a" }, {
+      ...commonEnv,
+      ANTHROPIC_BASE_URL: "https://anyrouter.top"
+    });
+    await runHook("Stop", { session_id: "session-a" }, {
       ...commonEnv,
       ANTHROPIC_BASE_URL: "https://anyrouter.top/v1/messages"
     });
@@ -76,6 +80,11 @@ test("plugin hook uploads only for matched AnyRouter sessions", async () => {
     });
 
     assert.equal(received.length, 1);
+
+    await runHook("SessionEnd", { session_id: "session-a" }, {
+      ...commonEnv,
+      ANTHROPIC_BASE_URL: "https://anyrouter.top"
+    });
   } finally {
     server.close();
     await rm(stateDir, { recursive: true, force: true });

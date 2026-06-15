@@ -110,19 +110,33 @@ export function bucketLatency(durationMs) {
   return "gt_60s";
 }
 
-export function classifyModel(input) {
-  const envModel = globalThis.process?.env?.CLAUDE_MODEL;
-  const raw = [
+export function classifyModel(input, { includeEnv = true } = {}) {
+  const inputRaw = [
     input?.model?.id,
     input?.model?.name,
     input?.model?.display_name,
+    input?.model?.displayName,
+    input?.model_id,
+    input?.model_name,
     input?.model,
-    envModel
   ]
     .filter((value) => typeof value === "string")
     .join(" ")
     .toLowerCase();
 
+  const inputModelClass = classifyModelText(inputRaw);
+  if (inputModelClass !== "unknown" || !includeEnv) return inputModelClass;
+
+  return classifyModelText([
+    globalThis.process?.env?.ANTHROPIC_MODEL,
+    globalThis.process?.env?.CLAUDE_MODEL
+  ]
+    .filter((value) => typeof value === "string")
+    .join(" ")
+    .toLowerCase());
+}
+
+function classifyModelText(raw) {
   if (raw.includes("haiku")) return "haiku";
   if (raw.includes("sonnet")) return "sonnet";
   if (raw.includes("opus")) return "opus";

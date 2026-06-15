@@ -32,8 +32,20 @@ async function main() {
   const state = await loadState();
   const sessionKey = hashLocalSessionId(input.session_id);
 
+  if (eventName === "SessionStart") {
+    recordSessionStart(state, sessionKey, input);
+    await saveState(state);
+    return;
+  }
+
+  if (eventName === "SessionEnd") {
+    delete state.sessions[sessionKey];
+    await saveState(state);
+    return;
+  }
+
   if (eventName === "UserPromptSubmit") {
-    recordPromptStart(state, sessionKey);
+    recordPromptStart(state, sessionKey, input);
     await saveState(state);
     return;
   }
@@ -57,11 +69,20 @@ async function readHookInput() {
   }
 }
 
-function recordPromptStart(state, sessionKey) {
+function recordSessionStart(state, sessionKey, input) {
+  const modelClass = classifyModel(input, { includeEnv: false });
+  state.sessions[sessionKey] = {
+    modelClass,
+    updatedAtMs: Date.now()
+  };
+}
+
+function recordPromptStart(state, sessionKey, input) {
   const match = matchTargetBaseUrl(process.env.ANTHROPIC_BASE_URL);
   state.pending[sessionKey] = {
     startedAtMs: Date.now(),
-    targetMatched: match.matched === true
+    targetMatched: match.matched === true,
+    modelClass: resolveModelClass(input, state.sessions[sessionKey])
   };
 }
 
@@ -83,7 +104,7 @@ async function reportCompletion({ eventName, input, state, config, sessionKey })
     errorType: ok ? "none" : classifyError(input),
     errorStatusCode: ok ? null : extractErrorStatusCode(input),
     errorHint: ok ? null : createErrorHint(input),
-    modelClass: classifyModel(input),
+    modelClass: resolveModelClass(input, pending, state.sessions[sessionKey]),
     latencyBucket: bucketLatency(Date.now() - Number(pending.startedAtMs)),
     timeBucket: createTimeBucket(),
     pluginVersion: PLUGIN_VERSION,
@@ -121,4 +142,15 @@ async function postReport(apiBaseUrl, payload) {
   } catch {
     return false;
   }
+}
+
+function resolveModelClass(input, ...fallbacks) {
+  const direct = classifyModel(input, { includeEnv: false });
+  if (direct !== "unknown") return direct;
+
+  for (const fallback of fallbacks) {
+    if (fallback?.modelClass && fallback.modelClass !== "unknown") return fallback.modelClass;
+  }
+
+  return classifyModel(input);
 }

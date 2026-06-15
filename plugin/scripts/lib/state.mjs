@@ -57,6 +57,7 @@ function normalizeState(value) {
     version: STATE_VERSION,
     anonymous: normalizeAnonymous(value?.anonymous),
     pending: normalizeObject(value?.pending),
+    sessions: normalizeObject(value?.sessions),
     contributions: normalizeObject(value?.contributions),
     lastPayload: value?.lastPayload && typeof value.lastPayload === "object" ? value.lastPayload : null,
     lastReportAt: typeof value?.lastReportAt === "string" ? value.lastReportAt : null
