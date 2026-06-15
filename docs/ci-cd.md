@@ -9,7 +9,7 @@ Cloudflare 从零配置见 [cloudflare-setup.md](cloudflare-setup.md)。
 `.github/workflows/ci.yml` 会在 PR 和所有分支 push 时运行：
 
 ```bash
-npm test
+pnpm test
 ```
 
 ## CD
@@ -17,11 +17,12 @@ npm test
 `.github/workflows/deploy-cloudflare.yml` 会在 `main` push 且改到 `worker/**` 或 `status-page/**` 时运行，也能手动触发。运行时会：
 
 1. 运行测试。
-2. 把 GitHub Variables 里的 D1 database id 注入 `worker/wrangler.toml`。
-3. 把 API 域名注入 `status-page/config.js`。
-4. 执行 D1 migrations。
-5. 部署 Worker。
-6. 部署 Cloudflare Pages。
+2. 编译 TypeScript。
+3. 把 GitHub Variables 里的 D1 database id 注入 `worker/wrangler.toml`。
+4. 把 API 域名注入 `status-page/config.js`。
+5. 执行 D1 migrations。
+6. 部署 Worker。
+7. 部署 Cloudflare Pages。
 
 ## GitHub Secrets
 

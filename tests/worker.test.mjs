@@ -2,153 +2,140 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { handleReport, handleRequest } from "../worker/src/index.mjs";
 import { buildStatusFromRows } from "../worker/src/status.mjs";
-
 test("worker rejects unknown report fields before touching D1", async () => {
-  const request = new Request("https://api.example.test/v1/report", {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({
-      ok: true,
-      errorType: "none",
-      modelClass: "sonnet",
-      latencyBucket: "lt_3s",
-      timeBucket: 30000000,
-      pluginVersion: "0.1.0",
-      anonymousId: "anon_abcdefghijklmnop",
-      sampleRate: 1,
-      targetMatched: true,
-      actualUrl: "https://anyrouter.top"
-    })
-  });
-
-  const response = await handleReport(request, { DB: failingDb() });
-  assert.equal(response.status, 400);
-  const body = await response.json();
-  assert.equal(body.error, "invalid_payload");
+    const request = new Request("https://api.example.test/v1/report", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+            ok: true,
+            errorType: "none",
+            modelClass: "sonnet",
+            latencyBucket: "lt_3s",
+            timeBucket: 30000000,
+            pluginVersion: "0.1.0",
+            anonymousId: "anon_abcdefghijklmnop",
+            sampleRate: 1,
+            targetMatched: true,
+            actualUrl: "https://anyrouter.top"
+        })
+    });
+    const response = await handleReport(request, { DB: failingDb() });
+    assert.equal(response.status, 400);
+    const body = await response.json();
+    assert.equal(body.error, "invalid_payload");
 });
-
 test("config endpoint exposes fixed AnyRouter hosts", async () => {
-  const response = await handleRequest(new Request("https://api.example.test/v1/config"), {});
-  const body = await response.json();
-  assert.deepEqual(body.targetBaseUrlHosts, ["anyrouter.top", "a-ocnfniawgw.cn-shanghai.fcapp.run"]);
-  assert.equal(body.apiBaseUrl, "https://api.example.test");
+    const response = await handleRequest(new Request("https://api.example.test/v1/config"), {});
+    const body = await response.json();
+    assert.deepEqual(body.targetBaseUrlHosts, ["anyrouter.top", "a-ocnfniawgw.cn-shanghai.fcapp.run"]);
+    assert.equal(body.apiBaseUrl, "https://api.example.test");
 });
-
 test("config endpoint is also available as config.json", async () => {
-  const response = await handleRequest(new Request("https://api.example.test/config.json"), {});
-  const body = await response.json();
-  assert.equal(body.apiBaseUrl, "https://api.example.test");
+    const response = await handleRequest(new Request("https://api.example.test/config.json"), {});
+    const body = await response.json();
+    assert.equal(body.apiBaseUrl, "https://api.example.test");
 });
-
 test("status aggregation returns insufficient data under sample floor", () => {
-  const status = buildStatusFromRows([
-    {
-      total_samples: 4,
-      success_samples: 4,
-      failure_samples: 0,
-      latency_lt_3s: 4
-    }
-  ], "5m");
-
-  assert.equal(status.state, "insufficient_data");
-  assert.equal(status.meta.unit, "turn");
-  assert.equal(status.meta.availabilityFormula, "successCount / sampleCount");
+    const status = buildStatusFromRows([
+        {
+            total_samples: 4,
+            success_samples: 4,
+            failure_samples: 0,
+            latency_lt_3s: 4
+        }
+    ], "5m");
+    assert.equal(status.state, "insufficient_data");
+    assert.equal(status.meta.unit, "turn");
+    assert.equal(status.meta.availabilityFormula, "successCount / sampleCount");
 });
-
 test("status aggregation detects unstable high error windows", () => {
-  const status = buildStatusFromRows([
-    {
-      total_samples: 20,
-      success_samples: 17,
-      failure_samples: 3,
-      latency_3_10s: 20,
-      err_server_error: 3
-    }
-  ], "15m");
-
-  assert.equal(status.state, "unstable");
-  assert.equal(status.errors[0].type, "server_error");
+    const status = buildStatusFromRows([
+        {
+            total_samples: 20,
+            success_samples: 17,
+            failure_samples: 3,
+            latency_3_10s: 20,
+            err_server_error: 3
+        }
+    ], "15m");
+    assert.equal(status.state, "unstable");
+    assert.equal(status.errors[0].type, "server_error");
 });
-
 test("status aggregation attaches error status codes and hints", () => {
-  const status = buildStatusFromRows([
-    {
-      total_samples: 10,
-      success_samples: 7,
-      failure_samples: 3,
-      err_rate_limited: 3
-    }
-  ], "60m", [], 30000010, [
-    {
-      error_type: "rate_limited",
-      status_code: 429,
-      error_hint: "API Error 429: Rate limit reached",
-      count: 2
-    },
-    {
-      error_type: "rate_limited",
-      status_code: 429,
-      error_hint: "Quota exceeded",
-      count: 1
-    }
-  ]);
-
-  assert.equal(status.errors[0].type, "rate_limited");
-  assert.deepEqual(status.errors[0].statusCodes, [{ code: 429, count: 3 }]);
-  assert.equal(status.errors[0].hints[0].text, "API Error 429: Rate limit reached");
+    const status = buildStatusFromRows([
+        {
+            total_samples: 10,
+            success_samples: 7,
+            failure_samples: 3,
+            err_rate_limited: 3
+        }
+    ], "60m", [], 30000010, [
+        {
+            error_type: "rate_limited",
+            status_code: 429,
+            error_hint: "API Error 429: Rate limit reached",
+            count: 2
+        },
+        {
+            error_type: "rate_limited",
+            status_code: 429,
+            error_hint: "Quota exceeded",
+            count: 1
+        }
+    ]);
+    assert.equal(status.errors[0].type, "rate_limited");
+    assert.deepEqual(status.errors[0].statusCodes, [{ code: 429, count: 3 }]);
+    assert.equal(status.errors[0].hints[0].text, "API Error 429: Rate limit reached");
 });
-
 test("status aggregation builds model trend buckets", () => {
-  const nowMinute = 30000010;
-  const status = buildStatusFromRows([
-    {
-      minute: nowMinute - 1,
-      total_samples: 3,
-      success_samples: 2,
-      failure_samples: 1,
-      err_server_error: 1
-    }
-  ], "90m", [
-    {
-      minute: nowMinute - 6,
-      model_class: "sonnet",
-      total_samples: 2,
-      success_samples: 2,
-      failure_samples: 0
-    },
-    {
-      minute: nowMinute - 1,
-      model_class: "sonnet",
-      total_samples: 3,
-      success_samples: 2,
-      failure_samples: 1
-    },
-    {
-      minute: nowMinute,
-      model_class: "opus",
-      total_samples: 1,
-      success_samples: 0,
-      failure_samples: 1
-    }
-  ], nowMinute);
-
-  assert.equal(status.timeline.bucketCount, 18);
-  assert.equal(status.timeline.bucketMinutes, 5);
-  assert.equal(status.models.length, 4);
-  assert.equal(status.models[0].modelClass, "haiku");
-  assert.equal(status.models[0].buckets.at(-1).state, "empty");
-  assert.equal(status.models[1].modelClass, "sonnet");
-  assert.equal(status.models[1].buckets.at(-2).state, "success");
-  assert.equal(status.models[1].buckets.at(-1).state, "mixed");
-  assert.equal(status.models[2].modelClass, "opus");
-  assert.equal(status.models[2].buckets.at(-1).state, "failure");
-  assert.equal(status.models[3].modelClass, "unknown");
+    const nowMinute = 30000010;
+    const status = buildStatusFromRows([
+        {
+            minute: nowMinute - 1,
+            total_samples: 3,
+            success_samples: 2,
+            failure_samples: 1,
+            err_server_error: 1
+        }
+    ], "90m", [
+        {
+            minute: nowMinute - 6,
+            model_class: "sonnet",
+            total_samples: 2,
+            success_samples: 2,
+            failure_samples: 0
+        },
+        {
+            minute: nowMinute - 1,
+            model_class: "sonnet",
+            total_samples: 3,
+            success_samples: 2,
+            failure_samples: 1
+        },
+        {
+            minute: nowMinute,
+            model_class: "opus",
+            total_samples: 1,
+            success_samples: 0,
+            failure_samples: 1
+        }
+    ], nowMinute);
+    assert.equal(status.timeline.bucketCount, 18);
+    assert.equal(status.timeline.bucketMinutes, 5);
+    assert.equal(status.models.length, 4);
+    assert.equal(status.models[0].modelClass, "haiku");
+    assert.equal(status.models[0].buckets.at(-1).state, "empty");
+    assert.equal(status.models[1].modelClass, "sonnet");
+    assert.equal(status.models[1].buckets.at(-2).state, "success");
+    assert.equal(status.models[1].buckets.at(-1).state, "mixed");
+    assert.equal(status.models[2].modelClass, "opus");
+    assert.equal(status.models[2].buckets.at(-1).state, "failure");
+    assert.equal(status.models[3].modelClass, "unknown");
 });
-
 function failingDb() {
-  return {
-    prepare() {
-      throw new Error("D1 should not be used for invalid payloads");
-    }
-  };
+    return {
+        prepare() {
+            throw new Error("D1 should not be used for invalid payloads");
+        }
+    };
 }

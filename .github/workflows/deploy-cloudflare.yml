@@ -5,8 +5,13 @@ on:
     branches:
       - main
     paths:
+      - "src/**"
       - "status-page/**"
       - "worker/**"
+      - "shared/**"
+      - "package.json"
+      - "pnpm-lock.yaml"
+      - "tsconfig*.json"
   workflow_dispatch:
 
 permissions:
@@ -27,9 +32,16 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 24
+          cache: pnpm
+
+      - name: Enable pnpm
+        run: corepack enable
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
 
       - name: Test
-        run: npm test
+        run: pnpm test
 
   deploy:
     runs-on: ubuntu-latest
@@ -47,6 +59,16 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 24
+          cache: pnpm
+
+      - name: Enable pnpm
+        run: corepack enable
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build
+        run: pnpm run build
 
       - name: Validate deployment variables
         run: |
@@ -60,10 +82,10 @@ jobs:
         run: node -e "const fs = require('fs'); const value = 'window.ANYROUTER_STATUS_API_BASE = ' + JSON.stringify(process.env.STATUS_API_BASE_URL) + ';\\n'; fs.writeFileSync('status-page/config.js', value);"
 
       - name: Apply D1 migrations
-        run: npx --yes wrangler@4 d1 migrations apply router-vitals --remote --config worker/wrangler.toml
+        run: pnpm dlx wrangler@4 d1 migrations apply router-vitals --remote --config worker/wrangler.toml
 
       - name: Deploy Worker
-        run: npx --yes wrangler@4 deploy --config worker/wrangler.toml
+        run: pnpm dlx wrangler@4 deploy --config worker/wrangler.toml
 
       - name: Deploy Pages
-        run: npx --yes wrangler@4 pages deploy status-page --project-name=router-vitals
+        run: pnpm dlx wrangler@4 pages deploy status-page --project-name=router-vitals
