@@ -169,6 +169,8 @@ article span {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
   border-top: 0;
+  border-radius: 0 0 8px 8px;
+  overflow: hidden;
 }
 
 article {
