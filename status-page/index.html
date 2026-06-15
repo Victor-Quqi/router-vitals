@@ -10,7 +10,11 @@
     <main class="shell">
       <header class="topbar">
         <div class="brand">
-          <span class="mark" aria-hidden="true"></span>
+          <span class="mark" aria-hidden="true">
+            <svg viewBox="0 0 48 48" focusable="false">
+              <path d="M9 25h8l4-12 6 22 5-14h7" />
+            </svg>
+          </span>
           <div>
             <h1>Any Router 状态</h1>
             <p>Claude Code 社区轮次观测</p>
@@ -25,9 +29,10 @@
           <div class="stateDetail" id="stateDetail">正在读取最近观测结果</div>
         </div>
         <div class="windowTabs" role="tablist" aria-label="时间窗口">
-          <button data-window="5m" type="button">5 分钟</button>
-          <button data-window="15m" type="button">15 分钟</button>
-          <button class="active" data-window="60m" type="button">60 分钟</button>
+          <button class="active" data-window="90m" type="button">近90分钟</button>
+          <button data-window="24h" type="button">近24小时</button>
+          <button data-window="7d" type="button">近7天</button>
+          <button data-window="30d" type="button">近30天</button>
         </div>
       </section>
 
@@ -45,6 +50,20 @@
           <span>失败轮次 <button class="help" type="button" aria-label="失败轮次说明" data-tip="StopFailure 上报的轮次数。错误类型只使用白名单分类，不上传原始错误文本。">?</button></span>
           <strong id="failureCountMetric">--</strong>
         </article>
+      </section>
+
+      <section class="panel trendPanel">
+        <div class="panelHeader">
+          <h2>模型趋势</h2>
+          <span id="bucketInfo">--</span>
+        </div>
+        <div class="trendLegend" aria-label="趋势颜色说明">
+          <span><i class="dot empty"></i>无数据</span>
+          <span><i class="dot success"></i>全成功</span>
+          <span><i class="dot mixed"></i>成功和失败混合</span>
+          <span><i class="dot failure"></i>全失败</span>
+        </div>
+        <div class="modelTable" id="modelTable"></div>
       </section>
 
       <section class="panel">

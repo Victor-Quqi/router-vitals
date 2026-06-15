@@ -48,8 +48,10 @@ export const DEFAULT_REMOTE_CONFIG = Object.freeze({
   sampleRateSuccess: 1,
   sampleRateFailure: 1,
   minPluginVersion: "0.1.0",
-  statusWindows: ["5m", "15m", "60m"]
+  statusWindows: ["90m", "24h", "7d", "30d"]
 });
+
+const STATUS_WINDOWS = Object.freeze(["5m", "15m", "60m", "90m", "24h", "7d", "30d"]);
 
 export function normalizeHostFromBaseUrl(value) {
   if (typeof value !== "string" || value.trim() === "") return null;
@@ -205,7 +207,7 @@ export function sanitizeRemoteConfig(value) {
     sampleRateSuccess: clampRate(value.sampleRateSuccess, DEFAULT_REMOTE_CONFIG.sampleRateSuccess),
     sampleRateFailure: clampRate(value.sampleRateFailure, DEFAULT_REMOTE_CONFIG.sampleRateFailure),
     minPluginVersion: typeof value.minPluginVersion === "string" ? value.minPluginVersion : DEFAULT_REMOTE_CONFIG.minPluginVersion,
-    statusWindows: Array.isArray(value.statusWindows) ? value.statusWindows.filter((item) => ["5m", "15m", "60m"].includes(item)) : DEFAULT_REMOTE_CONFIG.statusWindows
+    statusWindows: Array.isArray(value.statusWindows) ? value.statusWindows.filter((item) => STATUS_WINDOWS.includes(item)) : DEFAULT_REMOTE_CONFIG.statusWindows
   };
 }
 

@@ -80,6 +80,7 @@ export async function handleReport(request, env) {
   const minute = Math.floor(nowMs / 60000);
   await insertRawSample(env.DB, payload, nowMs, minute);
   await incrementAggregate(env.DB, payload, nowMs, minute);
+  await incrementModelAggregate(env.DB, payload, nowMs, minute);
 
   return json({ ok: true });
 }
@@ -87,18 +88,29 @@ export async function handleReport(request, env) {
 export async function handleStatus(url, env) {
   if (!env?.DB) return json({ error: "db_not_configured" }, 503);
 
-  const windowValue = url.searchParams.get("window") || "15m";
+  const windowValue = url.searchParams.get("window") || "90m";
   const minutes = parseStatusWindow(windowValue);
   if (!minutes) return json({ error: "invalid_window" }, 400);
 
   const nowMinute = Math.floor(Date.now() / 60000);
   const sinceMinute = nowMinute - minutes + 1;
-  const result = await env.DB
-    .prepare("SELECT * FROM minute_aggregates WHERE minute >= ? ORDER BY minute ASC")
-    .bind(sinceMinute)
-    .all();
+  const [result, modelResult] = await Promise.all([
+    env.DB
+      .prepare("SELECT * FROM minute_aggregates WHERE minute >= ? ORDER BY minute ASC")
+      .bind(sinceMinute)
+      .all(),
+    env.DB
+      .prepare(`
+        SELECT minute, model_class, total_samples, success_samples, failure_samples
+        FROM model_minute_aggregates
+        WHERE minute >= ?
+        ORDER BY minute ASC, model_class ASC
+      `)
+      .bind(sinceMinute)
+      .all()
+  ]);
 
-  return json(buildStatusFromRows(result.results || [], windowValue));
+  return json(buildStatusFromRows(result.results || [], windowValue, modelResult.results || [], nowMinute));
 }
 
 async function insertRawSample(db, payload, nowMs, minute) {
@@ -141,6 +153,31 @@ async function incrementAggregate(db, payload, nowMs, minute) {
       ${errorColumn} = ${errorColumn} + 1,
       updated_at = ?
   `).bind(minute, successDelta, failureDelta, nowMs, successDelta, failureDelta, nowMs).run();
+}
+
+async function incrementModelAggregate(db, payload, nowMs, minute) {
+  const successDelta = payload.ok ? 1 : 0;
+  const failureDelta = payload.ok ? 0 : 1;
+
+  await db.prepare(`
+    INSERT INTO model_minute_aggregates (
+      minute, model_class, total_samples, success_samples, failure_samples, updated_at
+    ) VALUES (?, ?, 1, ?, ?, ?)
+    ON CONFLICT(minute, model_class) DO UPDATE SET
+      total_samples = total_samples + 1,
+      success_samples = success_samples + ?,
+      failure_samples = failure_samples + ?,
+      updated_at = ?
+  `).bind(
+    minute,
+    payload.modelClass,
+    successDelta,
+    failureDelta,
+    nowMs,
+    successDelta,
+    failureDelta,
+    nowMs
+  ).run();
 }
 
 async function purgeOldSamples(env) {

@@ -70,6 +70,53 @@ test("status aggregation detects unstable high error windows", () => {
   assert.equal(status.errors[0].type, "server_error");
 });
 
+test("status aggregation builds model trend buckets", () => {
+  const nowMinute = 30000010;
+  const status = buildStatusFromRows([
+    {
+      minute: nowMinute - 1,
+      total_samples: 3,
+      success_samples: 2,
+      failure_samples: 1,
+      err_server_error: 1
+    }
+  ], "90m", [
+    {
+      minute: nowMinute - 6,
+      model_class: "sonnet",
+      total_samples: 2,
+      success_samples: 2,
+      failure_samples: 0
+    },
+    {
+      minute: nowMinute - 1,
+      model_class: "sonnet",
+      total_samples: 3,
+      success_samples: 2,
+      failure_samples: 1
+    },
+    {
+      minute: nowMinute,
+      model_class: "opus",
+      total_samples: 1,
+      success_samples: 0,
+      failure_samples: 1
+    }
+  ], nowMinute);
+
+  assert.equal(status.timeline.bucketCount, 18);
+  assert.equal(status.timeline.bucketMinutes, 5);
+  assert.equal(status.models.length, 4);
+  assert.equal(status.models[0].modelClass, "haiku");
+  assert.equal(status.models[0].buckets.at(-1).state, "empty");
+  assert.equal(status.models[1].modelClass, "sonnet");
+  assert.equal(status.models[1].buckets.at(-2).state, "success");
+  assert.equal(status.models[1].buckets.at(-1).state, "mixed");
+  assert.equal(status.models[2].modelClass, "opus");
+  assert.equal(status.models[2].buckets.at(-1).state, "failure");
+  assert.equal(status.models[3].modelClass, "unknown");
+});
+
 function failingDb() {
   return {
     prepare() {
