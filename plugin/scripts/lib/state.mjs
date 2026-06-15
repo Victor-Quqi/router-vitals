@@ -8,9 +8,9 @@ const STATE_VERSION = 1;
 export function getStatePath() {
   const root =
     process.env.ANYROUTER_STATUS_STATE_DIR ||
-    process.env.CLAUDE_PLUGIN_DATA ||
     process.env.XDG_STATE_HOME ||
     process.env.LOCALAPPDATA ||
+    process.env.CLAUDE_PLUGIN_DATA ||
     join(homedir(), ".local", "state");
   return join(root, "anyrouter-status-monitor", "state.json");
 }

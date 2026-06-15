@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   bucketLatency,
+  classifyError,
   matchTargetBaseUrl,
   sanitizeRemoteConfig,
   validateReportPayload
@@ -53,4 +54,12 @@ test("report payload rejects actual URLs and station fields", () => {
   assert.equal(validation.ok, false);
   assert.match(validation.errors.join("\n"), /unknown field: baseUrl/);
   assert.match(validation.errors.join("\n"), /unknown field: stationId/);
+});
+
+test("classifies Claude StopFailure error fields", () => {
+  assert.equal(classifyError({ error: "api_error" }), "server_error");
+  assert.equal(classifyError({ error: "rate_limit_error" }), "rate_limited");
+  assert.equal(classifyError({ error_details: { status_code: 503 } }), "server_error");
+  assert.equal(classifyError({ error_details: { message: "connection reset by peer" } }), "network_error");
+  assert.equal(classifyError({ error_details: { message: "request timed out" } }), "timeout");
 });

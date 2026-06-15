@@ -1,4 +1,4 @@
-export const PLUGIN_VERSION = "0.1.0";
+export const PLUGIN_VERSION = "0.1.2";
 
 export const TARGET_HOSTS = Object.freeze([
   "anyrouter.top",
@@ -114,24 +114,42 @@ export function classifyModel(input) {
 }
 
 export function classifyError(input) {
-  const raw = [
+  const raw = collectErrorParts(input).join(" ").toLowerCase();
+
+  if (raw.includes("rate") || raw.includes("rate_limit") || raw.includes("429") || raw.includes("quota")) return "rate_limited";
+  if (raw.includes("auth") || raw.includes("unauthorized") || raw.includes("401") || raw.includes("403")) return "auth_error";
+  if (raw.includes("timeout") || raw.includes("timed out") || raw.includes("etimedout")) return "timeout";
+  if (raw.includes("network") || raw.includes("connection") || raw.includes("econn") || raw.includes("enotfound") || raw.includes("fetch failed")) return "network_error";
+  if (raw.includes("api_error") || raw.includes("overloaded") || raw.includes("500") || raw.includes("502") || raw.includes("503") || raw.includes("504") || raw.includes("server")) return "server_error";
+  return "unknown";
+}
+
+function collectErrorParts(input) {
+  return [
     input?.error_type,
     input?.errorType,
     input?.reason,
     input?.message,
+    input?.status,
+    input?.status_code,
+    input?.code,
+    input?.error,
+    input?.error_details,
     input?.error?.type,
-    input?.error?.message
+    input?.error?.name,
+    input?.error?.code,
+    input?.error?.status,
+    input?.error?.status_code,
+    input?.error?.message,
+    input?.error_details?.type,
+    input?.error_details?.name,
+    input?.error_details?.code,
+    input?.error_details?.status,
+    input?.error_details?.status_code,
+    input?.error_details?.message
   ]
-    .filter((value) => typeof value === "string")
-    .join(" ")
-    .toLowerCase();
-
-  if (raw.includes("rate") || raw.includes("429") || raw.includes("quota")) return "rate_limited";
-  if (raw.includes("auth") || raw.includes("unauthorized") || raw.includes("401") || raw.includes("403")) return "auth_error";
-  if (raw.includes("timeout") || raw.includes("timed out") || raw.includes("etimedout")) return "timeout";
-  if (raw.includes("network") || raw.includes("econn") || raw.includes("enotfound") || raw.includes("fetch failed")) return "network_error";
-  if (raw.includes("500") || raw.includes("502") || raw.includes("503") || raw.includes("504") || raw.includes("server")) return "server_error";
-  return "unknown";
+    .filter((value) => typeof value === "string" || typeof value === "number")
+    .map((value) => String(value));
 }
 
 export function pickSampleRate(ok, config) {
