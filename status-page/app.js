@@ -44,7 +44,7 @@ async function loadStatus() {
 function render(data) {
   const state = data.state || "insufficient_data";
   setText("state", labels[state] || "状态暂缺");
-  setText("stateDetail", data.label || "社区观测结果暂不可用");
+  setText("stateDetail", formatStateDetail(data));
   setText("updated", data.generatedAt ? `更新于 ${formatTime(data.generatedAt)}` : "等待数据");
   setText("availability", typeof data.availability === "number" ? `${Math.round(data.availability * 1000) / 10}%` : "--");
   setText("sampleCount", String(data.sampleCount ?? "--"));
@@ -117,4 +117,15 @@ function formatAvailabilityMath(data) {
   if (!data || typeof data.successCount !== "number" || typeof data.sampleCount !== "number") return "--";
   if (data.sampleCount === 0) return "0 / 0";
   return `${data.successCount} / ${data.sampleCount}`;
+}
+
+function formatStateDetail(data) {
+  const windowText = data.window || activeWindow;
+  const sampleCount = Number.isInteger(data.sampleCount) ? data.sampleCount : 0;
+  if (data.state === "insufficient_data") return `近 ${windowText} 完成轮次 ${sampleCount} 条，暂不判断可用状态`;
+  if (typeof data.availability === "number") {
+    const percent = `${Math.round(data.availability * 1000) / 10}%`;
+    return `近 ${windowText} 成功轮次 ${data.successCount}/${data.sampleCount}，成功率 ${percent}`;
+  }
+  return `近 ${windowText} 社区轮次观测`;
 }

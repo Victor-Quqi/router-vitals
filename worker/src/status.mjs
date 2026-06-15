@@ -87,5 +87,5 @@ function labelForState(state, errors) {
   }
   if (state === "down") return "不可用";
   if (state === "available") return "可用";
-  return "样本不足";
+  return "样本不足，暂不判断可用状态";
 }
