@@ -1,4 +1,4 @@
-export const PLUGIN_VERSION = "0.1.5";
+export const PLUGIN_VERSION = "0.1.6";
 
 export const TARGET_HOSTS = Object.freeze([
   "anyrouter.top",
@@ -30,6 +30,20 @@ export const LATENCY_BUCKETS = Object.freeze([
 ]);
 
 export const REPORT_FIELDS = Object.freeze([
+  "ok",
+  "errorType",
+  "errorStatusCode",
+  "errorHint",
+  "modelClass",
+  "latencyBucket",
+  "timeBucket",
+  "pluginVersion",
+  "anonymousId",
+  "sampleRate",
+  "targetMatched"
+]);
+
+const REQUIRED_REPORT_FIELDS = Object.freeze([
   "ok",
   "errorType",
   "modelClass",
@@ -126,6 +140,74 @@ export function classifyError(input) {
   return "unknown";
 }
 
+export function extractErrorStatusCode(input) {
+  const directValues = [
+    input?.status,
+    input?.status_code,
+    input?.code,
+    input?.error?.status,
+    input?.error?.status_code,
+    input?.error?.code,
+    input?.error_details?.status,
+    input?.error_details?.status_code,
+    input?.error_details?.code
+  ];
+
+  for (const value of directValues) {
+    const statusCode = parseHttpStatusCode(value);
+    if (statusCode !== null) return statusCode;
+  }
+
+  const raw = [
+    ...collectErrorParts(input),
+    input?.last_assistant_message
+  ]
+    .filter((value) => typeof value === "string" || typeof value === "number")
+    .join(" ");
+  const match = raw.match(/\b([45]\d{2})\b/);
+  return match ? Number(match[1]) : null;
+}
+
+export function createErrorHint(input) {
+  const candidates = [
+    input?.error_details?.message,
+    input?.error?.message,
+    input?.message,
+    input?.last_assistant_message,
+    typeof input?.error_details === "string" ? input.error_details : null,
+    typeof input?.error === "string" ? input.error : null
+  ];
+
+  for (const candidate of candidates) {
+    const sanitized = sanitizeErrorHint(candidate);
+    if (sanitized) return sanitized;
+  }
+  return null;
+}
+
+export function sanitizeErrorHint(value) {
+  if (typeof value !== "string" && typeof value !== "number") return null;
+  let text = String(value)
+    .replace(/[\u0000-\u001f\u007f]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!text) return null;
+
+  text = text
+    .replace(/https?:\/\/[^\s)]+/gi, "[url]")
+    .replace(/[A-Za-z]:\\[^\s]+/g, "[path]")
+    .replace(/(^|\s)\/(?:Users|home|var|tmp|mnt|workspace|root)(?:\/[^\s]+)+/g, "$1[path]")
+    .replace(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi, "[email]")
+    .replace(/\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b/g, "[secret]")
+    .replace(/\b(authorization|cookie|x-api-key|api[_-]?key|token|secret)\s*[:=]\s*[^,\s;]+/gi, "$1=[secret]")
+    .replace(/\b(?:sk|ak|pk)_[A-Za-z0-9_-]{16,}\b/gi, "[secret]")
+    .replace(/\b[A-Za-z0-9_-]{48,}\b/g, "[id]");
+
+  text = text.replace(/\s+/g, " ").trim();
+  if (!text) return null;
+  return text.length > 160 ? `${text.slice(0, 157)}...` : text;
+}
+
 function collectErrorParts(input) {
   return [
     input?.error_type,
@@ -154,6 +236,14 @@ function collectErrorParts(input) {
     .map((value) => String(value));
 }
 
+function parseHttpStatusCode(value) {
+  if (typeof value === "number" && Number.isInteger(value) && value >= 400 && value <= 599) return value;
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  if (!/^[45]\d{2}$/.test(trimmed)) return null;
+  return Number(trimmed);
+}
+
 export function pickSampleRate(ok, config) {
   const key = ok ? "sampleRateSuccess" : "sampleRateFailure";
   const value = Number(config?.[key]);
@@ -179,7 +269,7 @@ export function validateReportPayload(payload) {
     if (!fieldSet.has(key)) errors.push(`unknown field: ${key}`);
   }
 
-  for (const key of REPORT_FIELDS) {
+  for (const key of REQUIRED_REPORT_FIELDS) {
     if (!(key in payload)) errors.push(`missing field: ${key}`);
   }
 
@@ -187,6 +277,18 @@ export function validateReportPayload(payload) {
   if (!ERROR_TYPES.includes(payload.errorType)) errors.push("invalid errorType");
   if (payload.ok === true && payload.errorType !== "none") errors.push("successful reports must use errorType=none");
   if (payload.ok === false && payload.errorType === "none") errors.push("failed reports must include an error type");
+  if ("errorStatusCode" in payload && payload.errorStatusCode !== null) {
+    if (!Number.isInteger(payload.errorStatusCode) || payload.errorStatusCode < 400 || payload.errorStatusCode > 599) {
+      errors.push("invalid errorStatusCode");
+    }
+  }
+  if ("errorHint" in payload && payload.errorHint !== null) {
+    if (typeof payload.errorHint !== "string" || payload.errorHint.length > 160 || /[\u0000-\u001f\u007f]/.test(payload.errorHint)) {
+      errors.push("invalid errorHint");
+    }
+  }
+  if (payload.ok === true && payload.errorStatusCode != null) errors.push("successful reports must use errorStatusCode=null");
+  if (payload.ok === true && payload.errorHint != null) errors.push("successful reports must use errorHint=null");
   if (!MODEL_CLASSES.includes(payload.modelClass)) errors.push("invalid modelClass");
   if (!LATENCY_BUCKETS.includes(payload.latencyBucket)) errors.push("invalid latencyBucket");
   if (!Number.isInteger(payload.timeBucket) || payload.timeBucket < 25000000) errors.push("invalid timeBucket");

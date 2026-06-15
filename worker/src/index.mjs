@@ -81,6 +81,7 @@ export async function handleReport(request, env) {
   await insertRawSample(env.DB, payload, nowMs, minute);
   await incrementAggregate(env.DB, payload, nowMs, minute);
   await incrementModelAggregate(env.DB, payload, nowMs, minute);
+  await incrementErrorObservation(env.DB, payload, nowMs, minute);
 
   return json({ ok: true });
 }
@@ -94,7 +95,7 @@ export async function handleStatus(url, env) {
 
   const nowMinute = Math.floor(Date.now() / 60000);
   const sinceMinute = nowMinute - minutes + 1;
-  const [result, modelResult] = await Promise.all([
+  const [result, modelResult, errorDetailResult] = await Promise.all([
     env.DB
       .prepare("SELECT * FROM minute_aggregates WHERE minute >= ? ORDER BY minute ASC")
       .bind(sinceMinute)
@@ -107,18 +108,35 @@ export async function handleStatus(url, env) {
         ORDER BY minute ASC, model_class ASC
       `)
       .bind(sinceMinute)
+      .all(),
+    env.DB
+      .prepare(`
+        SELECT error_type, status_code, error_hint, SUM(count) AS count
+        FROM error_observations
+        WHERE minute >= ?
+        GROUP BY error_type, status_code, error_hint
+        ORDER BY count DESC
+        LIMIT 80
+      `)
+      .bind(sinceMinute)
       .all()
   ]);
 
-  return json(buildStatusFromRows(result.results || [], windowValue, modelResult.results || [], nowMinute));
+  return json(buildStatusFromRows(
+    result.results || [],
+    windowValue,
+    modelResult.results || [],
+    nowMinute,
+    errorDetailResult.results || []
+  ));
 }
 
 async function insertRawSample(db, payload, nowMs, minute) {
   await db.prepare(`
     INSERT INTO samples_raw (
       id, created_at, minute, ok, error_type, model_class, latency_bucket, time_bucket,
-      plugin_version, anonymous_id, sample_rate, target_matched
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      plugin_version, anonymous_id, sample_rate, target_matched, error_status_code, error_hint
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).bind(
     crypto.randomUUID(),
     nowMs,
@@ -131,7 +149,9 @@ async function insertRawSample(db, payload, nowMs, minute) {
     payload.pluginVersion,
     payload.anonymousId,
     payload.sampleRate,
-    payload.targetMatched ? 1 : 0
+    payload.targetMatched ? 1 : 0,
+    payload.errorStatusCode ?? null,
+    payload.errorHint ?? null
   ).run();
 }
 
@@ -180,11 +200,42 @@ async function incrementModelAggregate(db, payload, nowMs, minute) {
   ).run();
 }
 
+async function incrementErrorObservation(db, payload, nowMs, minute) {
+  if (payload.ok) return;
+
+  const statusCode = payload.errorStatusCode ?? null;
+  const errorHint = payload.errorHint || null;
+  const statusKey = statusCode === null ? "none" : String(statusCode);
+  const hintKey = errorHint || "none";
+
+  await db.prepare(`
+    INSERT INTO error_observations (
+      minute, error_type, status_key, status_code, hint_key, error_hint, count, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, 1, ?)
+    ON CONFLICT(minute, error_type, status_key, hint_key) DO UPDATE SET
+      count = count + 1,
+      updated_at = ?
+  `).bind(
+    minute,
+    payload.errorType,
+    statusKey,
+    statusCode,
+    hintKey,
+    errorHint,
+    nowMs,
+    nowMs
+  ).run();
+}
+
 async function purgeOldSamples(env) {
   if (!env?.DB) return;
   const retentionHours = Number(env.RAW_SAMPLE_RETENTION_HOURS || 24);
   const cutoff = Date.now() - Math.max(1, retentionHours) * 60 * 60 * 1000;
   await env.DB.prepare("DELETE FROM samples_raw WHERE created_at < ?").bind(cutoff).run();
+
+  const detailRetentionDays = Number(env.ERROR_DETAIL_RETENTION_DAYS || 31);
+  const cutoffMinute = Math.floor((Date.now() - Math.max(1, detailRetentionDays) * 24 * 60 * 60 * 1000) / 60000);
+  await env.DB.prepare("DELETE FROM error_observations WHERE minute < ?").bind(cutoffMinute).run();
 }
 
 function allowRate(key, limit, windowMs) {

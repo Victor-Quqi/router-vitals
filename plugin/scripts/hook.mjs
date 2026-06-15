@@ -5,7 +5,9 @@ import {
   bucketLatency,
   classifyError,
   classifyModel,
+  createErrorHint,
   createTimeBucket,
+  extractErrorStatusCode,
   hashLocalSessionId,
   matchTargetBaseUrl,
   pickSampleRate,
@@ -79,6 +81,8 @@ async function reportCompletion({ eventName, input, state, config, sessionKey })
   const payload = {
     ok,
     errorType: ok ? "none" : classifyError(input),
+    errorStatusCode: ok ? null : extractErrorStatusCode(input),
+    errorHint: ok ? null : createErrorHint(input),
     modelClass: classifyModel(input),
     latencyBucket: bucketLatency(Date.now() - Number(pending.startedAtMs)),
     timeBucket: createTimeBucket(),

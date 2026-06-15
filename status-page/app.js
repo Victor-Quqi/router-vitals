@@ -16,12 +16,30 @@ const windowLabels = {
 };
 
 const errorLabels = {
-  server_error: "server_error",
-  rate_limited: "rate_limited",
-  network_error: "network_error",
-  auth_error: "auth_error",
-  timeout: "timeout",
-  unknown: "unknown"
+  server_error: {
+    title: "上游服务错误",
+    detail: "上游返回服务错误或过载。"
+  },
+  rate_limited: {
+    title: "限流 / 额度",
+    detail: "请求被限流或额度不足。"
+  },
+  network_error: {
+    title: "网络连接错误",
+    detail: "连接建立、DNS 或传输阶段失败。"
+  },
+  auth_error: {
+    title: "认证 / 权限错误",
+    detail: "认证失败、权限不足或账号不可用。"
+  },
+  timeout: {
+    title: "超时",
+    detail: "请求超时或连接超时。"
+  },
+  unknown: {
+    title: "未识别错误",
+    detail: "错误信息不足，暂未归类。"
+  }
 };
 
 const modelLabels = {
@@ -166,11 +184,23 @@ function renderErrors(errors) {
   }
 
   for (const error of errors.slice(0, 5)) {
-    const item = document.createElement("div");
+    const item = document.createElement("details");
     item.className = "errorItem";
+    const meta = errorLabels[error.type] || {
+      title: "未识别错误",
+      detail: "错误信息不足，暂未归类。"
+    };
 
-    const name = document.createElement("strong");
-    name.textContent = errorLabels[error.type] || error.type;
+    const summary = document.createElement("summary");
+    summary.className = "errorSummary";
+
+    const name = document.createElement("div");
+    name.className = "errorName";
+    const title = document.createElement("strong");
+    title.textContent = `${meta.title}${formatStatusSuffix(error.statusCodes)}`;
+    const detail = document.createElement("em");
+    detail.textContent = meta.detail;
+    name.append(title, detail);
 
     const bar = document.createElement("div");
     bar.className = "bar";
@@ -181,9 +211,49 @@ function renderErrors(errors) {
     const ratio = document.createElement("span");
     ratio.textContent = `${Math.round((error.ratio || 0) * 100)}%`;
 
-    item.append(name, bar, ratio);
+    summary.append(name, bar, ratio);
+    item.append(summary, buildErrorDetail(error, meta));
     root.append(item);
   }
+}
+
+function buildErrorDetail(error, meta) {
+  const root = document.createElement("div");
+  root.className = "errorDetail";
+
+  const statusLine = document.createElement("p");
+  statusLine.textContent = error.statusCodes?.length
+    ? `HTTP 状态码：${error.statusCodes.map((item) => `${item.code} x${item.count}`).join("，")}`
+    : "HTTP 状态码：暂无";
+  root.append(statusLine);
+
+  if (error.hints?.length) {
+    const title = document.createElement("p");
+    title.textContent = "错误摘要：";
+    root.append(title);
+
+    const list = document.createElement("ul");
+    for (const hint of error.hints) {
+      const item = document.createElement("li");
+      item.textContent = `${hint.text}${hint.count > 1 ? ` x${hint.count}` : ""}`;
+      list.append(item);
+    }
+    root.append(list);
+  } else {
+    const empty = document.createElement("p");
+    empty.textContent = "错误摘要：暂无";
+    root.append(empty);
+  }
+
+  const note = document.createElement("p");
+  note.textContent = `${meta.detail}错误摘要已做脱敏和截断。`;
+  root.append(note);
+  return root;
+}
+
+function formatStatusSuffix(statusCodes) {
+  if (!Array.isArray(statusCodes) || statusCodes.length === 0) return "";
+  return ` (${statusCodes.slice(0, 2).map((item) => item.code).join("/")})`;
 }
 
 function renderUnavailable() {

@@ -3,7 +3,10 @@ import assert from "node:assert/strict";
 import {
   bucketLatency,
   classifyError,
+  createErrorHint,
+  extractErrorStatusCode,
   matchTargetBaseUrl,
+  sanitizeErrorHint,
   sanitizeRemoteConfig,
   validateReportPayload
 } from "../shared/policy.mjs";
@@ -62,4 +65,36 @@ test("classifies Claude StopFailure error fields", () => {
   assert.equal(classifyError({ error_details: { status_code: 503 } }), "server_error");
   assert.equal(classifyError({ error_details: { message: "connection reset by peer" } }), "network_error");
   assert.equal(classifyError({ error_details: { message: "request timed out" } }), "timeout");
+});
+
+test("extracts and sanitizes StopFailure error details", () => {
+  const input = {
+    error_details: {
+      status_code: 429,
+      message: "API Error 429: quota exceeded for token sk_abcdefghijklmnopqrstuvwxyz123456"
+    },
+    last_assistant_message: "API Error: Rate limit reached"
+  };
+
+  assert.equal(extractErrorStatusCode(input), 429);
+  assert.equal(createErrorHint(input), "API Error 429: quota exceeded for token [secret]");
+  assert.equal(sanitizeErrorHint("failed at C:\\Users\\Lenovo\\secret\\file.txt with token=abc123"), "failed at [path] with token=[secret]");
+});
+
+test("report payload accepts optional sanitized error details", () => {
+  const payload = {
+    ok: false,
+    errorType: "rate_limited",
+    errorStatusCode: 429,
+    errorHint: "API Error 429: Rate limit reached",
+    modelClass: "sonnet",
+    latencyBucket: "3_10s",
+    timeBucket: 30000000,
+    pluginVersion: "0.1.6",
+    anonymousId: "anon_abcdefghijklmnop",
+    sampleRate: 1,
+    targetMatched: true
+  };
+
+  assert.equal(validateReportPayload(payload).ok, true);
 });

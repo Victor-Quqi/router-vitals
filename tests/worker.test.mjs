@@ -70,6 +70,34 @@ test("status aggregation detects unstable high error windows", () => {
   assert.equal(status.errors[0].type, "server_error");
 });
 
+test("status aggregation attaches error status codes and hints", () => {
+  const status = buildStatusFromRows([
+    {
+      total_samples: 10,
+      success_samples: 7,
+      failure_samples: 3,
+      err_rate_limited: 3
+    }
+  ], "60m", [], 30000010, [
+    {
+      error_type: "rate_limited",
+      status_code: 429,
+      error_hint: "API Error 429: Rate limit reached",
+      count: 2
+    },
+    {
+      error_type: "rate_limited",
+      status_code: 429,
+      error_hint: "Quota exceeded",
+      count: 1
+    }
+  ]);
+
+  assert.equal(status.errors[0].type, "rate_limited");
+  assert.deepEqual(status.errors[0].statusCodes, [{ code: 429, count: 3 }]);
+  assert.equal(status.errors[0].hints[0].text, "API Error 429: Rate limit reached");
+});
+
 test("status aggregation builds model trend buckets", () => {
   const nowMinute = 30000010;
   const status = buildStatusFromRows([

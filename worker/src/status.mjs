@@ -27,12 +27,18 @@ export function getStatusWindowSpec(value) {
   return WINDOW_SPECS[value] ? { ...WINDOW_SPECS[value] } : null;
 }
 
-export function buildStatusFromRows(rows, windowValue, modelRows = [], nowMinute = Math.floor(Date.now() / 60000)) {
+export function buildStatusFromRows(
+  rows,
+  windowValue,
+  modelRows = [],
+  nowMinute = Math.floor(Date.now() / 60000),
+  errorDetailRows = []
+) {
   const spec = getStatusWindowSpec(windowValue);
   const totals = sumRows(rows);
   const total = totals.total_samples;
   const availability = total > 0 ? totals.success_samples / total : null;
-  const errors = buildErrorBreakdown(totals.errors, totals.failure_samples);
+  const errors = buildErrorBreakdown(totals.errors, totals.failure_samples, errorDetailRows);
   const state = getState({ total, availability });
 
   return {
@@ -161,15 +167,63 @@ function sumRows(rows) {
   return totals;
 }
 
-function buildErrorBreakdown(counts, failureCount) {
+function buildErrorBreakdown(counts, failureCount, detailRows = []) {
+  const details = buildErrorDetails(detailRows);
   return ERROR_ORDER
     .map(([type]) => ({
       type,
       count: counts[type] || 0,
-      ratio: failureCount > 0 ? (counts[type] || 0) / failureCount : 0
+      ratio: failureCount > 0 ? (counts[type] || 0) / failureCount : 0,
+      statusCodes: details.get(type)?.statusCodes || [],
+      hints: details.get(type)?.hints || []
     }))
     .filter((item) => item.count > 0)
     .sort((a, b) => b.count - a.count);
+}
+
+function buildErrorDetails(rows) {
+  const details = new Map();
+
+  for (const row of rows) {
+    const type = normalizeErrorType(row.error_type);
+    const count = Number(row.count || 0);
+    if (count <= 0) continue;
+    const item = getErrorDetail(details, type);
+    const statusCode = Number(row.status_code);
+    if (Number.isInteger(statusCode) && statusCode >= 400 && statusCode <= 599) {
+      item.statusCounts.set(statusCode, (item.statusCounts.get(statusCode) || 0) + count);
+    }
+    if (typeof row.error_hint === "string" && row.error_hint.trim()) {
+      const hint = row.error_hint.trim();
+      item.hintCounts.set(hint, (item.hintCounts.get(hint) || 0) + count);
+    }
+  }
+
+  for (const [type, item] of details) {
+    details.set(type, {
+      statusCodes: [...item.statusCounts.entries()]
+        .map(([code, count]) => ({ code, count }))
+        .sort((a, b) => b.count - a.count || a.code - b.code)
+        .slice(0, 4),
+      hints: [...item.hintCounts.entries()]
+        .map(([text, count]) => ({ text, count }))
+        .sort((a, b) => b.count - a.count || a.text.localeCompare(b.text))
+        .slice(0, 3)
+    });
+  }
+
+  return details;
+}
+
+function getErrorDetail(details, type) {
+  const current = details.get(type);
+  if (current) return current;
+  const item = {
+    statusCounts: new Map(),
+    hintCounts: new Map()
+  };
+  details.set(type, item);
+  return item;
 }
 
 function getState({ total, availability }) {
@@ -198,6 +252,10 @@ function labelForState(state, errors) {
 
 function normalizeModelClass(value) {
   return MODEL_ORDER.includes(value) ? value : "unknown";
+}
+
+function normalizeErrorType(value) {
+  return ERROR_ORDER.some(([type]) => type === value) ? value : "unknown";
 }
 
 function minuteToIso(minute) {
