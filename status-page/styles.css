@@ -266,7 +266,7 @@ article em {
 
 .errorSummary {
   display: grid;
-  grid-template-columns: minmax(220px, 320px) 1fr minmax(56px, auto);
+  grid-template-columns: 14px minmax(220px, 320px) 1fr minmax(56px, auto);
   align-items: center;
   gap: 12px;
   padding: 12px 0;
@@ -276,6 +276,18 @@ article em {
 
 .errorSummary::-webkit-details-marker {
   display: none;
+}
+
+.errorSummary::before {
+  content: "▸";
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1;
+  transition: transform 120ms ease;
+}
+
+.errorItem[open] > .errorSummary::before {
+  transform: rotate(90deg);
 }
 
 .errorName {
@@ -477,7 +489,16 @@ footer {
   }
 
   .errorSummary {
-    grid-template-columns: 1fr;
+    grid-template-columns: 14px 1fr;
+  }
+
+  .errorSummary .errorName {
+    grid-column: 2;
+  }
+
+  .errorSummary .bar,
+  .errorSummary > span {
+    grid-column: 1 / -1;
   }
 
   .modelHead {

@@ -50,6 +50,7 @@ const modelLabels = {
 };
 
 let activeWindow = "60m";
+const openErrorKeys = new Set();
 
 for (const button of document.querySelectorAll("[data-window]")) {
   button.addEventListener("click", () => {
@@ -186,6 +187,12 @@ function renderErrors(errors) {
   for (const error of errors.slice(0, 5)) {
     const item = document.createElement("details");
     item.className = "errorItem";
+    const errorKey = getErrorKey(error);
+    item.open = openErrorKeys.has(errorKey);
+    item.addEventListener("toggle", () => {
+      if (item.open) openErrorKeys.add(errorKey);
+      else openErrorKeys.delete(errorKey);
+    });
     const meta = errorLabels[error.type] || {
       title: "未识别错误",
       detail: "错误信息不足，暂未归类。"
@@ -212,12 +219,12 @@ function renderErrors(errors) {
     ratio.textContent = `${Math.round((error.ratio || 0) * 100)}%`;
 
     summary.append(name, bar, ratio);
-    item.append(summary, buildErrorDetail(error, meta));
+    item.append(summary, buildErrorDetail(error));
     root.append(item);
   }
 }
 
-function buildErrorDetail(error, meta) {
+function buildErrorDetail(error) {
   const root = document.createElement("div");
   root.className = "errorDetail";
 
@@ -244,11 +251,12 @@ function buildErrorDetail(error, meta) {
     empty.textContent = "错误摘要：暂无";
     root.append(empty);
   }
-
-  const note = document.createElement("p");
-  note.textContent = `${meta.detail}错误摘要已做脱敏和截断。`;
-  root.append(note);
   return root;
+}
+
+function getErrorKey(error) {
+  const statusCodes = Array.isArray(error.statusCodes) ? error.statusCodes.map((item) => item.code).join("/") : "";
+  return `${error.type || "unknown"}:${statusCodes}`;
 }
 
 function formatStatusSuffix(statusCodes) {
