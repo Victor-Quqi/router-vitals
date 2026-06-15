@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
+  PLUGIN_VERSION,
   bucketLatency,
   classifyError,
   classifyModel,
@@ -98,7 +99,7 @@ test("report payload accepts optional sanitized error details", () => {
     modelClass: "sonnet",
     latencyBucket: "3_10s",
     timeBucket: 30000000,
-    pluginVersion: "0.1.6",
+    pluginVersion: PLUGIN_VERSION,
     anonymousId: "anon_abcdefghijklmnop",
     sampleRate: 1,
     targetMatched: true
