@@ -46,7 +46,27 @@ export function buildStatusFromRows(rows, windowValue) {
     availability,
     confidence,
     latency,
-    errors
+    errors,
+    meta: {
+      unit: "turn",
+      availabilityFormula: "successCount / sampleCount",
+      sampleCountDefinition: "Completed Claude Code user turns observed by the plugin in this window.",
+      latencyDefinition: "End-to-end turn duration bucket from UserPromptSubmit to Stop or StopFailure.",
+      latencyBuckets: ["lt_3s", "3_10s", "10_30s", "30_60s", "gt_60s", "unknown"],
+      confidenceThresholds: {
+        insufficient: "sampleCount < 5",
+        low: "5 <= sampleCount < 20",
+        medium: "20 <= sampleCount < 100",
+        high: "sampleCount >= 100"
+      },
+      stateThresholds: {
+        insufficient_data: "sampleCount < 5",
+        down: "availability < 50%",
+        unstable: "50% <= availability < 95%",
+        slow: "availability >= 95% and p90 latency is 30_60s or gt_60s",
+        available: "availability >= 95% and p90 latency is below 30s"
+      }
+    }
   };
 }
 

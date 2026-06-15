@@ -204,6 +204,36 @@ footer {
   padding: 16px 2px 0;
 }
 
+.definitions {
+  display: grid;
+  gap: 14px;
+  margin: 0;
+}
+
+.definitions div {
+  display: grid;
+  grid-template-columns: 150px 1fr;
+  gap: 16px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+}
+
+.definitions div:first-child {
+  padding-top: 0;
+  border-top: 0;
+}
+
+.definitions dt {
+  color: var(--text);
+  font-weight: 700;
+}
+
+.definitions dd {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.55;
+}
+
 .available {
   color: var(--green);
 }
@@ -244,5 +274,10 @@ footer {
 
   .errorItem {
     grid-template-columns: 1fr;
+  }
+
+  .definitions div {
+    grid-template-columns: 1fr;
+    gap: 6px;
   }
 }

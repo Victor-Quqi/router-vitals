@@ -13,7 +13,7 @@
           <span class="mark" aria-hidden="true"></span>
           <div>
             <h1>AnyRouter 状态</h1>
-            <p>社区真实使用观测</p>
+            <p>Claude Code 社区轮次观测</p>
           </div>
         </div>
         <div class="updated" id="updated">等待数据</div>
@@ -33,25 +33,54 @@
 
       <section class="metrics" aria-label="状态指标">
         <article>
-          <span>可用性</span>
+          <span>轮次成功率</span>
           <strong id="availability">--</strong>
         </article>
         <article>
-          <span>样本数</span>
+          <span>轮次数</span>
           <strong id="sampleCount">--</strong>
         </article>
         <article>
-          <span>p50 延迟</span>
+          <span>p50 轮次耗时</span>
           <strong id="p50">--</strong>
         </article>
         <article>
-          <span>p90 延迟</span>
+          <span>p90 轮次耗时</span>
           <strong id="p90">--</strong>
         </article>
         <article>
           <span>置信度</span>
           <strong id="confidence">--</strong>
         </article>
+      </section>
+
+      <section class="panel">
+        <div class="panelHeader">
+          <h2>计算口径</h2>
+          <span id="windowScope">当前窗口 --</span>
+        </div>
+        <dl class="definitions">
+          <div>
+            <dt>轮次数</dt>
+            <dd>插件观测到的 Claude Code 完整用户轮次。一次轮次从提交消息开始，到 Stop 或 StopFailure 结束；不等同于底层 API 请求次数。</dd>
+          </div>
+          <div>
+            <dt>轮次成功率</dt>
+            <dd><span id="availabilityFormula">成功轮次 / 总轮次</span>，当前窗口为 <span id="availabilityMath">--</span>。</dd>
+          </div>
+          <div>
+            <dt>p50 / p90 轮次耗时</dt>
+            <dd>按耗时桶计算的分位数，桶为 &lt;3s、3-10s、10-30s、30-60s、&gt;60s；这是端到端轮次耗时，不是单次 API latency。</dd>
+          </div>
+          <div>
+            <dt>置信度</dt>
+            <dd>样本 &lt;5 为不足，5-19 为低，20-99 为中，≥100 为高；样本不足时不判断可用状态。</dd>
+          </div>
+          <div>
+            <dt>状态阈值</dt>
+            <dd>成功率 &lt;50% 为不可用，50%-95% 为不稳定，≥95% 且 p90 ≥30s 为偏慢，≥95% 且 p90 &lt;30s 为可用。</dd>
+          </div>
+        </dl>
       </section>
 
       <section class="panel">
@@ -63,7 +92,7 @@
       </section>
 
       <footer>
-        数据来自自愿安装插件的 Claude Code 用户；页面只展示聚合后的社区观测结果。
+        数据来自自愿安装插件的 Claude Code 用户；页面只展示聚合后的轮次观测结果，不代表官方 SLA 或单次 API 请求指标。
       </footer>
     </main>
     <script src="./config.js"></script>

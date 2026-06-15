@@ -69,6 +69,8 @@ function render(data) {
   setText("p90", latencyLabels[data.latency?.p90] || "--");
   setText("confidence", confidenceLabels[data.confidence] || "--");
   setText("failureCount", `失败样本 ${data.failureCount ?? "--"}`);
+  setText("windowScope", `当前窗口 ${data.window || activeWindow}`);
+  setText("availabilityMath", formatAvailabilityMath(data));
 
   const stateNode = document.getElementById("state");
   stateNode.className = `state ${state}`;
@@ -114,6 +116,8 @@ function renderUnavailable() {
   setText("updated", "等待数据");
   for (const id of ["availability", "sampleCount", "p50", "p90", "confidence"]) setText(id, "--");
   setText("failureCount", "失败样本 --");
+  setText("windowScope", `当前窗口 ${activeWindow}`);
+  setText("availabilityMath", "--");
   document.getElementById("state").className = "state insufficient_data";
   renderErrors([]);
 }
@@ -128,4 +132,11 @@ function formatTime(value) {
     minute: "2-digit",
     second: "2-digit"
   }).format(new Date(value));
+}
+
+function formatAvailabilityMath(data) {
+  if (!data || typeof data.successCount !== "number" || typeof data.sampleCount !== "number") return "--";
+  if (data.sampleCount === 0) return "0 / 0";
+  const percent = typeof data.availability === "number" ? `${Math.round(data.availability * 1000) / 10}%` : "--";
+  return `${data.successCount} / ${data.sampleCount} = ${percent}`;
 }
