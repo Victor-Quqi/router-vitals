@@ -1,4 +1,4 @@
-# AnyRouter Status Monitor Plugin
+# Any Router Status Monitor Plugin
 
 Claude Code 插件。它通过 hooks 记录真实使用结果，并匿名上报到 Router Vitals API。
 

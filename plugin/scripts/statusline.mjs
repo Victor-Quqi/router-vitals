@@ -4,7 +4,7 @@ import { matchTargetBaseUrl } from "./lib/policy.mjs";
 import { getTodayContributions, loadState } from "./lib/state.mjs";
 
 main().catch(() => {
-  console.log("Claude 公益站: 状态暂缺");
+  console.log("Any Router 近 60m 状态: 状态暂缺");
 });
 
 async function main() {
@@ -13,21 +13,21 @@ async function main() {
   const count = getTodayContributions(state);
 
   if (!target.matched) {
-    console.log(`Claude 公益站: 未匹配目标站 · 贡献暂停 · 今日 ${count} 条`);
+    console.log(`Any Router 近 60m 状态: 未匹配目标站 · 贡献暂停 · 今日贡献 ${count} 条`);
     return;
   }
 
   const status = await fetchStatus(config.apiBaseUrl);
   const statusText = formatStatus(status);
   const contributionText = config.reportingEnabled === false ? "贡献暂停" : "贡献开启";
-  console.log(`Claude 公益站: ${statusText} · ${contributionText} · 今日 ${count} 条`);
+  console.log(`Any Router 近 60m 状态: ${statusText} · ${contributionText} · 今日贡献 ${count} 条`);
 }
 
 async function fetchStatus(apiBaseUrl) {
   try {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 1200);
-    const response = await fetch(`${apiBaseUrl.replace(/\/+$/, "")}/v1/status?window=5m`, {
+    const response = await fetch(`${apiBaseUrl.replace(/\/+$/, "")}/v1/status?window=60m`, {
       signal: controller.signal,
       headers: { accept: "application/json" }
     });
@@ -40,10 +40,8 @@ async function fetchStatus(apiBaseUrl) {
 }
 
 function formatStatus(status) {
-  const samples = Number.isInteger(status?.sampleCount) ? ` · 5m ${status.sampleCount} 条` : "";
-  if (!status || status.state === "insufficient_data") return `样本不足${samples}`;
+  if (!status || status.state === "insufficient_data") return "观测中";
   if (status.state === "down") return "不可用";
-  if (status.state === "unstable") return `${status.label || "不稳定"}${samples}`;
-  if (status.state === "slow") return "可用 · 慢";
-  return `可用${samples}`;
+  if (status.state === "unstable") return status.label || "失败偏高";
+  return "可用";
 }

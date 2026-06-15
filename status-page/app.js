@@ -2,26 +2,9 @@ const API_BASE = window.ANYROUTER_STATUS_API_BASE || "https://api.status.example
 
 const labels = {
   available: "可用",
-  slow: "偏慢",
   unstable: "不稳定",
   down: "不可用",
   insufficient_data: "样本不足"
-};
-
-const latencyLabels = {
-  lt_3s: "<3s",
-  "3_10s": "3-10s",
-  "10_30s": "10-30s",
-  "30_60s": "30-60s",
-  gt_60s: ">60s",
-  unknown: "--"
-};
-
-const confidenceLabels = {
-  insufficient: "不足",
-  low: "低",
-  medium: "中",
-  high: "高"
 };
 
 const errorLabels = {
@@ -33,7 +16,7 @@ const errorLabels = {
   unknown: "unknown"
 };
 
-let activeWindow = "5m";
+let activeWindow = "60m";
 
 for (const button of document.querySelectorAll("[data-window]")) {
   button.addEventListener("click", () => {
@@ -65,11 +48,8 @@ function render(data) {
   setText("updated", data.generatedAt ? `更新于 ${formatTime(data.generatedAt)}` : "等待数据");
   setText("availability", typeof data.availability === "number" ? `${Math.round(data.availability * 1000) / 10}%` : "--");
   setText("sampleCount", String(data.sampleCount ?? "--"));
-  setText("p50", latencyLabels[data.latency?.p50] || "--");
-  setText("p90", latencyLabels[data.latency?.p90] || "--");
-  setText("confidence", confidenceLabels[data.confidence] || "--");
-  setText("failureCount", `失败样本 ${data.failureCount ?? "--"}`);
-  setText("windowScope", `当前窗口 ${data.window || activeWindow}`);
+  setText("failureCountMetric", String(data.failureCount ?? "--"));
+  setText("failureCount", `当前窗口 ${data.window || activeWindow} · 失败轮次 ${data.failureCount ?? "--"}`);
   setText("availabilityMath", formatAvailabilityMath(data));
 
   const stateNode = document.getElementById("state");
@@ -114,9 +94,8 @@ function renderUnavailable() {
   setText("state", "状态暂缺");
   setText("stateDetail", "API 暂时没有返回可用数据");
   setText("updated", "等待数据");
-  for (const id of ["availability", "sampleCount", "p50", "p90", "confidence"]) setText(id, "--");
-  setText("failureCount", "失败样本 --");
-  setText("windowScope", `当前窗口 ${activeWindow}`);
+  for (const id of ["availability", "sampleCount", "failureCountMetric"]) setText(id, "--");
+  setText("failureCount", `当前窗口 ${activeWindow}`);
   setText("availabilityMath", "--");
   document.getElementById("state").className = "state insufficient_data";
   renderErrors([]);
@@ -137,6 +116,5 @@ function formatTime(value) {
 function formatAvailabilityMath(data) {
   if (!data || typeof data.successCount !== "number" || typeof data.sampleCount !== "number") return "--";
   if (data.sampleCount === 0) return "0 / 0";
-  const percent = typeof data.availability === "number" ? `${Math.round(data.availability * 1000) / 10}%` : "--";
-  return `${data.successCount} / ${data.sampleCount} = ${percent}`;
+  return `${data.successCount} / ${data.sampleCount}`;
 }

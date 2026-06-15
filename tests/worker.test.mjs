@@ -51,7 +51,6 @@ test("status aggregation returns insufficient data under sample floor", () => {
   ], "5m");
 
   assert.equal(status.state, "insufficient_data");
-  assert.equal(status.confidence, "insufficient");
   assert.equal(status.meta.unit, "turn");
   assert.equal(status.meta.availabilityFormula, "successCount / sampleCount");
 });

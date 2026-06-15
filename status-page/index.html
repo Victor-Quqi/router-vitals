@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>AnyRouter 状态</title>
+    <title>Any Router 状态</title>
     <link rel="stylesheet" href="./styles.css">
   </head>
   <body>
@@ -12,7 +12,7 @@
         <div class="brand">
           <span class="mark" aria-hidden="true"></span>
           <div>
-            <h1>AnyRouter 状态</h1>
+            <h1>Any Router 状态</h1>
             <p>Claude Code 社区轮次观测</p>
           </div>
         </div>
@@ -25,68 +25,32 @@
           <div class="stateDetail" id="stateDetail">正在读取最近观测结果</div>
         </div>
         <div class="windowTabs" role="tablist" aria-label="时间窗口">
-          <button class="active" data-window="5m" type="button">5 分钟</button>
+          <button data-window="5m" type="button">5 分钟</button>
           <button data-window="15m" type="button">15 分钟</button>
-          <button data-window="60m" type="button">60 分钟</button>
+          <button class="active" data-window="60m" type="button">60 分钟</button>
         </div>
       </section>
 
       <section class="metrics" aria-label="状态指标">
         <article>
-          <span>轮次成功率</span>
+          <span>轮次成功率 <button class="help" type="button" aria-label="轮次成功率说明" data-tip="成功轮次 / 总轮次。样本少于 5 时不判断可用状态。">?</button></span>
           <strong id="availability">--</strong>
+          <em id="availabilityMath">--</em>
         </article>
         <article>
-          <span>轮次数</span>
+          <span>轮次数 <button class="help" type="button" aria-label="轮次数说明" data-tip="当前时间窗口内完成并上报的 Claude Code 用户轮次，不是底层 API 请求次数。">?</button></span>
           <strong id="sampleCount">--</strong>
         </article>
         <article>
-          <span>p50 轮次耗时</span>
-          <strong id="p50">--</strong>
+          <span>失败轮次 <button class="help" type="button" aria-label="失败轮次说明" data-tip="StopFailure 上报的轮次数。错误类型只使用白名单分类，不上传原始错误文本。">?</button></span>
+          <strong id="failureCountMetric">--</strong>
         </article>
-        <article>
-          <span>p90 轮次耗时</span>
-          <strong id="p90">--</strong>
-        </article>
-        <article>
-          <span>置信度</span>
-          <strong id="confidence">--</strong>
-        </article>
-      </section>
-
-      <section class="panel">
-        <div class="panelHeader">
-          <h2>计算口径</h2>
-          <span id="windowScope">当前窗口 --</span>
-        </div>
-        <dl class="definitions">
-          <div>
-            <dt>轮次数</dt>
-            <dd>插件观测到的 Claude Code 完整用户轮次。一次轮次从提交消息开始，到 Stop 或 StopFailure 结束；不等同于底层 API 请求次数。</dd>
-          </div>
-          <div>
-            <dt>轮次成功率</dt>
-            <dd><span id="availabilityFormula">成功轮次 / 总轮次</span>，当前窗口为 <span id="availabilityMath">--</span>。</dd>
-          </div>
-          <div>
-            <dt>p50 / p90 轮次耗时</dt>
-            <dd>按耗时桶计算的分位数，桶为 &lt;3s、3-10s、10-30s、30-60s、&gt;60s；这是端到端轮次耗时，不是单次 API latency。</dd>
-          </div>
-          <div>
-            <dt>置信度</dt>
-            <dd>样本 &lt;5 为不足，5-19 为低，20-99 为中，≥100 为高；样本不足时不判断可用状态。</dd>
-          </div>
-          <div>
-            <dt>状态阈值</dt>
-            <dd>成功率 &lt;50% 为不可用，50%-95% 为不稳定，≥95% 且 p90 ≥30s 为偏慢，≥95% 且 p90 &lt;30s 为可用。</dd>
-          </div>
-        </dl>
       </section>
 
       <section class="panel">
         <div class="panelHeader">
           <h2>主要错误类型</h2>
-          <span id="failureCount">失败样本 --</span>
+          <span id="failureCount">当前窗口 --</span>
         </div>
         <div id="errors" class="errorList"></div>
       </section>
