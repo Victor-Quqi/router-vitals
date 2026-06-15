@@ -14,7 +14,7 @@ npm test
 
 ## CD
 
-`.github/workflows/deploy-cloudflare.yml` 会在 `main` push 或手动触发时：
+`.github/workflows/deploy-cloudflare.yml` 会在 `main` push 且改到 `worker/**` 或 `status-page/**` 时运行，也能手动触发。运行时会：
 
 1. 运行测试。
 2. 把 GitHub Variables 里的 D1 database id 注入 `worker/wrangler.toml`。
