@@ -22,13 +22,15 @@ export function parseStatusWindow(value) {
 export function getStatusWindowSpec(value) {
     return isStatusWindow(value) ? { ...WINDOW_SPECS[value] } : null;
 }
-export function buildStatusFromRows(rows, windowValue, modelRows = [], nowMinute = Math.floor(Date.now() / 60000), errorDetailRows = []) {
+export function buildStatusFromRows(rows, windowValue, modelRows = [], nowMinute = Math.floor(Date.now() / 60000), modelErrorDetailRows = []) {
     const spec = getStatusWindowSpec(windowValue);
     const totals = sumRows(rows);
     const total = totals.total_samples;
     const availability = total > 0 ? totals.success_samples / total : null;
-    const errors = buildErrorBreakdown(totals.errors, totals.failure_samples, errorDetailRows);
+    const errors = buildErrorBreakdown(totals.errors, totals.failure_samples, modelErrorDetailRows);
     const state = getState({ total, availability });
+    const models = spec ? buildModelTimelines(modelRows, spec, nowMinute, modelErrorDetailRows) : [];
+    const modelErrors = buildModelErrorBreakdowns(models, modelErrorDetailRows);
     return {
         window: windowValue,
         generatedAt: new Date().toISOString(),
@@ -40,7 +42,8 @@ export function buildStatusFromRows(rows, windowValue, modelRows = [], nowMinute
         availability,
         errors,
         timeline: spec ? buildTimelineMeta(spec, nowMinute) : null,
-        models: spec ? buildModelTimelines(modelRows, spec, nowMinute) : [],
+        models,
+        modelErrors,
         meta: {
             unit: "turn",
             availabilityFormula: "successCount / sampleCount",
@@ -64,7 +67,7 @@ function buildTimelineMeta(spec, nowMinute) {
         endAt: minuteToIso(nowMinute)
     };
 }
-function buildModelTimelines(rows, spec, nowMinute) {
+function buildModelTimelines(rows, spec, nowMinute, errorRows = []) {
     const startMinute = nowMinute - spec.minutes + 1;
     const models = new Map();
     for (const modelClass of MODEL_ORDER)
@@ -91,6 +94,7 @@ function buildModelTimelines(rows, spec, nowMinute) {
         model.successCount += success;
         model.failureCount += failure;
     }
+    attachBucketErrors(models, errorRows);
     return [...models.values()]
         .map(finalizeModelTimeline)
         .sort((a, b) => MODEL_ORDER.indexOf(a.modelClass) - MODEL_ORDER.indexOf(b.modelClass));
@@ -116,12 +120,77 @@ function getModelTimeline(models, modelClass, spec, startMinute, nowMinute) {
                 total: 0,
                 success: 0,
                 failure: 0,
-                state: "empty"
+                state: "empty",
+                errors: []
             };
         })
     };
     models.set(modelClass, model);
     return model;
+}
+function attachBucketErrors(models, rows) {
+    const grouped = new Map();
+    for (const row of rows) {
+        const bucketIndex = Number(row.bucket_index);
+        if (!Number.isInteger(bucketIndex))
+            continue;
+        const modelClass = normalizeModelClass(row.model_class);
+        const model = models.get(modelClass);
+        const bucket = model?.buckets[bucketIndex];
+        if (!bucket)
+            continue;
+        const key = `${modelClass}:${bucketIndex}`;
+        const item = getGroupedErrors(grouped, key);
+        const type = normalizeErrorType(row.error_type);
+        const count = Number(row.count || 0);
+        if (count <= 0)
+            continue;
+        item.counts[type] += count;
+        item.rows.push(row);
+    }
+    for (const [key, item] of grouped) {
+        const [modelClass, bucketIndexValue] = key.split(":");
+        const bucketIndex = Number(bucketIndexValue);
+        const bucket = models.get(normalizeModelClass(modelClass))?.buckets[bucketIndex];
+        if (!bucket)
+            continue;
+        bucket.errors = buildErrorBreakdown(item.counts, bucket.failure, item.rows);
+    }
+}
+function buildModelErrorBreakdowns(models, rows) {
+    const grouped = new Map();
+    for (const modelClass of MODEL_ORDER)
+        grouped.set(modelClass, createErrorGroup());
+    for (const row of rows) {
+        const modelClass = normalizeModelClass(row.model_class);
+        const item = grouped.get(modelClass) || createErrorGroup();
+        const type = normalizeErrorType(row.error_type);
+        const count = Number(row.count || 0);
+        if (count <= 0)
+            continue;
+        item.counts[type] += count;
+        item.rows.push(row);
+        grouped.set(modelClass, item);
+    }
+    const failureCounts = new Map(models.map((model) => [model.modelClass, model.failureCount]));
+    return Object.fromEntries(MODEL_ORDER.map((modelClass) => {
+        const item = grouped.get(modelClass) || createErrorGroup();
+        return [modelClass, buildErrorBreakdown(item.counts, failureCounts.get(modelClass) || 0, item.rows)];
+    }));
+}
+function getGroupedErrors(grouped, key) {
+    const current = grouped.get(key);
+    if (current)
+        return current;
+    const item = createErrorGroup();
+    grouped.set(key, item);
+    return item;
+}
+function createErrorGroup() {
+    return {
+        rows: [],
+        counts: Object.fromEntries(ERROR_ORDER.map(([key]) => [key, 0]))
+    };
 }
 function finalizeModelTimeline(model) {
     model.availability = model.sampleCount > 0 ? model.successCount / model.sampleCount : null;

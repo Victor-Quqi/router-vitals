@@ -73,6 +73,7 @@ test("scheduled purge caps all retained D1 tables at 90 days", async () => {
     assert.deepEqual(calls.map((call) => call.query), [
         "DELETE FROM samples_raw WHERE created_at < ?",
         "DELETE FROM error_observations WHERE minute < ?",
+        "DELETE FROM model_error_observations WHERE minute < ?",
         "DELETE FROM minute_aggregates WHERE minute < ?",
         "DELETE FROM model_minute_aggregates WHERE minute < ?"
     ]);
@@ -83,6 +84,7 @@ test("scheduled purge caps all retained D1 tables at 90 days", async () => {
     assert.equal(calls[1].values[0], cutoffMinute);
     assert.equal(calls[2].values[0], cutoffMinute);
     assert.equal(calls[3].values[0], cutoffMinute);
+    assert.equal(calls[4].values[0], cutoffMinute);
 });
 test("status aggregation returns insufficient data under sample floor", () => {
     const status = buildStatusFromRows([
@@ -120,12 +122,16 @@ test("status aggregation attaches error status codes and hints", () => {
         }
     ], "60m", [], 30000010, [
         {
+            bucket_index: 11,
+            model_class: "opus",
             error_type: "rate_limited",
             status_code: 429,
             error_hint: "API Error 429: Rate limit reached",
             count: 2
         },
         {
+            bucket_index: 11,
+            model_class: "opus",
             error_type: "rate_limited",
             status_code: 429,
             error_hint: "Quota exceeded",
@@ -135,6 +141,8 @@ test("status aggregation attaches error status codes and hints", () => {
     assert.equal(status.errors[0].type, "rate_limited");
     assert.deepEqual(status.errors[0].statusCodes, [{ code: 429, count: 3 }]);
     assert.equal(status.errors[0].hints[0].text, "API Error 429: Rate limit reached");
+    assert.equal(status.modelErrors.opus[0].type, "rate_limited");
+    assert.deepEqual(status.models[0].buckets.at(-1).errors[0].statusCodes, [{ code: 429, count: 3 }]);
 });
 test("status aggregation builds model trend buckets", () => {
     const nowMinute = 30000010;
@@ -168,15 +176,34 @@ test("status aggregation builds model trend buckets", () => {
             success_samples: 0,
             failure_samples: 1
         }
-    ], nowMinute);
+    ], nowMinute, [
+        {
+            bucket_index: 17,
+            model_class: "opus",
+            error_type: "server_error",
+            status_code: 503,
+            error_hint: "Service overloaded",
+            count: 1
+        },
+        {
+            bucket_index: 17,
+            model_class: "sonnet",
+            error_type: "server_error",
+            status_code: 503,
+            error_hint: "Service overloaded",
+            count: 1
+        }
+    ]);
     assert.equal(status.timeline.bucketCount, 18);
     assert.equal(status.timeline.bucketMinutes, 5);
     assert.equal(status.models.length, 4);
     assert.equal(status.models[0].modelClass, "opus");
     assert.equal(status.models[0].buckets.at(-1).state, "failure");
+    assert.equal(status.models[0].buckets.at(-1).errors[0].type, "server_error");
     assert.equal(status.models[1].modelClass, "sonnet");
     assert.equal(status.models[1].buckets.at(-2).state, "success");
     assert.equal(status.models[1].buckets.at(-1).state, "mixed");
+    assert.equal(status.modelErrors.sonnet[0].type, "server_error");
     assert.equal(status.models[2].modelClass, "haiku");
     assert.equal(status.models[2].buckets.at(-1).state, "empty");
     assert.equal(status.models[3].modelClass, "unknown");

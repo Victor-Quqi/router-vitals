@@ -1,5 +1,5 @@
 import { DEFAULT_REMOTE_CONFIG, ERROR_TYPES, LATENCY_BUCKETS, validateReportPayload } from "../../shared/policy.mjs";
-import { buildStatusFromRows, parseStatusWindow } from "./status.mjs";
+import { buildStatusFromRows, getStatusWindowSpec, parseStatusWindow } from "./status.mjs";
 const JSON_HEADERS = {
     "content-type": "application/json; charset=utf-8",
     "access-control-allow-origin": "*",
@@ -76,6 +76,7 @@ export async function handleReport(request, env) {
     await incrementAggregate(env.DB, payload, nowMs, minute);
     await incrementModelAggregate(env.DB, payload, nowMs, minute);
     await incrementErrorObservation(env.DB, payload, nowMs, minute);
+    await incrementModelErrorObservation(env.DB, payload, nowMs, minute);
     return json({ ok: true });
 }
 export async function handleStatus(url, env) {
@@ -83,7 +84,10 @@ export async function handleStatus(url, env) {
         return json({ error: "db_not_configured" }, 503);
     const windowValue = url.searchParams.get("window") || "60m";
     const minutes = parseStatusWindow(windowValue);
+    const spec = getStatusWindowSpec(windowValue);
     if (!minutes)
+        return json({ error: "invalid_window" }, 400);
+    if (!spec)
         return json({ error: "invalid_window" }, 400);
     const nowMs = Date.now();
     const cacheTtlMs = getStatusCacheTtlMs(windowValue);
@@ -95,7 +99,7 @@ export async function handleStatus(url, env) {
     }
     const nowMinute = Math.floor(nowMs / 60000);
     const sinceMinute = nowMinute - minutes + 1;
-    const [result, modelResult, errorDetailResult] = await Promise.all([
+    const [result, modelResult, modelErrorDetailResult] = await Promise.all([
         env.DB
             .prepare("SELECT * FROM minute_aggregates WHERE minute >= ? ORDER BY minute ASC")
             .bind(sinceMinute)
@@ -111,17 +115,25 @@ export async function handleStatus(url, env) {
             .all(),
         env.DB
             .prepare(`
-        SELECT error_type, status_code, error_hint, SUM(count) AS count
-        FROM error_observations
-        WHERE minute >= ?
-        GROUP BY error_type, status_code, error_hint
-        ORDER BY count DESC
-        LIMIT 80
+        SELECT bucket_index, model_class, error_type, status_code, error_hint, SUM(count) AS count
+        FROM (
+          SELECT
+            CAST((minute - ?) / ? AS INTEGER) AS bucket_index,
+            model_class,
+            error_type,
+            status_code,
+            error_hint,
+            count
+          FROM model_error_observations
+          WHERE minute >= ? AND minute <= ?
+        )
+        GROUP BY bucket_index, model_class, error_type, status_code, error_hint
+        ORDER BY bucket_index ASC, model_class ASC, count DESC
       `)
-            .bind(sinceMinute)
+            .bind(sinceMinute, spec.bucketMinutes, sinceMinute, nowMinute)
             .all()
     ]);
-    const body = JSON.stringify(buildStatusFromRows(result.results || [], windowValue, modelResult.results || [], nowMinute, errorDetailResult.results || []));
+    const body = JSON.stringify(buildStatusFromRows(result.results || [], windowValue, modelResult.results || [], nowMinute, modelErrorDetailResult.results || []));
     statusResponseCache.set(cacheKey, { body, expiresAt: nowMs + cacheTtlMs });
     return jsonText(body, 200, bypassCache ? { "cache-control": "no-store" } : statusCacheHeaders(cacheTtlMs));
 }
@@ -181,6 +193,22 @@ async function incrementErrorObservation(db, payload, nowMs, minute) {
       updated_at = ?
   `).bind(minute, payload.errorType, statusKey, statusCode, hintKey, errorHint, nowMs, nowMs).run();
 }
+async function incrementModelErrorObservation(db, payload, nowMs, minute) {
+    if (payload.ok)
+        return;
+    const statusCode = payload.errorStatusCode ?? null;
+    const errorHint = payload.errorHint || null;
+    const statusKey = statusCode === null ? "none" : String(statusCode);
+    const hintKey = errorHint || "none";
+    await db.prepare(`
+    INSERT INTO model_error_observations (
+      minute, model_class, error_type, status_key, status_code, hint_key, error_hint, count, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?)
+    ON CONFLICT(minute, model_class, error_type, status_key, hint_key) DO UPDATE SET
+      count = count + 1,
+      updated_at = ?
+  `).bind(minute, payload.modelClass, payload.errorType, statusKey, statusCode, hintKey, errorHint, nowMs, nowMs).run();
+}
 async function purgeExpiredData(env) {
     if (!env?.DB)
         return;
@@ -191,6 +219,7 @@ async function purgeExpiredData(env) {
     const detailRetentionDays = parseBoundedRetention(env.ERROR_DETAIL_RETENTION_DAYS, 31, 1, MAX_RETENTION_DAYS);
     const cutoffMinute = Math.floor((nowMs - detailRetentionDays * 24 * 60 * 60 * 1000) / 60000);
     await env.DB.prepare("DELETE FROM error_observations WHERE minute < ?").bind(cutoffMinute).run();
+    await env.DB.prepare("DELETE FROM model_error_observations WHERE minute < ?").bind(cutoffMinute).run();
     const aggregateCutoffMinute = Math.floor((nowMs - MAX_RETENTION_DAYS * 24 * 60 * 60 * 1000) / 60000);
     await env.DB.prepare("DELETE FROM minute_aggregates WHERE minute < ?").bind(aggregateCutoffMinute).run();
     await env.DB.prepare("DELETE FROM model_minute_aggregates WHERE minute < ?").bind(aggregateCutoffMinute).run();

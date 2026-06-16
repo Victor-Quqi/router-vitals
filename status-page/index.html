@@ -21,8 +21,20 @@
           </div>
         </div>
         <div class="topActions">
-          <a class="githubLink" href="https://github.com/Victor-Quqi/router-vitals" target="_blank" rel="noreferrer">GitHub</a>
-          <div class="updated" id="updated">等待数据</div>
+          <a class="githubLink" href="https://github.com/Victor-Quqi/router-vitals" target="_blank" rel="noreferrer" aria-label="GitHub">
+            <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+              <path d="M12 2C6.48 2 2 6.59 2 12.25c0 4.53 2.87 8.37 6.84 9.73.5.1.68-.22.68-.5v-1.91c-2.78.62-3.37-1.22-3.37-1.22-.45-1.19-1.11-1.5-1.11-1.5-.91-.64.07-.63.07-.63 1 .07 1.53 1.06 1.53 1.06.9 1.57 2.36 1.12 2.93.86.09-.67.35-1.12.63-1.38-2.22-.26-4.55-1.14-4.55-5.07 0-1.12.39-2.03 1.03-2.75-.1-.26-.45-1.31.1-2.72 0 0 .84-.28 2.75 1.05A9.3 9.3 0 0 1 12 6.92c.85 0 1.7.12 2.5.35 1.9-1.33 2.74-1.05 2.74-1.05.55 1.41.2 2.46.1 2.72.64.72 1.03 1.63 1.03 2.75 0 3.94-2.34 4.8-4.56 5.06.36.32.68.95.68 1.92v2.85c0 .28.18.6.69.5A10.17 10.17 0 0 0 22 12.25C22 6.59 17.52 2 12 2Z" />
+            </svg>
+          </a>
+          <label class="autoRefresh" id="autoRefreshControl">
+            <input id="autoRefreshToggle" type="checkbox">
+            <span class="switchText">自动刷新</span>
+          </label>
+          <button class="refreshButton" id="refreshButton" type="button" aria-label="刷新">
+            <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+              <path d="M20 11a8 8 0 0 0-14.9-4M4 4v5h5M4 13a8 8 0 0 0 14.9 4M20 20v-5h-5" />
+            </svg>
+          </button>
         </div>
       </header>
 
@@ -46,13 +58,6 @@
             <button data-window="7d" type="button">近7天</button>
             <button data-window="30d" type="button">近30天</button>
           </div>
-          <div class="refreshControls">
-            <label class="autoRefresh" id="autoRefreshControl">
-              <input id="autoRefreshToggle" type="checkbox">
-              <span>自动刷新</span>
-            </label>
-            <button class="refreshButton" id="refreshButton" type="button">刷新</button>
-          </div>
         </div>
       </section>
 
@@ -75,7 +80,6 @@
       <section class="panel trendPanel">
         <div class="panelHeader">
           <h2>模型趋势</h2>
-          <span id="bucketInfo">--</span>
         </div>
         <div class="trendLegend" aria-label="趋势颜色说明">
           <span><i class="dot empty"></i>无数据</span>
@@ -87,9 +91,17 @@
       </section>
 
       <section class="panel">
-        <div class="panelHeader">
-          <h2>主要错误类型</h2>
-          <span id="failureCount">当前窗口 --</span>
+        <div class="panelHeader errorHeader">
+          <div class="panelTitle">
+            <h2>主要错误类型</h2>
+            <span id="failureCount">当前窗口 --</span>
+          </div>
+          <div class="modelTabs" role="tablist" aria-label="错误模型">
+            <button class="active" data-error-model="opus" type="button">Opus</button>
+            <button data-error-model="sonnet" type="button">Sonnet</button>
+            <button data-error-model="haiku" type="button">Haiku</button>
+            <button data-error-model="unknown" type="button">Unknown</button>
+          </div>
         </div>
         <div id="errors" class="errorList"></div>
       </section>

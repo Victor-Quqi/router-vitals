@@ -9,9 +9,10 @@ import {
 } from "../../shared/policy.mjs";
 import {
   buildStatusFromRows,
+  getStatusWindowSpec,
   parseStatusWindow,
   type AggregateRow,
-  type ErrorDetailRow,
+  type ModelErrorDetailRow,
   type ModelAggregateRow
 } from "./status.mjs";
 
@@ -115,6 +116,7 @@ export async function handleReport(request: Request, env: WorkerEnv): Promise<Re
   await incrementAggregate(env.DB, payload, nowMs, minute);
   await incrementModelAggregate(env.DB, payload, nowMs, minute);
   await incrementErrorObservation(env.DB, payload, nowMs, minute);
+  await incrementModelErrorObservation(env.DB, payload, nowMs, minute);
 
   return json({ ok: true });
 }
@@ -124,7 +126,9 @@ export async function handleStatus(url: URL, env: WorkerEnv): Promise<Response> 
 
   const windowValue = url.searchParams.get("window") || "60m";
   const minutes = parseStatusWindow(windowValue);
+  const spec = getStatusWindowSpec(windowValue);
   if (!minutes) return json({ error: "invalid_window" }, 400);
+  if (!spec) return json({ error: "invalid_window" }, 400);
 
   const nowMs = Date.now();
   const cacheTtlMs = getStatusCacheTtlMs(windowValue);
@@ -137,7 +141,7 @@ export async function handleStatus(url: URL, env: WorkerEnv): Promise<Response> 
 
   const nowMinute = Math.floor(nowMs / 60000);
   const sinceMinute = nowMinute - minutes + 1;
-  const [result, modelResult, errorDetailResult] = await Promise.all([
+  const [result, modelResult, modelErrorDetailResult] = await Promise.all([
     env.DB
       .prepare("SELECT * FROM minute_aggregates WHERE minute >= ? ORDER BY minute ASC")
       .bind(sinceMinute)
@@ -153,15 +157,23 @@ export async function handleStatus(url: URL, env: WorkerEnv): Promise<Response> 
       .all<ModelAggregateRow>(),
     env.DB
       .prepare(`
-        SELECT error_type, status_code, error_hint, SUM(count) AS count
-        FROM error_observations
-        WHERE minute >= ?
-        GROUP BY error_type, status_code, error_hint
-        ORDER BY count DESC
-        LIMIT 80
+        SELECT bucket_index, model_class, error_type, status_code, error_hint, SUM(count) AS count
+        FROM (
+          SELECT
+            CAST((minute - ?) / ? AS INTEGER) AS bucket_index,
+            model_class,
+            error_type,
+            status_code,
+            error_hint,
+            count
+          FROM model_error_observations
+          WHERE minute >= ? AND minute <= ?
+        )
+        GROUP BY bucket_index, model_class, error_type, status_code, error_hint
+        ORDER BY bucket_index ASC, model_class ASC, count DESC
       `)
-      .bind(sinceMinute)
-      .all<ErrorDetailRow>()
+      .bind(sinceMinute, spec.bucketMinutes, sinceMinute, nowMinute)
+      .all<ModelErrorDetailRow>()
   ]);
 
   const body = JSON.stringify(buildStatusFromRows(
@@ -169,7 +181,7 @@ export async function handleStatus(url: URL, env: WorkerEnv): Promise<Response> 
     windowValue,
     modelResult.results || [],
     nowMinute,
-    errorDetailResult.results || []
+    modelErrorDetailResult.results || []
   ));
   statusResponseCache.set(cacheKey, { body, expiresAt: nowMs + cacheTtlMs });
 
@@ -272,6 +284,34 @@ async function incrementErrorObservation(db: D1Database, payload: ReportPayload,
   ).run();
 }
 
+async function incrementModelErrorObservation(db: D1Database, payload: ReportPayload, nowMs: number, minute: number): Promise<void> {
+  if (payload.ok) return;
+
+  const statusCode = payload.errorStatusCode ?? null;
+  const errorHint = payload.errorHint || null;
+  const statusKey = statusCode === null ? "none" : String(statusCode);
+  const hintKey = errorHint || "none";
+
+  await db.prepare(`
+    INSERT INTO model_error_observations (
+      minute, model_class, error_type, status_key, status_code, hint_key, error_hint, count, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?)
+    ON CONFLICT(minute, model_class, error_type, status_key, hint_key) DO UPDATE SET
+      count = count + 1,
+      updated_at = ?
+  `).bind(
+    minute,
+    payload.modelClass,
+    payload.errorType,
+    statusKey,
+    statusCode,
+    hintKey,
+    errorHint,
+    nowMs,
+    nowMs
+  ).run();
+}
+
 async function purgeExpiredData(env: WorkerEnv): Promise<void> {
   if (!env?.DB) return;
   const nowMs = Date.now();
@@ -282,6 +322,7 @@ async function purgeExpiredData(env: WorkerEnv): Promise<void> {
   const detailRetentionDays = parseBoundedRetention(env.ERROR_DETAIL_RETENTION_DAYS, 31, 1, MAX_RETENTION_DAYS);
   const cutoffMinute = Math.floor((nowMs - detailRetentionDays * 24 * 60 * 60 * 1000) / 60000);
   await env.DB.prepare("DELETE FROM error_observations WHERE minute < ?").bind(cutoffMinute).run();
+  await env.DB.prepare("DELETE FROM model_error_observations WHERE minute < ?").bind(cutoffMinute).run();
 
   const aggregateCutoffMinute = Math.floor((nowMs - MAX_RETENTION_DAYS * 24 * 60 * 60 * 1000) / 60000);
   await env.DB.prepare("DELETE FROM minute_aggregates WHERE minute < ?").bind(aggregateCutoffMinute).run();

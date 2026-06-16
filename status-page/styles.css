@@ -12,6 +12,7 @@
   --blue: #2f81f7;
   --empty: #30363d;
   --ink: #f0f6fc;
+  --control-width: 520px;
 }
 
 * {
@@ -58,27 +59,37 @@ body {
 .topActions {
   display: flex;
   align-items: center;
-  gap: 14px;
+  gap: 10px;
   text-align: right;
 }
 
 .githubLink {
-  display: inline-flex;
-  align-items: center;
-  min-height: 34px;
-  padding: 0 12px;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  background: var(--panel-2);
-  color: var(--text);
-  font-size: 13px;
+  display: inline-grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  color: var(--muted);
   text-decoration: none;
+}
+
+.githubLink svg {
+  width: 25px;
+  height: 25px;
+}
+
+.githubLink path {
+  fill: currentColor;
 }
 
 .githubLink:hover,
 .githubLink:focus-visible {
-  border-color: var(--blue);
-  outline: 0;
+  color: var(--text);
+  outline: none;
+}
+
+.githubLink:focus-visible {
+  box-shadow: 0 0 0 3px rgb(47 129 247 / 32%);
+  border-radius: 50%;
 }
 
 .mark {
@@ -161,8 +172,8 @@ article span {
 }
 
 .summaryControls {
-  display: grid;
-  gap: 10px;
+  width: var(--control-width);
+  max-width: 100%;
 }
 
 .stateDetail {
@@ -171,52 +182,80 @@ article span {
   font-size: 15px;
 }
 
-.windowTabs {
+.windowTabs,
+.modelTabs {
   display: grid;
-  grid-template-columns: repeat(4, minmax(86px, 1fr));
-  border: 1px solid var(--line);
+  gap: 3px;
+  width: 100%;
+  padding: 3px;
+  border: 1px solid rgb(139 148 158 / 18%);
   border-radius: 8px;
-  overflow: hidden;
+  background: #0d1117;
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 4%);
 }
 
-.windowTabs button {
-  min-height: 38px;
+.windowTabs {
+  grid-template-columns: repeat(4, minmax(72px, 1fr));
+  align-items: center;
+}
+
+.modelTabs {
+  grid-template-columns: repeat(4, minmax(86px, 1fr));
+  width: var(--control-width);
+  max-width: 100%;
+}
+
+.windowTabs button,
+.modelTabs button {
+  min-height: 32px;
   border: 0;
-  border-right: 1px solid var(--line);
-  background: var(--panel-2);
+  border-radius: 6px;
+  background: transparent;
   color: var(--muted);
   font: inherit;
+  font-size: 14px;
   cursor: pointer;
+  transition: background 140ms ease, color 140ms ease, box-shadow 140ms ease;
 }
 
-.windowTabs button:last-child {
-  border-right: 0;
-}
-
-.windowTabs button.active {
-  background: var(--blue);
+.windowTabs button.active,
+.modelTabs button.active {
+  background: #1f6feb;
   color: #fff;
+  box-shadow: 0 8px 20px rgb(47 129 247 / 22%), inset 0 1px 0 rgb(255 255 255 / 18%);
+}
+
+.windowTabs button:hover:not(.active),
+.modelTabs button:hover:not(.active) {
+  background: rgb(139 148 158 / 9%);
+  color: var(--text);
+}
+
+.windowTabs button:focus-visible,
+.modelTabs button:focus-visible {
+  outline: 2px solid var(--blue);
+  outline-offset: 2px;
 }
 
 .refreshControls {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 10px;
+  display: contents;
 }
 
 .autoRefresh {
+  position: relative;
   display: inline-flex;
   align-items: center;
-  gap: 8px;
-  min-height: 34px;
-  padding: 0 10px;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  background: var(--panel-2);
+  justify-content: center;
+  min-height: 32px;
+  padding: 0 9px;
+  border: 1px solid rgb(139 148 158 / 18%);
+  border-radius: 999px;
+  background: #0d1117;
   color: var(--muted);
-  font-size: 13px;
+  font-size: 12px;
   cursor: pointer;
+  user-select: none;
+  transition: border-color 140ms ease, color 140ms ease, background 140ms ease;
 }
 
 .autoRefresh[hidden] {
@@ -224,27 +263,66 @@ article span {
 }
 
 .autoRefresh input {
-  width: 16px;
-  height: 16px;
-  accent-color: var(--blue);
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.switchText {
+  line-height: 1;
+}
+
+.autoRefresh:has(input:checked) {
+  background: rgb(46 160 67 / 10%);
+  color: #7ee787;
+}
+
+.autoRefresh input:checked ~ .switchText {
+  color: #7ee787;
+}
+
+.autoRefresh:hover,
+.autoRefresh:focus-within {
+  background: rgb(139 148 158 / 9%);
+  color: var(--text);
 }
 
 .refreshButton {
-  min-height: 34px;
-  padding: 0 14px;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  background: var(--panel-2);
+  display: inline-grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 1px solid rgb(139 148 158 / 18%);
+  border-radius: 999px;
+  background: #0d1117;
   color: var(--text);
-  font: inherit;
-  font-size: 13px;
   cursor: pointer;
+  transition: border-color 140ms ease, color 140ms ease, background 140ms ease, transform 140ms ease;
+}
+
+.refreshButton svg {
+  width: 16px;
+  height: 16px;
+}
+
+.refreshButton path {
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 2;
 }
 
 .refreshButton:hover,
 .refreshButton:focus-visible {
-  border-color: var(--blue);
+  background: rgb(47 129 247 / 9%);
+  color: #58a6ff;
   outline: 0;
+}
+
+.refreshButton:active {
+  transform: translateY(1px);
 }
 
 .refreshButton:disabled {
@@ -341,6 +419,15 @@ article em {
   justify-content: space-between;
   gap: 12px;
   margin-bottom: 16px;
+}
+
+.errorHeader {
+  align-items: end;
+}
+
+.panelTitle {
+  display: grid;
+  gap: 6px;
 }
 
 .errorList {
@@ -546,6 +633,34 @@ article em {
   background: var(--red);
 }
 
+.trendBlock:focus-visible {
+  outline: 2px solid var(--blue);
+  outline-offset: 3px;
+}
+
+.trendTooltip {
+  position: fixed;
+  max-width: min(300px, calc(100vw - 24px));
+  padding: 9px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #0b0d12;
+  color: var(--text);
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-line;
+  box-shadow: 0 12px 30px rgb(0 0 0 / 30%);
+  opacity: 0;
+  pointer-events: none;
+  transform: translate(-50%, -100%) translateY(-10px);
+  transition: opacity 100ms ease;
+  z-index: 30;
+}
+
+.trendTooltip.visible {
+  opacity: 1;
+}
+
 .emptyTrend {
   padding: 18px 0 4px;
   color: var(--muted);
@@ -590,6 +705,15 @@ footer {
 
   .windowTabs {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .modelTabs {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .autoRefresh,
+  .refreshButton {
+    border: 1px solid rgb(139 148 158 / 18%);
   }
 
   .topActions,

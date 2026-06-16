@@ -45,6 +45,8 @@ const modelLabels = {
     unknown: "Unknown"
 };
 let activeWindow = "60m";
+let activeErrorModel = "opus";
+let latestStatusData = null;
 const openErrorKeys = new Set();
 const autoRefreshWindows = new Set(["60m", "24h"]);
 const autoRefreshMs = 30000;
@@ -54,6 +56,9 @@ let loadSequence = 0;
 const refreshButton = getElement("refreshButton");
 const autoRefreshControl = getElement("autoRefreshControl");
 const autoRefreshToggle = getElement("autoRefreshToggle");
+const trendTooltip = document.createElement("div");
+trendTooltip.className = "trendTooltip";
+document.body.append(trendTooltip);
 for (const element of document.querySelectorAll("[data-window]")) {
     const button = element;
     button.addEventListener("click", () => {
@@ -63,6 +68,16 @@ for (const element of document.querySelectorAll("[data-window]")) {
         document.querySelectorAll("[data-window]").forEach((item) => item.classList.toggle("active", item === button));
         syncRefreshControls();
         void loadStatus();
+    });
+}
+for (const element of document.querySelectorAll("[data-error-model]")) {
+    const button = element;
+    button.addEventListener("click", () => {
+        const model = normalizeModelClass(button.dataset.errorModel);
+        activeErrorModel = model;
+        document.querySelectorAll("[data-error-model]").forEach((item) => item.classList.toggle("active", item === button));
+        if (latestStatusData)
+            renderErrorsForModel(latestStatusData);
     });
 }
 refreshButton.addEventListener("click", () => {
@@ -116,20 +131,18 @@ function syncRefreshControls() {
     }
 }
 function render(data) {
+    latestStatusData = data;
     const state = normalizeServiceState(data.state);
     setText("state", labels[state] || "状态暂缺");
     setText("stateDetail", formatStateDetail(data));
-    setText("updated", data.generatedAt ? `更新于 ${formatTime(data.generatedAt)}` : "等待数据");
     setText("availability", formatPercent(data.availability));
     setText("sampleCount", String(data.sampleCount ?? "--"));
     setText("failureCountMetric", String(data.failureCount ?? "--"));
-    setText("failureCount", `${formatWindowLabel(data.window)} · 失败轮次 ${data.failureCount ?? "--"}`);
     setText("availabilityMath", formatAvailabilityMath(data));
-    setText("bucketInfo", formatBucketInfo(data.timeline));
     const stateNode = getElement("state");
     stateNode.className = `state ${state}`;
     renderModelTable(data.models || [], data.timeline);
-    renderErrors(data.errors || []);
+    renderErrorsForModel(data);
 }
 function renderModelTable(models, timeline) {
     const root = getElement("modelTable");
@@ -167,8 +180,10 @@ function renderModelTable(models, timeline) {
         for (const bucket of model.buckets || []) {
             const block = document.createElement("span");
             block.className = `trendBlock ${bucket.state || "empty"}`;
-            block.title = formatBucketTitle(bucket);
-            block.setAttribute("aria-label", block.title);
+            const tooltip = formatBucketTooltip(bucket);
+            block.tabIndex = 0;
+            block.setAttribute("aria-label", tooltip);
+            bindTrendTooltip(block, tooltip);
             trend.append(block);
         }
         row.append(name, availability, sampleCount, failureCount, trend);
@@ -199,13 +214,19 @@ function buildEmptyModels(timeline) {
 function minuteToIso(minute) {
     return new Date(minute * 60000).toISOString();
 }
+function renderErrorsForModel(data) {
+    const model = findModelStatus(data, activeErrorModel);
+    const errors = data.modelErrors?.[activeErrorModel] || [];
+    setText("failureCount", `${modelLabels[activeErrorModel]} · ${formatWindowLabel(data.window)} · 失败轮次 ${model?.failureCount ?? 0}`);
+    renderErrors(errors);
+}
 function renderErrors(errors) {
     const root = getElement("errors");
     root.replaceChildren();
     if (errors.length === 0) {
         const empty = document.createElement("div");
         empty.className = "stateDetail";
-        empty.textContent = "当前窗口没有主要错误类型";
+        empty.textContent = `${modelLabels[activeErrorModel]} 当前窗口没有主要错误类型`;
         root.append(empty);
         return;
     }
@@ -291,14 +312,13 @@ function formatStatusSuffix(statusCodes) {
     return ` (${statusCodes.slice(0, 2).map((item) => item.code).join("/")})`;
 }
 function renderUnavailable() {
+    latestStatusData = null;
     setText("state", "状态暂缺");
     setText("stateDetail", "API 暂时没有返回可用数据");
-    setText("updated", "等待数据");
     for (const id of ["availability", "sampleCount", "failureCountMetric"])
         setText(id, "--");
     setText("failureCount", formatWindowLabel(activeWindow));
     setText("availabilityMath", "--");
-    setText("bucketInfo", "--");
     getElement("state").className = "state insufficient_data";
     renderModelTable([], null);
     renderErrors([]);
@@ -311,13 +331,6 @@ function getElement(id) {
     if (!element)
         throw new Error(`missing element: ${id}`);
     return element;
-}
-function formatTime(value) {
-    return new Intl.DateTimeFormat("zh-CN", {
-        hour: "2-digit",
-        minute: "2-digit",
-        second: "2-digit"
-    }).format(new Date(value));
 }
 function formatRange(startAt, endAt) {
     const options = activeWindow.endsWith("d")
@@ -349,11 +362,6 @@ function formatStateDetail(data) {
 function formatWindowLabel(value) {
     return windowLabels[value || ""] || windowLabels[activeWindow] || activeWindow;
 }
-function formatBucketInfo(timeline) {
-    if (!timeline)
-        return "--";
-    return `${timeline.bucketCount} 格 · 每格 ${formatDuration(timeline.bucketMinutes)}`;
-}
 function formatDuration(minutes) {
     if (minutes >= 1440)
         return `${minutes / 1440}天`;
@@ -361,15 +369,75 @@ function formatDuration(minutes) {
         return `${minutes / 60}小时`;
     return `${minutes}分钟`;
 }
-function formatBucketTitle(bucket) {
+function formatBucketTooltip(bucket) {
     const total = bucket.total ?? 0;
     const success = bucket.success ?? 0;
     const failure = bucket.failure ?? 0;
-    return `${formatRange(bucket.startAt, bucket.endAt)} · 成功 ${success} · 失败 ${failure} · 总轮次 ${total}`;
+    const lines = [formatRange(bucket.startAt, bucket.endAt)];
+    if (total <= 0) {
+        lines.push("无数据");
+        return lines.join("\n");
+    }
+    lines.push(`成功 ${success} · 失败 ${failure} · 总轮次 ${total}`);
+    lines.push(`成功率 ${formatPercent(total > 0 ? success / total : null)}`);
+    if (failure > 0) {
+        const primaryError = bucket.errors?.[0];
+        lines.push(primaryError ? `主要错误：${formatPrimaryError(primaryError)}` : "主要错误：暂无明细");
+    }
+    return lines.join("\n");
+}
+function formatPrimaryError(error) {
+    const meta = errorLabels[error.type || "unknown"] || { title: "未识别错误", detail: "" };
+    const statusCode = error.statusCodes?.[0]?.code;
+    const count = error.count ?? 0;
+    const parts = [meta.title];
+    if (statusCode)
+        parts.push(`HTTP ${statusCode}`);
+    if (count > 0)
+        parts.push(`${count} 次`);
+    return parts.join(" · ");
 }
 function normalizeServiceState(value) {
     if (value === "available" || value === "unstable" || value === "down" || value === "insufficient_data")
         return value;
     return "insufficient_data";
+}
+function normalizeModelClass(value) {
+    if (value === "opus" || value === "sonnet" || value === "haiku" || value === "unknown")
+        return value;
+    return "unknown";
+}
+function findModelStatus(data, modelClass) {
+    return (data.models || []).find((model) => model.modelClass === modelClass);
+}
+function bindTrendTooltip(element, text) {
+    element.addEventListener("mouseenter", (event) => {
+        showTrendTooltip(text);
+        positionTrendTooltip(event.clientX, event.clientY);
+    });
+    element.addEventListener("mousemove", (event) => {
+        positionTrendTooltip(event.clientX, event.clientY);
+    });
+    element.addEventListener("mouseleave", hideTrendTooltip);
+    element.addEventListener("focus", () => {
+        const rect = element.getBoundingClientRect();
+        showTrendTooltip(text);
+        positionTrendTooltip(rect.left + rect.width / 2, rect.top);
+    });
+    element.addEventListener("blur", hideTrendTooltip);
+}
+function showTrendTooltip(text) {
+    trendTooltip.textContent = text;
+    trendTooltip.classList.add("visible");
+}
+function hideTrendTooltip() {
+    trendTooltip.classList.remove("visible");
+}
+function positionTrendTooltip(clientX, clientY) {
+    const margin = 12;
+    const x = Math.min(window.innerWidth - margin, Math.max(margin, clientX));
+    const y = Math.min(window.innerHeight - margin, Math.max(margin, clientY));
+    trendTooltip.style.left = `${x}px`;
+    trendTooltip.style.top = `${y}px`;
 }
 export {};

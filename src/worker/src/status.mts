@@ -55,6 +55,11 @@ export interface ErrorDetailRow {
   count?: unknown;
 }
 
+export interface ModelErrorDetailRow extends ErrorDetailRow {
+  bucket_index?: unknown;
+  model_class?: unknown;
+}
+
 interface TimelineMeta {
   bucketMinutes: number;
   bucketCount: number;
@@ -70,6 +75,7 @@ export interface TimelineBucket {
   success: number;
   failure: number;
   state: BucketState;
+  errors: ErrorBreakdown[];
 }
 
 export interface ModelTimeline {
@@ -102,6 +108,7 @@ export interface StatusResponse {
   errors: ErrorBreakdown[];
   timeline: TimelineMeta | null;
   models: ModelTimeline[];
+  modelErrors: Record<ModelClass, ErrorBreakdown[]>;
   meta: {
     unit: "turn";
     availabilityFormula: string;
@@ -141,14 +148,16 @@ export function buildStatusFromRows(
   windowValue: string,
   modelRows: ModelAggregateRow[] = [],
   nowMinute = Math.floor(Date.now() / 60000),
-  errorDetailRows: ErrorDetailRow[] = []
+  modelErrorDetailRows: ModelErrorDetailRow[] = []
 ): StatusResponse {
   const spec = getStatusWindowSpec(windowValue);
   const totals = sumRows(rows);
   const total = totals.total_samples;
   const availability = total > 0 ? totals.success_samples / total : null;
-  const errors = buildErrorBreakdown(totals.errors, totals.failure_samples, errorDetailRows);
+  const errors = buildErrorBreakdown(totals.errors, totals.failure_samples, modelErrorDetailRows);
   const state = getState({ total, availability });
+  const models = spec ? buildModelTimelines(modelRows, spec, nowMinute, modelErrorDetailRows) : [];
+  const modelErrors = buildModelErrorBreakdowns(models, modelErrorDetailRows);
 
   return {
     window: windowValue,
@@ -161,7 +170,8 @@ export function buildStatusFromRows(
     availability,
     errors,
     timeline: spec ? buildTimelineMeta(spec, nowMinute) : null,
-    models: spec ? buildModelTimelines(modelRows, spec, nowMinute) : [],
+    models,
+    modelErrors,
     meta: {
       unit: "turn",
       availabilityFormula: "successCount / sampleCount",
@@ -187,7 +197,12 @@ function buildTimelineMeta(spec: WindowSpec, nowMinute: number): TimelineMeta {
   };
 }
 
-function buildModelTimelines(rows: ModelAggregateRow[], spec: WindowSpec, nowMinute: number): ModelTimeline[] {
+function buildModelTimelines(
+  rows: ModelAggregateRow[],
+  spec: WindowSpec,
+  nowMinute: number,
+  errorRows: ModelErrorDetailRow[] = []
+): ModelTimeline[] {
   const startMinute = nowMinute - spec.minutes + 1;
   const models = new Map<ModelClass, ModelTimeline>();
   for (const modelClass of MODEL_ORDER) getModelTimeline(models, modelClass, spec, startMinute, nowMinute);
@@ -213,6 +228,8 @@ function buildModelTimelines(rows: ModelAggregateRow[], spec: WindowSpec, nowMin
     model.successCount += success;
     model.failureCount += failure;
   }
+
+  attachBucketErrors(models, errorRows);
 
   return [...models.values()]
     .map(finalizeModelTimeline)
@@ -246,13 +263,86 @@ function getModelTimeline(
         total: 0,
         success: 0,
         failure: 0,
-        state: "empty" as const
+        state: "empty" as const,
+        errors: []
       };
     })
   };
 
   models.set(modelClass, model);
   return model;
+}
+
+function attachBucketErrors(models: Map<ModelClass, ModelTimeline>, rows: ModelErrorDetailRow[]): void {
+  const grouped = new Map<string, { rows: ModelErrorDetailRow[]; counts: Record<ErrorType, number> }>();
+
+  for (const row of rows) {
+    const bucketIndex = Number(row.bucket_index);
+    if (!Number.isInteger(bucketIndex)) continue;
+    const modelClass = normalizeModelClass(row.model_class);
+    const model = models.get(modelClass);
+    const bucket = model?.buckets[bucketIndex];
+    if (!bucket) continue;
+
+    const key = `${modelClass}:${bucketIndex}`;
+    const item = getGroupedErrors(grouped, key);
+    const type = normalizeErrorType(row.error_type);
+    const count = Number(row.count || 0);
+    if (count <= 0) continue;
+    item.counts[type] += count;
+    item.rows.push(row);
+  }
+
+  for (const [key, item] of grouped) {
+    const [modelClass, bucketIndexValue] = key.split(":");
+    const bucketIndex = Number(bucketIndexValue);
+    const bucket = models.get(normalizeModelClass(modelClass))?.buckets[bucketIndex];
+    if (!bucket) continue;
+    bucket.errors = buildErrorBreakdown(item.counts, bucket.failure, item.rows);
+  }
+}
+
+function buildModelErrorBreakdowns(
+  models: ModelTimeline[],
+  rows: ModelErrorDetailRow[]
+): Record<ModelClass, ErrorBreakdown[]> {
+  const grouped = new Map<ModelClass, { rows: ModelErrorDetailRow[]; counts: Record<ErrorType, number> }>();
+  for (const modelClass of MODEL_ORDER) grouped.set(modelClass, createErrorGroup());
+
+  for (const row of rows) {
+    const modelClass = normalizeModelClass(row.model_class);
+    const item = grouped.get(modelClass) || createErrorGroup();
+    const type = normalizeErrorType(row.error_type);
+    const count = Number(row.count || 0);
+    if (count <= 0) continue;
+    item.counts[type] += count;
+    item.rows.push(row);
+    grouped.set(modelClass, item);
+  }
+
+  const failureCounts = new Map(models.map((model) => [model.modelClass, model.failureCount]));
+  return Object.fromEntries(MODEL_ORDER.map((modelClass) => {
+    const item = grouped.get(modelClass) || createErrorGroup();
+    return [modelClass, buildErrorBreakdown(item.counts, failureCounts.get(modelClass) || 0, item.rows)];
+  })) as Record<ModelClass, ErrorBreakdown[]>;
+}
+
+function getGroupedErrors(
+  grouped: Map<string, { rows: ModelErrorDetailRow[]; counts: Record<ErrorType, number> }>,
+  key: string
+): { rows: ModelErrorDetailRow[]; counts: Record<ErrorType, number> } {
+  const current = grouped.get(key);
+  if (current) return current;
+  const item = createErrorGroup();
+  grouped.set(key, item);
+  return item;
+}
+
+function createErrorGroup(): { rows: ModelErrorDetailRow[]; counts: Record<ErrorType, number> } {
+  return {
+    rows: [],
+    counts: Object.fromEntries(ERROR_ORDER.map(([key]) => [key, 0])) as Record<ErrorType, number>
+  };
 }
 
 function finalizeModelTimeline(model: ModelTimeline): ModelTimeline {
