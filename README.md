@@ -32,7 +32,8 @@ pnpm test
 pnpm run status:preview
 ```
 
-然后访问 `http://127.0.0.1:8788`。
+该命令会先构建，再对 Wrangler 本地 D1 应用 `worker/migrations/`，最后启动同源 Worker 和状态页。然后访问 `http://127.0.0.1:8788`。
+本地造数时，把 `ANYROUTER_STATUS_API_BASE_URL` 指向 `http://127.0.0.1:8788`。
 
 Cloudflare 从零配置见 [docs/cloudflare-setup.md](docs/cloudflare-setup.md)，CI/CD 见 [docs/ci-cd.md](docs/ci-cd.md)。
 

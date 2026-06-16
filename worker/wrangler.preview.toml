@@ -1,0 +1,15 @@
+name = "router-vitals-preview"
+main = "src/index.mjs"
+compatibility_date = "2026-06-01"
+
+[assets]
+directory = "../status-page"
+binding = "ASSETS"
+
+[triggers]
+crons = ["17 * * * *"]
+
+[[d1_databases]]
+binding = "DB"
+database_name = "router-vitals"
+database_id = "local-router-vitals"

@@ -1,0 +1,75 @@
+import { spawn } from "node:child_process";
+import { resolve } from "node:path";
+import process from "node:process";
+
+const wranglerConfig = "worker/wrangler.preview.toml";
+const port = process.env.STATUS_PREVIEW_PORT || "8788";
+if (!/^\d+$/.test(port)) throw new Error("STATUS_PREVIEW_PORT must be a numeric port");
+const pnpm = "pnpm";
+const wranglerEnv = buildWranglerEnv();
+
+await runWrangler(["d1", "migrations", "apply", "router-vitals", "--local", "--config", wranglerConfig]);
+
+const dev = spawnPnpm([
+  "dlx",
+  "wrangler@4",
+  "dev",
+  "--config",
+  wranglerConfig,
+  "--local",
+  "--port",
+  port
+]);
+
+for (const signal of ["SIGINT", "SIGTERM"] as const) {
+  process.on(signal, () => {
+    dev.kill(signal);
+  });
+}
+
+dev.on("exit", (code, signal) => {
+  if (signal) process.kill(process.pid, signal);
+  process.exit(code ?? 0);
+});
+
+function runWrangler(args: string[]): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const child = spawnPnpm(["dlx", "wrangler@4", ...args]);
+
+    child.on("error", reject);
+    child.on("exit", (code) => {
+      if (code === 0) resolve();
+      else reject(new Error(`wrangler ${args.join(" ")} exited with code ${code ?? "unknown"}`));
+    });
+  });
+}
+
+function spawnPnpm(args: string[]): ReturnType<typeof spawn> {
+  if (process.platform === "win32") {
+    return spawn(process.env.ComSpec || "cmd.exe", ["/d", "/s", "/c", [pnpm, ...args].map(quoteCmdArg).join(" ")], {
+      env: wranglerEnv,
+      stdio: "inherit",
+      shell: false
+    });
+  }
+
+  return spawn(pnpm, args, {
+    env: wranglerEnv,
+    stdio: "inherit",
+    shell: false
+  });
+}
+
+function quoteCmdArg(value: string): string {
+  if (!/[\s"&|<>^]/.test(value)) return value;
+  return `"${value.replace(/"/g, '\\"')}"`;
+}
+
+function buildWranglerEnv(): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = {};
+  for (const [key, value] of Object.entries(process.env)) {
+    if (value !== undefined && !key.startsWith("=")) env[key] = value;
+  }
+  env.XDG_CONFIG_HOME = resolve(".wrangler", "config");
+  return env;
+}

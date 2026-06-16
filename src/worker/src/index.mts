@@ -26,8 +26,13 @@ interface D1Database {
   prepare(query: string): D1PreparedStatement;
 }
 
+interface AssetFetcher {
+  fetch(request: Request): Promise<Response>;
+}
+
 interface WorkerEnv {
   DB?: D1Database;
+  ASSETS?: AssetFetcher;
   RAW_SAMPLE_RETENTION_HOURS?: string | number;
   ERROR_DETAIL_RETENTION_DAYS?: string | number;
 }
@@ -85,6 +90,7 @@ export async function handleRequest(request: Request, env: WorkerEnv): Promise<R
   }
   if (request.method === "GET" && url.pathname === "/v1/status") return handleStatus(url, env);
   if (request.method === "POST" && url.pathname === "/v1/report") return handleReport(request, env);
+  if (request.method === "GET" && env?.ASSETS) return env.ASSETS.fetch(request);
 
   return json({ error: "not_found" }, 404);
 }

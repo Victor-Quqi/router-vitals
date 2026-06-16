@@ -1,4 +1,4 @@
-const API_BASE = window.ANYROUTER_STATUS_API_BASE || "https://api.status.example.com";
+const API_BASE = window.ANYROUTER_STATUS_API_BASE || window.location.origin;
 const labels = {
     available: "可用",
     unstable: "不稳定",
@@ -135,6 +135,7 @@ function render(data) {
     const state = normalizeServiceState(data.state);
     setText("state", labels[state] || "状态暂缺");
     setText("stateDetail", formatStateDetail(data));
+    setText("updatedAt", formatUpdatedAt(data.generatedAt));
     setText("availability", formatPercent(data.availability));
     setText("sampleCount", String(data.sampleCount ?? "--"));
     setText("failureCountMetric", String(data.failureCount ?? "--"));
@@ -315,6 +316,7 @@ function renderUnavailable() {
     latestStatusData = null;
     setText("state", "状态暂缺");
     setText("stateDetail", "API 暂时没有返回可用数据");
+    setText("updatedAt", "更新于 --");
     for (const id of ["availability", "sampleCount", "failureCountMetric"])
         setText(id, "--");
     setText("failureCount", formatWindowLabel(activeWindow));
@@ -348,6 +350,21 @@ function formatAvailabilityMath(data) {
     if (data.sampleCount === 0)
         return "0 / 0";
     return `${data.successCount} / ${data.sampleCount}`;
+}
+function formatUpdatedAt(value) {
+    if (!value)
+        return "更新于 --";
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime()))
+        return "更新于 --";
+    return `更新于 ${new Intl.DateTimeFormat("zh-CN", {
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit"
+    }).format(date)}`;
 }
 function formatStateDetail(data) {
     const windowText = formatWindowLabel(data.window);

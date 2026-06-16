@@ -182,6 +182,10 @@ article span {
   font-size: 15px;
 }
 
+.updated {
+  margin-top: 6px;
+}
+
 .windowTabs,
 .modelTabs {
   display: grid;

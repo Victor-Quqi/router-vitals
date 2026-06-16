@@ -46,6 +46,8 @@ export async function handleRequest(request, env) {
         return handleStatus(url, env);
     if (request.method === "POST" && url.pathname === "/v1/report")
         return handleReport(request, env);
+    if (request.method === "GET" && env?.ASSETS)
+        return env.ASSETS.fetch(request);
     return json({ error: "not_found" }, 404);
 }
 export async function handleReport(request, env) {
