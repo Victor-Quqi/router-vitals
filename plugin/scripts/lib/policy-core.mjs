@@ -61,6 +61,7 @@ export const DEFAULT_REMOTE_CONFIG = Object.freeze({
     sampleRateSuccess: 1,
     sampleRateFailure: 1,
     minPluginVersion: PLUGIN_VERSION,
+    latestPluginVersion: PLUGIN_VERSION,
     statusWindows: ["60m", "24h", "7d", "30d"]
 });
 export function normalizeHostFromBaseUrl(value) {
@@ -342,10 +343,17 @@ export function sanitizeRemoteConfig(value) {
         sampleRateSuccess: clampRate(config.sampleRateSuccess, DEFAULT_REMOTE_CONFIG.sampleRateSuccess),
         sampleRateFailure: clampRate(config.sampleRateFailure, DEFAULT_REMOTE_CONFIG.sampleRateFailure),
         minPluginVersion: typeof config.minPluginVersion === "string" ? config.minPluginVersion : DEFAULT_REMOTE_CONFIG.minPluginVersion,
+        latestPluginVersion: normalizePluginVersion(config.latestPluginVersion, DEFAULT_REMOTE_CONFIG.latestPluginVersion),
         statusWindows: Array.isArray(config.statusWindows)
             ? config.statusWindows.filter((item) => typeof item === "string" && STATUS_WINDOWS.includes(item))
             : DEFAULT_REMOTE_CONFIG.statusWindows
     };
+}
+function normalizePluginVersion(value, fallback) {
+    if (typeof value !== "string")
+        return fallback;
+    const trimmed = value.trim();
+    return /^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/.test(trimmed) ? trimmed : fallback;
 }
 function clampRate(value, fallback) {
     const number = Number(value);

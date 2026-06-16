@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { loadRemoteConfig } from "./lib/config.mjs";
-import { LOCAL_DAILY_REPORT_LIMIT, matchTargetBaseUrl } from "./lib/policy.mjs";
+import { LOCAL_DAILY_REPORT_LIMIT, PLUGIN_VERSION, matchTargetBaseUrl } from "./lib/policy.mjs";
 import { getTodayContributions, loadState, loadStatusCache, saveStatusCache } from "./lib/state.mjs";
 const STATUS_CACHE_TTL_MS = 60 * 1000;
 main().catch(() => {
@@ -10,14 +10,16 @@ async function main() {
     const [state, config] = await Promise.all([loadState(), loadRemoteConfig()]);
     const target = matchTargetBaseUrl(process.env.ANTHROPIC_BASE_URL, config.targetBaseUrlHosts);
     const count = getTodayContributions(state);
+    const updateHint = formatUpdateHint(config.latestPluginVersion);
+    const suffix = updateHint ? ` · ${updateHint}` : "";
     if (!target.matched) {
-        console.log(`Any Router 近 60m 状态: 未匹配目标站 · 贡献暂停 · ${formatContributionCount(count)}`);
+        console.log(`Any Router 近 60m 状态: 未匹配目标站 · 贡献暂停 · ${formatContributionCount(count)}${suffix}`);
         return;
     }
     const status = await getCachedStatus(config.apiBaseUrl);
     const statusText = formatStatus(status);
     const contributionText = config.reportingEnabled === false ? "贡献暂停" : "贡献开启";
-    console.log(`Any Router 近 60m 状态: ${statusText} · ${contributionText} · ${formatContributionCount(count)}`);
+    console.log(`Any Router 近 60m 状态: ${statusText} · ${contributionText} · ${formatContributionCount(count)}${suffix}`);
 }
 async function getCachedStatus(apiBaseUrl) {
     const nowMs = Date.now();
@@ -63,4 +65,25 @@ function formatContributionCount(count) {
     if (count >= LOCAL_DAILY_REPORT_LIMIT)
         return `今日贡献 ${count}/${LOCAL_DAILY_REPORT_LIMIT} 条 · 今日已满`;
     return `今日贡献 ${count} 条`;
+}
+function formatUpdateHint(latestPluginVersion) {
+    return comparePluginVersions(latestPluginVersion, PLUGIN_VERSION) > 0 ? `插件有新版 ${latestPluginVersion} · 运行 /plugin` : null;
+}
+function comparePluginVersions(left, right) {
+    const leftParts = parsePluginVersion(left);
+    const rightParts = parsePluginVersion(right);
+    if (!leftParts || !rightParts)
+        return 0;
+    for (let index = 0; index < leftParts.length; index += 1) {
+        const diff = leftParts[index] - rightParts[index];
+        if (diff !== 0)
+            return diff;
+    }
+    return 0;
+}
+function parsePluginVersion(value) {
+    const match = value.match(/^(\d+)\.(\d+)\.(\d+)/);
+    if (!match)
+        return null;
+    return [Number(match[1]), Number(match[2]), Number(match[3])];
 }

@@ -18,32 +18,29 @@ node scripts/preview.mjs
 node scripts/statusline.mjs
 ```
 
-Claude Code 的主 statusLine 需要手动配置。先查看插件安装目录：
+配置 Claude Code 主 statusLine：
 
 ```bash
-claude plugin list --json
+node scripts/setup-statusline.mjs
 ```
 
-找到 `anyrouter-status-monitor@router-vitals` 的 `installPath`，然后把 `command` 指到该目录下的 `scripts/statusline.mjs`：
+配置一次后，后续插件升级不用再改 statusLine 路径。
 
-```json
-"statusLine": {
-  "command": "node \"C:/Users/<you>/.claude/plugins/cache/router-vitals/anyrouter-status-monitor/0.1.10/scripts/statusline.mjs\"",
-  "type": "command"
-}
-```
-
-Linux/macOS 示例：
-
-```json
-"statusLine": {
-  "command": "node \"/home/<you>/.claude/plugins/cache/router-vitals/anyrouter-status-monitor/0.1.10/scripts/statusline.mjs\"",
-  "type": "command"
-}
-```
-
-不能只下载单个 `statusline.mjs`。它依赖 `scripts/lib/` 下的同包文件，需要完整插件目录。如果从仓库克隆运行，也可以指向仓库里的 `plugin/scripts/statusline.mjs`。
+已有其他 statusLine 时，配置命令默认不替换；确认要替换时加 `--force`。
 
 statusLine 大致显示：`Any Router 近 60m 状态: 可用 · 贡献开启 · 今日贡献 12 条`。满额后会提示 `今日已满`。
+
+有新版时会追加 `插件有新版 x.y.z · 运行 /plugin`。命令行更新：
+
+```bash
+claude plugin marketplace update router-vitals
+claude plugin update anyrouter-status-monitor@router-vitals
+```
+
+如果当前 Claude Code 会话正在运行，更新后在会话里执行 `/reload-plugins`。
+
+**建议保持最新版本**。旧版本可能使用过期的上报规则、目标入口或状态判断逻辑，导致本机贡献被跳过，或状态栏显示不准。
+
+如果你信任本仓库，可在 `/plugin` 里进入 `Marketplaces`，选择 `router-vitals`，开启 auto-update。
 
 hooks 和 statusLine 是两条独立路径；statusLine 报错时，Claude Code 会继续跑 hooks。这里不配置定时轮询，近 60m 状态在本地缓存 60 秒。

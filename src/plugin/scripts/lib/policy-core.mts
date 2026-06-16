@@ -92,6 +92,7 @@ export interface RemoteConfig {
   sampleRateSuccess: number;
   sampleRateFailure: number;
   minPluginVersion: string;
+  latestPluginVersion: string;
   statusWindows: readonly StatusWindow[];
 }
 
@@ -104,6 +105,7 @@ export const DEFAULT_REMOTE_CONFIG: RemoteConfig = Object.freeze({
   sampleRateSuccess: 1,
   sampleRateFailure: 1,
   minPluginVersion: PLUGIN_VERSION,
+  latestPluginVersion: PLUGIN_VERSION,
   statusWindows: ["60m", "24h", "7d", "30d"] as const
 });
 
@@ -371,10 +373,17 @@ export function sanitizeRemoteConfig(value: unknown): RemoteConfig {
     sampleRateSuccess: clampRate(config.sampleRateSuccess, DEFAULT_REMOTE_CONFIG.sampleRateSuccess),
     sampleRateFailure: clampRate(config.sampleRateFailure, DEFAULT_REMOTE_CONFIG.sampleRateFailure),
     minPluginVersion: typeof config.minPluginVersion === "string" ? config.minPluginVersion : DEFAULT_REMOTE_CONFIG.minPluginVersion,
+    latestPluginVersion: normalizePluginVersion(config.latestPluginVersion, DEFAULT_REMOTE_CONFIG.latestPluginVersion),
     statusWindows: Array.isArray(config.statusWindows)
       ? config.statusWindows.filter((item): item is StatusWindow => typeof item === "string" && STATUS_WINDOWS.includes(item as StatusWindow))
       : DEFAULT_REMOTE_CONFIG.statusWindows
   };
+}
+
+function normalizePluginVersion(value: unknown, fallback: string): string {
+  if (typeof value !== "string") return fallback;
+  const trimmed = value.trim();
+  return /^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/.test(trimmed) ? trimmed : fallback;
 }
 
 function clampRate(value: unknown, fallback: number): number {

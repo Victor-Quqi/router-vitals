@@ -6,7 +6,7 @@
 
 它不主动探测——单账号反复探测容易触发上游风控、限流甚至封号，而且只代表那一个账号。这里换成：大家正常用 Claude Code，每轮结束后匿名上报这轮成功还是失败，汇总成社区状态。
 
-装上即可做出贡献，平时完全无感——插件只读环境变量判断你连的是不是 Any Router，不碰你发往上游的请求，对 Any Router 不留额外特征。想看状态可以配一下状态栏，或直接打开状态页。
+装上即可做出贡献，平时完全无感——插件只读环境变量判断你连的是不是 Any Router，不碰你发往上游的请求，对 Any Router 不留额外特征。想在 Claude Code 里看状态，按下面配置一次状态栏；也可以直接打开状态页。
 
 状态页：https://router-vitals.pages.dev/
 
@@ -30,9 +30,9 @@ claude plugin install anyrouter-status-monitor@router-vitals
 
 装完插件 hooks 就开始工作了。不想参与设环境变量 `ANYROUTER_STATUS_DISABLED=1` 即可。
 
-### 在状态栏显示状态（可选）
+### 在状态栏显示状态（推荐）
 
-想在 Claude Code 状态栏看到实时状态，要手动配一下 statusLine。
+想在 Claude Code 状态栏看到实时状态，运行一次配置命令即可。
 
 先找到插件装在哪：
 
@@ -40,22 +40,30 @@ claude plugin install anyrouter-status-monitor@router-vitals
 claude plugin list --json
 ```
 
-把 `anyrouter-status-monitor@router-vitals` 的 `installPath` 拿出来，让 statusLine 指向它下面的 `scripts/statusline.mjs`：
+把 `anyrouter-status-monitor@router-vitals` 的 `installPath` 拿出来，运行：
 
-```json
-"statusLine": {
-  "command": "node \"C:/Users/<you>/.claude/plugins/cache/router-vitals/anyrouter-status-monitor/0.1.10/scripts/statusline.mjs\"",
-  "type": "command"
-}
+```bash
+node "<installPath>/scripts/setup-statusline.mjs"
 ```
 
-Linux/macOS 换成对应的绝对路径即可。几个注意点：
+Linux/macOS 换成对应的绝对路径。配置一次后，后续插件升级不用再改 statusLine 路径。
 
-- 要完整插件目录，不能只下一个 `statusline.mjs`——它还会 import 同目录的 `lib/`。
-- 插件升级后版本号目录会变，记得同步改 `command` 里的路径。
-- 从本仓库克隆运行的话，直接指向 `plugin/scripts/statusline.mjs` 亦可。
+已有其他 statusLine 时，配置命令默认不替换；确认要替换时加 `--force`。
 
 配好后状态栏大致长这样：`Any Router 近 60m 状态: 可用 · 贡献开启 · 今日贡献 12 条`；当天上报满额会显示 `今日已满`。
+
+有新版时会追加 `插件有新版 x.y.z · 运行 /plugin`。也可以用命令行手动更新：
+
+```bash
+claude plugin marketplace update router-vitals
+claude plugin update anyrouter-status-monitor@router-vitals
+```
+
+如果当前 Claude Code 会话正在运行，更新后在会话里执行 `/reload-plugins`。
+
+**建议保持最新版本**。旧版本可能使用过期的上报规则、目标入口或状态判断逻辑，导致本机贡献被跳过，或状态栏显示不准。
+
+如果你不想手动更新且信任本仓库，也可以在 `/plugin` 里进入 `Marketplaces`，选择 `router-vitals`，开启 auto-update。
 
 ## 想了解更多
 

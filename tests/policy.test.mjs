@@ -17,11 +17,13 @@ test("remote target hosts are constrained to baked AnyRouter hosts", () => {
     const config = sanitizeRemoteConfig({
         targetBaseUrlHosts: ["anyrouter.top", "evil.example"],
         sampleRateSuccess: 2,
-        sampleRateFailure: -1
+        sampleRateFailure: -1,
+        latestPluginVersion: "9.9.9"
     });
     assert.deepEqual(config.targetBaseUrlHosts, ["anyrouter.top"]);
     assert.equal(config.sampleRateSuccess, 1);
     assert.equal(config.sampleRateFailure, 0);
+    assert.equal(config.latestPluginVersion, "9.9.9");
 });
 test("target host normalization only accepts fixed AnyRouter hosts", () => {
     assert.equal(normalizeTargetHost("ANYROUTER.TOP"), "anyrouter.top");

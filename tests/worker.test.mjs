@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import worker, { handleReport, handleRequest } from "../worker/src/index.mjs";
 import { buildStatusFromRows } from "../worker/src/status.mjs";
-import { SERVER_DAILY_REPORT_HARD_LIMIT, SERVER_DAILY_REPORT_SAMPLE_RATE, SERVER_DAILY_REPORT_SOFT_LIMIT } from "../shared/policy.mjs";
+import { PLUGIN_VERSION, SERVER_DAILY_REPORT_HARD_LIMIT, SERVER_DAILY_REPORT_SAMPLE_RATE, SERVER_DAILY_REPORT_SOFT_LIMIT } from "../shared/policy.mjs";
 test("worker rejects unknown report fields before touching D1", async () => {
     const request = new Request("https://api.example.test/v1/report", {
         method: "POST",
@@ -68,6 +68,7 @@ test("config endpoint exposes fixed AnyRouter hosts", async () => {
     const body = await response.json();
     assert.deepEqual(body.targetBaseUrlHosts, ["anyrouter.top", "a-ocnfniawgw.cn-shanghai.fcapp.run"]);
     assert.equal(body.apiBaseUrl, "https://api.example.test");
+    assert.equal(body.latestPluginVersion, PLUGIN_VERSION);
 });
 test("config endpoint is also available as config.json", async () => {
     const response = await handleRequest(new Request("https://api.example.test/config.json"), {});
