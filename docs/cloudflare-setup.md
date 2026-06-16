@@ -125,7 +125,7 @@ Actions -> Deploy Cloudflare -> Run workflow
 ```text
 api.status.example.com    -> Worker
 status.example.com        -> Pages
-config.status.example.com -> Worker 的 /v1/config，或单独静态 JSON
+config.status.example.com -> Worker 的 /config.json 或 /v1/config，或单独静态 JSON
 ```
 
 如果 Cloudflare 托管你的 DNS：
@@ -146,11 +146,12 @@ https://api.status.example.com
 部署后访问：
 
 ```text
+https://api.status.example.com/config.json
 https://api.status.example.com/v1/config
 https://api.status.example.com/v1/status?window=15m
 ```
 
-`/v1/config` 应该返回 AnyRouter 两个目标 host：
+`/config.json` 和 `/v1/config` 应该返回 Any Router 两个目标 host：
 
 ```text
 anyrouter.top

@@ -14,7 +14,7 @@ pnpm test
 
 ## CD
 
-`.github/workflows/deploy-cloudflare.yml` 会在 `main` push 且改到 `worker/**` 或 `status-page/**` 时运行，也能手动触发。运行时会：
+`.github/workflows/deploy-cloudflare.yml` 会在 `main` push 且改到运行时代码、状态页、Worker、共享策略、依赖或 TypeScript 配置时运行，也能手动触发。运行时会：
 
 1. 运行测试。
 2. 编译 TypeScript。
