@@ -1,6 +1,14 @@
 # Any Router Status Monitor
 
+[English](README.en.md)
+
 Claude Code 插件，把 Any Router 公益站的实际使用结果汇总成社区状态。安装后，每个 Claude Code 用户轮次结束时，插件会根据 hook 结果提交一条精简事件。
+
+这个项目不做单账号主动轮询。单账号持续探测很容易触发上游风控、限流甚至封禁，也会把状态判断变成某个账号的个体情况。这里改用社区用户的真实 Claude Code 轮次做匿名汇总，只看实际使用结果。
+
+感谢 [LINUX DO](https://linux.do/) 社区的支持。
+
+状态页：https://router-vitals.pages.dev/
 
 ## 安装
 
@@ -18,18 +26,44 @@ claude plugin marketplace add Victor-Quqi/router-vitals
 claude plugin install anyrouter-status-monitor@router-vitals
 ```
 
-这两条命令会把 marketplace 和 enabled plugin 写进 Claude Code 配置。如果要使用 statusLine，需要自己加。
+这两条命令会把 marketplace 和 enabled plugin 写进 Claude Code 配置。hooks 会随插件启用；statusLine 是 Claude Code 的全局配置，需要自己加。
 
-statusLine 配置示例：
+先查看插件安装目录：
+
+```bash
+claude plugin list --json
+```
+
+找到 `anyrouter-status-monitor@router-vitals` 的 `installPath`，然后把 `command` 指到该目录下的 `scripts/statusline.mjs`：
 
 ```json
 "statusLine": {
-  "command": "node \"/path/to/router-vitals/plugin/scripts/statusline.mjs\"",
+  "command": "node \"C:/Users/<you>/.claude/plugins/cache/router-vitals/anyrouter-status-monitor/0.1.10/scripts/statusline.mjs\"",
   "type": "command"
 }
 ```
 
-把 `command` 里的路径改成实际的 `plugin/scripts/statusline.mjs` 路径。Windows 路径需要转义反斜杠，或直接使用 `/`。
+Linux/macOS 示例：
+
+```json
+"statusLine": {
+  "command": "node \"/home/<you>/.claude/plugins/cache/router-vitals/anyrouter-status-monitor/0.1.10/scripts/statusline.mjs\"",
+  "type": "command"
+}
+```
+
+statusLine 不能只下载单个 `statusline.mjs`。它会 import 同目录下的 `lib/config.mjs`、`lib/state.mjs`、`lib/policy.mjs` 等文件，需要完整插件目录。如果是从本仓库克隆运行，也可以指向仓库里的 `plugin/scripts/statusline.mjs`，例如：
+
+```json
+"statusLine": {
+  "command": "node \"D:/vc-proj/router-vitals/plugin/scripts/statusline.mjs\"",
+  "type": "command"
+}
+```
+
+插件更新后，Claude Code cache 里的版本目录可能变化；如果 statusLine 使用的是 cache 路径，更新插件后同步改一下 `command`。
+
+statusLine 大致显示：`Any Router 近 60m 状态: 可用 · 贡献开启 · 今日贡献 12 条`。满额后会提示 `今日已满`。
 
 ## 上报规则
 
@@ -53,7 +87,7 @@ Any Router 入口：
 
 提交字段：成功/失败、错误分类、HTTP 状态码、脱敏截断后的错误摘要、模型类别、耗时区间、分钟级时间桶、插件版本、匿名 ID、采样率、目标命中标记和端点类别。
 
-这些内容留在本机：实际 URL、prompt、response、token、cookie、key、账号、`session_id`、文件路径、完整日志、精确时间戳。
+这些内容不会提交：实际 URL、prompt、response、token、cookie、key、账号、`session_id`、文件路径、完整日志、精确时间戳。
 
 设置环境变量 `ANYROUTER_STATUS_DISABLED=1` 会在本机停用上报。
 
