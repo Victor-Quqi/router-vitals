@@ -5,6 +5,23 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Any Router 状态</title>
     <link rel="icon" href="./favicon.svg" type="image/svg+xml">
+    <script>
+      (() => {
+        const key = "router-vitals-theme";
+        try {
+          const stored = localStorage.getItem(key);
+          const mode = stored === "light" || stored === "dark" ? stored : "system";
+          const resolved = mode === "system"
+            ? (matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark")
+            : mode;
+          document.documentElement.dataset.theme = resolved;
+          document.documentElement.dataset.themeMode = mode;
+        } catch {
+          document.documentElement.dataset.theme = "dark";
+          document.documentElement.dataset.themeMode = "system";
+        }
+      })();
+    </script>
     <link rel="stylesheet" href="./styles.css">
   </head>
   <body>
@@ -27,6 +44,19 @@
               <path d="M12 2C6.48 2 2 6.59 2 12.25c0 4.53 2.87 8.37 6.84 9.73.5.1.68-.22.68-.5v-1.91c-2.78.62-3.37-1.22-3.37-1.22-.45-1.19-1.11-1.5-1.11-1.5-.91-.64.07-.63.07-.63 1 .07 1.53 1.06 1.53 1.06.9 1.57 2.36 1.12 2.93.86.09-.67.35-1.12.63-1.38-2.22-.26-4.55-1.14-4.55-5.07 0-1.12.39-2.03 1.03-2.75-.1-.26-.45-1.31.1-2.72 0 0 .84-.28 2.75 1.05A9.3 9.3 0 0 1 12 6.92c.85 0 1.7.12 2.5.35 1.9-1.33 2.74-1.05 2.74-1.05.55 1.41.2 2.46.1 2.72.64.72 1.03 1.63 1.03 2.75 0 3.94-2.34 4.8-4.56 5.06.36.32.68.95.68 1.92v2.85c0 .28.18.6.69.5A10.17 10.17 0 0 0 22 12.25C22 6.59 17.52 2 12 2Z" />
             </svg>
           </a>
+          <button class="themeButton" id="themeButton" type="button" aria-label="主题：跟随系统">
+            <svg class="themeIcon sunIcon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+              <path d="M12 4V2M12 22v-2M4 12H2M22 12h-2M5.64 5.64 4.22 4.22M19.78 19.78l-1.42-1.42M18.36 5.64l1.42-1.42M4.22 19.78l1.42-1.42" />
+              <circle cx="12" cy="12" r="4.2" />
+            </svg>
+            <svg class="themeIcon moonIcon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+              <path d="M20.5 14.5A7.6 7.6 0 0 1 9.5 3.5 8.5 8.5 0 1 0 20.5 14.5Z" />
+            </svg>
+            <svg class="systemBadge" viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+              <rect x="3" y="3.5" width="10" height="7" rx="1.4" />
+              <path d="M6.5 13h3M8 10.5V13" />
+            </svg>
+          </button>
           <div class="endpointTabs" role="tablist" aria-label="端点">
             <button class="active" data-target-host="all" type="button">全部端点</button>
             <button data-target-host="main" type="button">主站直连</button>
@@ -114,7 +144,7 @@
       </section>
 
       <footer>
-        数据来自自愿安装插件的 Claude Code 用户；页面只展示聚合后的轮次观测结果，不代表官方 SLA 或单次 API 请求指标。
+        数据来自自愿<a href="https://github.com/Victor-Quqi/router-vitals" target="_blank" rel="noreferrer">安装插件</a>的 Claude Code 用户；页面只展示聚合后的轮次观测结果，不代表官方 SLA 或单次 API 请求指标。
       </footer>
     </main>
     <script src="./config.js" type="module"></script>

@@ -51,6 +51,13 @@ let latestStatusData = null;
 const openErrorKeys = new Set();
 const autoRefreshWindows = new Set(["60m", "24h"]);
 const autoRefreshMs = 30000;
+const themeStorageKey = "router-vitals-theme";
+const themeModes = ["system", "light", "dark"];
+const themeLabels = {
+    system: "主题：跟随系统",
+    light: "主题：浅色",
+    dark: "主题：深色"
+};
 let autoRefreshTimer;
 let autoRefreshEnabled = false;
 let loadSequence = 0;
@@ -60,11 +67,25 @@ const targetHostParams = {
     optimized: "a-ocnfniawgw.cn-shanghai.fcapp.run"
 };
 const refreshButton = getElement("refreshButton");
+const themeButton = getElement("themeButton");
 const autoRefreshControl = getElement("autoRefreshControl");
 const autoRefreshToggle = getElement("autoRefreshToggle");
+const systemThemeQuery = window.matchMedia("(prefers-color-scheme: light)");
+let activeThemeMode = readThemeMode();
 const trendTooltip = document.createElement("div");
 trendTooltip.className = "trendTooltip";
 document.body.append(trendTooltip);
+applyTheme(activeThemeMode);
+themeButton.addEventListener("click", () => {
+    const index = themeModes.indexOf(activeThemeMode);
+    activeThemeMode = themeModes[(index + 1) % themeModes.length] ?? "system";
+    saveThemeMode(activeThemeMode);
+    applyTheme(activeThemeMode);
+});
+systemThemeQuery.addEventListener("change", () => {
+    if (activeThemeMode === "system")
+        applyTheme(activeThemeMode);
+});
 for (const element of document.querySelectorAll("[data-window]")) {
     const button = element;
     button.addEventListener("click", () => {
@@ -159,6 +180,36 @@ function playManualRefreshSpin() {
         refreshButton.classList.remove("manualSpin");
         manualRefreshTimer = undefined;
     }, 700);
+}
+function readThemeMode() {
+    try {
+        const value = localStorage.getItem(themeStorageKey);
+        if (value === "light" || value === "dark")
+            return value;
+    }
+    catch {
+        return "system";
+    }
+    return "system";
+}
+function saveThemeMode(mode) {
+    try {
+        if (mode === "system")
+            localStorage.removeItem(themeStorageKey);
+        else
+            localStorage.setItem(themeStorageKey, mode);
+    }
+    catch {
+        return;
+    }
+}
+function applyTheme(mode) {
+    const resolved = mode === "system" ? (systemThemeQuery.matches ? "light" : "dark") : mode;
+    document.documentElement.dataset.theme = resolved;
+    document.documentElement.dataset.themeMode = mode;
+    themeButton.dataset.themeMode = mode;
+    themeButton.setAttribute("aria-label", themeLabels[mode]);
+    themeButton.title = themeLabels[mode];
 }
 function render(data) {
     latestStatusData = data;

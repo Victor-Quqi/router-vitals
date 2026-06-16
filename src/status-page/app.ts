@@ -5,6 +5,7 @@ type ModelClass = "haiku" | "sonnet" | "opus" | "unknown";
 type BucketState = "empty" | "success" | "mixed" | "failure";
 type RefreshOptions = { bypassCache?: boolean };
 type TargetHostFilter = "all" | "main" | "optimized";
+type ThemeMode = "system" | "light" | "dark";
 
 interface TimelineMeta {
   bucketMinutes: number;
@@ -122,6 +123,13 @@ let latestStatusData: StatusData | null = null;
 const openErrorKeys = new Set<string>();
 const autoRefreshWindows = new Set(["60m", "24h"]);
 const autoRefreshMs = 30000;
+const themeStorageKey = "router-vitals-theme";
+const themeModes: readonly ThemeMode[] = ["system", "light", "dark"];
+const themeLabels: Record<ThemeMode, string> = {
+  system: "主题：跟随系统",
+  light: "主题：浅色",
+  dark: "主题：深色"
+};
 let autoRefreshTimer: number | undefined;
 let autoRefreshEnabled = false;
 let loadSequence = 0;
@@ -133,11 +141,27 @@ const targetHostParams: Record<Exclude<TargetHostFilter, "all">, string> = {
 };
 
 const refreshButton = getElement("refreshButton") as HTMLButtonElement;
+const themeButton = getElement("themeButton") as HTMLButtonElement;
 const autoRefreshControl = getElement("autoRefreshControl") as HTMLLabelElement;
 const autoRefreshToggle = getElement("autoRefreshToggle") as HTMLInputElement;
+const systemThemeQuery = window.matchMedia("(prefers-color-scheme: light)");
+let activeThemeMode = readThemeMode();
 const trendTooltip = document.createElement("div");
 trendTooltip.className = "trendTooltip";
 document.body.append(trendTooltip);
+
+applyTheme(activeThemeMode);
+
+themeButton.addEventListener("click", () => {
+  const index = themeModes.indexOf(activeThemeMode);
+  activeThemeMode = themeModes[(index + 1) % themeModes.length] ?? "system";
+  saveThemeMode(activeThemeMode);
+  applyTheme(activeThemeMode);
+});
+
+systemThemeQuery.addEventListener("change", () => {
+  if (activeThemeMode === "system") applyTheme(activeThemeMode);
+});
 
 for (const element of document.querySelectorAll("[data-window]")) {
   const button = element as HTMLButtonElement;
@@ -232,6 +256,34 @@ function playManualRefreshSpin(): void {
     refreshButton.classList.remove("manualSpin");
     manualRefreshTimer = undefined;
   }, 700);
+}
+
+function readThemeMode(): ThemeMode {
+  try {
+    const value = localStorage.getItem(themeStorageKey);
+    if (value === "light" || value === "dark") return value;
+  } catch {
+    return "system";
+  }
+  return "system";
+}
+
+function saveThemeMode(mode: ThemeMode): void {
+  try {
+    if (mode === "system") localStorage.removeItem(themeStorageKey);
+    else localStorage.setItem(themeStorageKey, mode);
+  } catch {
+    return;
+  }
+}
+
+function applyTheme(mode: ThemeMode): void {
+  const resolved = mode === "system" ? (systemThemeQuery.matches ? "light" : "dark") : mode;
+  document.documentElement.dataset.theme = resolved;
+  document.documentElement.dataset.themeMode = mode;
+  themeButton.dataset.themeMode = mode;
+  themeButton.setAttribute("aria-label", themeLabels[mode]);
+  themeButton.title = themeLabels[mode];
 }
 
 function render(data: StatusData): void {

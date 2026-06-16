@@ -12,7 +12,47 @@
   --blue: #2f81f7;
   --empty: #30363d;
   --ink: #f0f6fc;
+  --control-bg: #0d1117;
+  --control-hover: rgb(139 148 158 / 9%);
+  --control-border: rgb(139 148 158 / 18%);
+  --active-bg: #1f6feb;
+  --active-text: #fff;
+  --tooltip-bg: #0b0d12;
+  --metric-bg: rgb(13 17 23 / 50%);
+  --focus-ring: rgb(47 129 247 / 32%);
+  --link-hover: #58a6ff;
+  --mark-bg: #fff8f0;
+  --mark-border: #ffd9cf;
+  --mark-color: #073f4a;
   --control-width: 520px;
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
+  --bg: #f6f8fa;
+  --text: #24292f;
+  --muted: #57606a;
+  --line: #d0d7de;
+  --panel: #ffffff;
+  --panel-2: #f6f8fa;
+  --green: #1a7f37;
+  --yellow: #c88a00;
+  --red: #e64263;
+  --blue: #0969da;
+  --empty: #d0d7de;
+  --ink: #24292f;
+  --control-bg: #f6f8fa;
+  --control-hover: rgb(9 105 218 / 8%);
+  --control-border: rgb(31 35 40 / 14%);
+  --active-bg: #0969da;
+  --active-text: #fff;
+  --tooltip-bg: #ffffff;
+  --metric-bg: rgb(246 248 250 / 76%);
+  --focus-ring: rgb(9 105 218 / 28%);
+  --link-hover: #0969da;
+  --mark-bg: #fff8f0;
+  --mark-border: #ffdbc2;
+  --mark-color: #073f4a;
 }
 
 * {
@@ -90,8 +130,71 @@ body {
 }
 
 .githubLink:focus-visible {
-  box-shadow: 0 0 0 3px rgb(47 129 247 / 32%);
+  box-shadow: 0 0 0 3px var(--focus-ring);
   border-radius: 50%;
+}
+
+.themeButton {
+  position: relative;
+  display: inline-grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.themeButton:hover,
+.themeButton:focus-visible {
+  color: var(--text);
+  outline: none;
+}
+
+.themeButton:focus-visible {
+  box-shadow: 0 0 0 3px var(--focus-ring);
+}
+
+.themeIcon {
+  display: none;
+  width: 20px;
+  height: 20px;
+}
+
+.themeIcon path,
+.themeIcon circle,
+.systemBadge rect,
+.systemBadge path {
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 2;
+}
+
+:root[data-theme="light"] .sunIcon,
+:root[data-theme="dark"] .moonIcon {
+  display: block;
+}
+
+.systemBadge {
+  display: none;
+  position: absolute;
+  right: 1px;
+  bottom: 1px;
+  width: 11px;
+  height: 11px;
+  padding: 1px;
+  border-radius: 4px;
+  background: var(--panel);
+  color: var(--muted);
+}
+
+:root[data-theme-mode="system"] .systemBadge {
+  display: block;
 }
 
 .endpointTabs {
@@ -101,9 +204,9 @@ body {
   width: 248px;
   max-width: min(100%, 248px);
   padding: 3px;
-  border: 1px solid rgb(139 148 158 / 18%);
+  border: 1px solid var(--control-border);
   border-radius: 999px;
-  background: #0d1117;
+  background: var(--control-bg);
   box-shadow: inset 0 1px 0 rgb(255 255 255 / 4%);
 }
 
@@ -121,13 +224,13 @@ body {
 }
 
 .endpointTabs button.active {
-  background: #1f6feb;
-  color: #fff;
+  background: var(--active-bg);
+  color: var(--active-text);
   box-shadow: 0 8px 20px rgb(47 129 247 / 22%), inset 0 1px 0 rgb(255 255 255 / 18%);
 }
 
 .endpointTabs button:hover:not(.active) {
-  background: rgb(139 148 158 / 9%);
+  background: var(--control-hover);
   color: var(--text);
 }
 
@@ -141,16 +244,16 @@ body {
   place-items: center;
   width: 44px;
   height: 44px;
-  border: 1px solid #ffd9cf;
+  border: 1px solid var(--mark-border);
   border-radius: 14px;
-  background: #fff8f0;
+  background: var(--mark-bg);
   box-shadow: 0 10px 24px rgb(255 123 88 / 16%);
 }
 
 .mark svg {
   width: 31px;
   height: 31px;
-  color: #073f4a;
+  color: var(--mark-color);
 }
 
 .mark path {
@@ -236,9 +339,9 @@ article span {
   gap: 3px;
   width: 100%;
   padding: 3px;
-  border: 1px solid rgb(139 148 158 / 18%);
+  border: 1px solid var(--control-border);
   border-radius: 8px;
-  background: #0d1117;
+  background: var(--control-bg);
   box-shadow: inset 0 1px 0 rgb(255 255 255 / 4%);
 }
 
@@ -268,14 +371,14 @@ article span {
 
 .windowTabs button.active,
 .modelTabs button.active {
-  background: #1f6feb;
-  color: #fff;
+  background: var(--active-bg);
+  color: var(--active-text);
   box-shadow: 0 8px 20px rgb(47 129 247 / 22%), inset 0 1px 0 rgb(255 255 255 / 18%);
 }
 
 .windowTabs button:hover:not(.active),
 .modelTabs button:hover:not(.active) {
-  background: rgb(139 148 158 / 9%);
+  background: var(--control-hover);
   color: var(--text);
 }
 
@@ -296,9 +399,9 @@ article span {
   justify-content: center;
   min-height: 32px;
   padding: 0 9px;
-  border: 1px solid rgb(139 148 158 / 18%);
+  border: 1px solid var(--control-border);
   border-radius: 999px;
-  background: #0d1117;
+  background: var(--control-bg);
   color: var(--muted);
   font-size: 12px;
   cursor: pointer;
@@ -322,25 +425,25 @@ article span {
 
 .autoRefresh:has(input:checked) {
   border-color: rgb(47 129 247 / 42%);
-  background: #1f6feb;
-  color: #fff;
+  background: var(--active-bg);
+  color: var(--active-text);
   box-shadow: 0 8px 20px rgb(47 129 247 / 22%), inset 0 1px 0 rgb(255 255 255 / 18%);
 }
 
 .autoRefresh input:checked ~ .switchText {
-  color: #fff;
+  color: var(--active-text);
 }
 
 .autoRefresh:hover,
 .autoRefresh:focus-within {
-  background: rgb(139 148 158 / 9%);
+  background: var(--control-hover);
   color: var(--text);
 }
 
 .autoRefresh:has(input:checked):hover,
 .autoRefresh:has(input:checked):focus-within {
-  background: #1f6feb;
-  color: #fff;
+  background: var(--active-bg);
+  color: var(--active-text);
 }
 
 .refreshButton {
@@ -349,9 +452,9 @@ article span {
   width: 32px;
   height: 32px;
   padding: 0;
-  border: 1px solid rgb(139 148 158 / 18%);
+  border: 1px solid var(--control-border);
   border-radius: 999px;
-  background: #0d1117;
+  background: var(--control-bg);
   color: var(--text);
   cursor: pointer;
   transition: border-color 140ms ease, color 140ms ease, background 140ms ease, transform 140ms ease;
@@ -374,7 +477,7 @@ article span {
 .refreshButton:hover,
 .refreshButton:focus-visible {
   background: rgb(47 129 247 / 9%);
-  color: #58a6ff;
+  color: var(--link-hover);
   outline: 0;
 }
 
@@ -386,7 +489,7 @@ article span {
 .refreshButton.spinning {
   border-color: rgb(47 129 247 / 42%);
   background: rgb(47 129 247 / 9%);
-  color: #58a6ff;
+  color: var(--link-hover);
 }
 
 .refreshButton.manualSpin svg {
@@ -470,7 +573,7 @@ article em {
   padding: 9px 10px;
   border: 1px solid var(--line);
   border-radius: 6px;
-  background: #0b0d12;
+  background: var(--tooltip-bg);
   color: var(--text);
   content: attr(data-tip);
   font-weight: 400;
@@ -695,12 +798,22 @@ article em {
 }
 
 .trendBlock {
+  position: relative;
   display: block;
   height: 28px;
   min-width: 8px;
   border-radius: 6px;
   background: var(--empty);
   box-shadow: inset 0 0 0 1px rgb(255 255 255 / 4%);
+  transform-origin: center;
+  transition: transform 140ms ease, box-shadow 140ms ease;
+}
+
+.trendBlock:hover,
+.trendBlock:focus-visible {
+  z-index: 1;
+  box-shadow: 0 8px 18px rgb(0 0 0 / 24%), inset 0 0 0 1px rgb(255 255 255 / 12%);
+  transform: scale(1.08);
 }
 
 .trendBlock.success {
@@ -720,13 +833,26 @@ article em {
   outline-offset: 3px;
 }
 
+@media (prefers-reduced-motion: reduce) {
+  .trendBlock {
+    transition: none;
+  }
+
+  .trendBlock:hover,
+  .trendBlock:focus-visible {
+    transform: none;
+  }
+}
+
 .trendTooltip {
   position: fixed;
+  left: 50%;
+  top: 0;
   max-width: min(300px, calc(100vw - 24px));
   padding: 9px 10px;
   border: 1px solid var(--line);
   border-radius: 8px;
-  background: #0b0d12;
+  background: var(--tooltip-bg);
   color: var(--text);
   font-size: 12px;
   line-height: 1.5;
@@ -736,11 +862,13 @@ article em {
   pointer-events: none;
   transform: translate(-50%, -100%) translateY(-10px);
   transition: opacity 100ms ease;
+  visibility: hidden;
   z-index: 30;
 }
 
 .trendTooltip.visible {
   opacity: 1;
+  visibility: visible;
 }
 
 .emptyTrend {
@@ -751,6 +879,17 @@ article em {
 
 footer {
   padding: 16px 2px 0;
+}
+
+footer a {
+  color: var(--text);
+  text-decoration-color: rgb(139 148 158 / 48%);
+  text-underline-offset: 3px;
+}
+
+footer a:hover,
+footer a:focus-visible {
+  color: var(--link-hover);
 }
 
 .available {
@@ -770,6 +909,11 @@ footer {
 }
 
 @media (max-width: 780px) {
+  .shell {
+    width: min(100% - 24px, 1180px);
+    padding: 14px 0 28px;
+  }
+
   .topbar,
   .summary,
   .panelHeader {
@@ -777,12 +921,100 @@ footer {
     flex-direction: column;
   }
 
+  .topbar {
+    gap: 14px;
+    padding: 16px;
+  }
+
+  .brand {
+    min-width: 0;
+  }
+
+  .mark {
+    width: 38px;
+    height: 38px;
+    border-radius: 12px;
+  }
+
+  .mark svg {
+    width: 27px;
+    height: 27px;
+  }
+
+  h1 {
+    font-size: 18px;
+  }
+
+  .topActions {
+    display: grid;
+    grid-template-columns: auto auto 1fr auto;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+  }
+
+  .githubLink {
+    width: 32px;
+    height: 32px;
+    order: 2;
+  }
+
+  .themeButton {
+    width: 32px;
+    height: 32px;
+    order: 2;
+  }
+
+  .endpointTabs {
+    grid-column: 1 / -1;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    width: 100%;
+    max-width: none;
+    order: 1;
+  }
+
+  .autoRefresh {
+    order: 2;
+    justify-self: start;
+  }
+
+  .refreshButton {
+    order: 2;
+  }
+
   .summary {
     grid-template-columns: 1fr;
+    gap: 16px;
+    padding: 18px 16px;
+  }
+
+  .summary > *,
+  .summaryControls {
+    min-width: 0;
+    width: 100%;
   }
 
   .state {
-    font-size: 36px;
+    font-size: 34px;
+  }
+
+  .stateDetail {
+    font-size: 14px;
+  }
+
+  .tooltip[data-tip]::after {
+    position: fixed;
+    left: 12px;
+    right: 12px;
+    bottom: 14px;
+    width: auto;
+    max-width: none;
+    transform: translateY(6px);
+  }
+
+  .tooltip[data-tip]:hover::after,
+  .tooltip[data-tip]:focus-visible::after {
+    transform: translateY(0);
   }
 
   .windowTabs {
@@ -795,26 +1027,36 @@ footer {
 
   .autoRefresh,
   .refreshButton {
-    border: 1px solid rgb(139 148 158 / 18%);
-  }
-
-  .topActions,
-  .refreshControls {
-    justify-content: flex-start;
-    text-align: left;
-  }
-
-  .endpointTabs {
-    width: min(100%, 248px);
+    border: 1px solid var(--control-border);
   }
 
   .metrics {
-    grid-template-columns: repeat(2, 1fr);
+    grid-template-columns: 1fr;
   }
 
   article {
+    min-height: auto;
+    padding: 16px;
     border-right: 0;
     border-top: 1px solid var(--line);
+  }
+
+  article:first-child {
+    border-top: 0;
+  }
+
+  article strong {
+    margin-top: 8px;
+    font-size: 24px;
+  }
+
+  .panel {
+    margin-top: 14px;
+    padding: 16px;
+  }
+
+  .panelHeader {
+    gap: 10px;
   }
 
   .errorSummary {
@@ -826,7 +1068,7 @@ footer {
   }
 
   .errorSummary .bar,
-  .errorSummary > span {
+  .errorSummary > span:not(.disclosureIcon) {
     grid-column: 1 / -1;
   }
 
@@ -836,12 +1078,64 @@ footer {
 
   .modelRow {
     grid-template-columns: 1fr 1fr 1fr;
-    gap: 8px 12px;
+    gap: 8px;
     padding: 12px 0;
     border-top: 1px solid var(--line);
   }
 
+  .modelRow:first-child {
+    border-top: 0;
+  }
+
+  .modelHead + .modelRow {
+    border-top: 0;
+  }
+
+  .modelRow strong {
+    grid-column: 1 / -1;
+  }
+
+  .modelRow:not(.modelHead) > span {
+    min-width: 0;
+    padding: 8px;
+    border: 1px solid rgb(139 148 158 / 14%);
+    border-radius: 6px;
+    background: var(--metric-bg);
+    color: var(--text);
+    font-size: 13px;
+  }
+
+  .modelRow:not(.modelHead) > span::before {
+    display: block;
+    margin-bottom: 3px;
+    color: var(--muted);
+    font-size: 11px;
+    line-height: 1.2;
+  }
+
+  .modelRow:not(.modelHead) > span:nth-of-type(1)::before {
+    content: "可用率";
+  }
+
+  .modelRow:not(.modelHead) > span:nth-of-type(2)::before {
+    content: "轮次";
+  }
+
+  .modelRow:not(.modelHead) > span:nth-of-type(3)::before {
+    content: "失败";
+  }
+
   .trendStrip {
     grid-column: 1 / -1;
+    grid-template-columns: repeat(var(--bucket-count), minmax(12px, 1fr));
+    gap: 3px;
+    min-width: 0;
+    overflow-x: auto;
+    padding: 3px 2px 8px;
+    scrollbar-width: thin;
+  }
+
+  .trendBlock {
+    height: 24px;
   }
 }
