@@ -1,12 +1,14 @@
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
-import { createAnonymousId, getTodayKey, type ModelClass, type ReportPayload } from "./policy.mjs";
+import { LOCAL_DAILY_REPORT_LIMIT, MODEL_CLASSES, createAnonymousId, getTodayKey, type ModelClass, type ReportPayload } from "./policy.mjs";
 
 const STATE_VERSION = 1;
 const STATE_DIR_NAME = "anyrouter-status-monitor";
 const STATE_FILE_NAME = "state.json";
 const STATUS_CACHE_FILE_NAME = "status-cache.json";
+const CONTRIBUTION_RETENTION_DAYS = 120;
+const TURN_STATE_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
 
 export interface AnonymousState {
   day: string;
@@ -107,14 +109,19 @@ export function getTodayContributions(state: PluginState, now = new Date()): num
   return state.contributions[getTodayKey(now)] ?? 0;
 }
 
-function normalizeState(value: unknown): PluginState {
+export function hasReachedDailyReportLimit(state: PluginState, now = new Date()): boolean {
+  return getTodayContributions(state, now) >= LOCAL_DAILY_REPORT_LIMIT;
+}
+
+function normalizeState(value: unknown, now = new Date()): PluginState {
   const record = isRecord(value) ? value : {};
+  const nowMs = now.getTime();
   return {
     version: STATE_VERSION,
     anonymous: normalizeAnonymous(record.anonymous),
-    pending: normalizeTurnMap(record.pending),
-    sessions: normalizeTurnMap(record.sessions),
-    contributions: normalizeContributions(record.contributions),
+    pending: normalizeTurnMap(record.pending, nowMs),
+    sessions: normalizeTurnMap(record.sessions, nowMs),
+    contributions: normalizeContributions(record.contributions, now),
     lastPayload: isRecord(record.lastPayload) ? record.lastPayload as unknown as ReportPayload : null,
     lastReportAt: typeof record.lastReportAt === "string" ? record.lastReportAt : null
   };
@@ -127,18 +134,55 @@ function normalizeAnonymous(value: unknown): AnonymousState | null {
   return { day: record.day, id: record.id };
 }
 
-function normalizeTurnMap(value: unknown): Record<string, TurnState> {
+function normalizeTurnMap(value: unknown, nowMs: number): Record<string, TurnState> {
   if (!value || typeof value !== "object" || Array.isArray(value)) return {};
-  return { ...(value as Record<string, TurnState>) };
+  const result: Record<string, TurnState> = {};
+  const cutoffMs = nowMs - TURN_STATE_RETENTION_MS;
+  for (const [key, item] of Object.entries(value)) {
+    const turn = normalizeTurnState(item);
+    if (!turn) continue;
+    const updatedAtMs = getTurnUpdatedAtMs(turn);
+    if (updatedAtMs === null || updatedAtMs < cutoffMs) continue;
+    result[key] = turn;
+  }
+  return result;
 }
 
-function normalizeContributions(value: unknown): Record<string, number> {
+function normalizeTurnState(value: unknown): TurnState | null {
+  if (!isRecord(value)) return null;
+  const result: TurnState = {};
+  if (typeof value.startedAtMs === "number" && Number.isFinite(value.startedAtMs)) result.startedAtMs = value.startedAtMs;
+  if (typeof value.updatedAtMs === "number" && Number.isFinite(value.updatedAtMs)) result.updatedAtMs = value.updatedAtMs;
+  if (typeof value.targetMatched === "boolean") result.targetMatched = value.targetMatched;
+  if (typeof value.modelClass === "string" && MODEL_CLASSES.includes(value.modelClass as ModelClass)) {
+    result.modelClass = value.modelClass as ModelClass;
+  }
+  return Object.keys(result).length > 0 ? result : null;
+}
+
+function getTurnUpdatedAtMs(turn: TurnState): number | null {
+  const values = [turn.updatedAtMs, turn.startedAtMs].filter((value): value is number => typeof value === "number" && Number.isFinite(value));
+  return values.length > 0 ? Math.max(...values) : null;
+}
+
+function normalizeContributions(value: unknown, now: Date): Record<string, number> {
   if (!value || typeof value !== "object" || Array.isArray(value)) return {};
   const result: Record<string, number> = {};
+  const cutoffKey = getRetentionCutoffKey(now);
   for (const [key, count] of Object.entries(value)) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(key) || key < cutoffKey) continue;
     if (typeof count === "number" && Number.isFinite(count)) result[key] = count;
   }
   return result;
+}
+
+function getRetentionCutoffKey(now: Date): string {
+  const cutoffMs = Date.UTC(
+    now.getUTCFullYear(),
+    now.getUTCMonth(),
+    now.getUTCDate() - CONTRIBUTION_RETENTION_DAYS + 1
+  );
+  return new Date(cutoffMs).toISOString().slice(0, 10);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

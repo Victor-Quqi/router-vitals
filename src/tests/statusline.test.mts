@@ -6,6 +6,7 @@ import { createServer, type Server, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
+import { LOCAL_DAILY_REPORT_LIMIT } from "../plugin/scripts/lib/policy.mjs";
 
 const statuslinePath = resolve("plugin/scripts/statusline.mjs");
 
@@ -28,6 +29,30 @@ test("statusLine prints today's local contribution count", async () => {
       ANTHROPIC_BASE_URL: "https://api.anthropic.com"
     });
     assert.match(output, /今日贡献 2 条/);
+  } finally {
+    await rm(stateDir, { recursive: true, force: true });
+  }
+});
+
+test("statusLine shows a full daily contribution hint", async () => {
+  const stateDir = await mkdtemp(join(tmpdir(), "router-vitals-statusline-"));
+  const statePath = join(stateDir, "anyrouter-status-monitor", "state.json");
+  const today = new Date().toISOString().slice(0, 10);
+
+  await mkdir(dirname(statePath), { recursive: true });
+  await writeFile(statePath, JSON.stringify({
+    version: 1,
+    contributions: { [today]: LOCAL_DAILY_REPORT_LIMIT }
+  }), "utf8");
+
+  try {
+    const output = await runStatusLine({
+      ...process.env,
+      ANYROUTER_STATUS_DISABLED: "1",
+      ANYROUTER_STATUS_STATE_DIR: stateDir,
+      ANTHROPIC_BASE_URL: "https://api.anthropic.com"
+    });
+    assert.match(output, new RegExp(`今日贡献 ${LOCAL_DAILY_REPORT_LIMIT}/${LOCAL_DAILY_REPORT_LIMIT} 条 · 今日已满`));
   } finally {
     await rm(stateDir, { recursive: true, force: true });
   }

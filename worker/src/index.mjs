@@ -1,4 +1,4 @@
-import { DEFAULT_REMOTE_CONFIG, ERROR_TYPES, LATENCY_BUCKETS, normalizeTargetHost, validateReportPayload } from "../../shared/policy.mjs";
+import { DEFAULT_REMOTE_CONFIG, ERROR_TYPES, LATENCY_BUCKETS, SERVER_DAILY_REPORT_HARD_LIMIT, SERVER_DAILY_REPORT_SAMPLE_RATE, SERVER_DAILY_REPORT_SOFT_LIMIT, normalizeTargetHost, validateReportPayload } from "../../shared/policy.mjs";
 import { buildStatusFromRows, getStatusWindowSpec, parseStatusWindow } from "./status.mjs";
 const JSON_HEADERS = {
     "content-type": "application/json; charset=utf-8",
@@ -24,6 +24,7 @@ const ERROR_COLUMNS = Object.freeze({
     unknown: "err_unknown"
 });
 const isolateRateLimit = new Map();
+const dailyReportLimitCache = new Map();
 const statusResponseCache = new Map();
 const MAX_RETENTION_DAYS = 90;
 const MAX_RETENTION_HOURS = MAX_RETENTION_DAYS * 24;
@@ -76,6 +77,10 @@ export async function handleReport(request, env) {
     if (!targetHost)
         return json({ error: "invalid_payload", details: ["invalid targetHost"] }, 400);
     const nowMs = Date.now();
+    const dailyDecision = await reserveDailyReportSlot(env.DB, payload.anonymousId, nowMs);
+    if (dailyDecision === "drop" || (dailyDecision === "sample" && Math.random() >= SERVER_DAILY_REPORT_SAMPLE_RATE)) {
+        return new Response(null, { status: 204, headers: JSON_HEADERS });
+    }
     const minute = Math.floor(nowMs / 60000);
     await insertRawSample(env.DB, payload, nowMs, minute, targetHost);
     await incrementTargetAggregate(env.DB, payload, nowMs, minute, targetHost);
@@ -300,6 +305,8 @@ async function purgeExpiredData(env) {
     const nowMs = Date.now();
     const retentionHours = parseBoundedRetention(env.RAW_SAMPLE_RETENTION_HOURS, 24, 1, MAX_RETENTION_HOURS);
     const cutoff = nowMs - retentionHours * 60 * 60 * 1000;
+    const retentionCutoff = nowMs - MAX_RETENTION_DAYS * 24 * 60 * 60 * 1000;
+    await env.DB.prepare("DELETE FROM daily_report_counts WHERE updated_at < ?").bind(retentionCutoff).run();
     await env.DB.prepare("DELETE FROM samples_raw WHERE created_at < ?").bind(cutoff).run();
     const detailRetentionDays = parseBoundedRetention(env.ERROR_DETAIL_RETENTION_DAYS, 31, 1, MAX_RETENTION_DAYS);
     const cutoffMinute = Math.floor((nowMs - detailRetentionDays * 24 * 60 * 60 * 1000) / 60000);
@@ -314,6 +321,33 @@ function parseBoundedRetention(value, fallback, min, max) {
     if (!Number.isFinite(parsed))
         return fallback;
     return Math.min(max, Math.max(min, parsed));
+}
+async function reserveDailyReportSlot(db, anonymousId, nowMs) {
+    const now = new Date(nowMs);
+    const day = now.toISOString().slice(0, 10);
+    const resetAt = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1);
+    const cacheKey = `${day}:${anonymousId}`;
+    const cached = dailyReportLimitCache.get(cacheKey);
+    if (cached?.resetAt && cached.resetAt <= nowMs)
+        dailyReportLimitCache.delete(cacheKey);
+    else if (cached?.blocked)
+        return "drop";
+    const result = await db.prepare(`
+    INSERT INTO daily_report_counts (day, anonymous_id, count, updated_at)
+    VALUES (?, ?, 1, ?)
+    ON CONFLICT(day, anonymous_id) DO UPDATE SET
+      count = count + 1,
+      updated_at = ?
+    RETURNING count
+  `).bind(day, anonymousId, nowMs, nowMs).all();
+    const count = Number(result.results?.[0]?.count ?? 1);
+    const blocked = count > SERVER_DAILY_REPORT_HARD_LIMIT;
+    dailyReportLimitCache.set(cacheKey, { blocked, resetAt });
+    if (blocked)
+        return "drop";
+    if (count > SERVER_DAILY_REPORT_SOFT_LIMIT)
+        return "sample";
+    return "accept";
 }
 function allowRate(key, limit, windowMs) {
     const now = Date.now();

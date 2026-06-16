@@ -20,6 +20,7 @@ import {
 } from "./lib/policy.mjs";
 import {
   getDailyAnonymousId,
+  hasReachedDailyReportLimit,
   incrementContribution,
   loadState,
   saveState,
@@ -114,6 +115,7 @@ async function reportCompletion({
   if (!currentMatch.matched) return;
   const targetHost = normalizeTargetHost(currentMatch.host);
   if (!targetHost) return;
+  if (hasReachedDailyReportLimit(state)) return;
 
   const ok = eventName === "Stop";
   const sampleRate = pickSampleRate(ok, config);

@@ -1,4 +1,4 @@
-export const PLUGIN_VERSION = "0.1.9";
+export const PLUGIN_VERSION = "0.1.10";
 
 export const TARGET_HOSTS = Object.freeze([
   "anyrouter.top",
@@ -7,6 +7,10 @@ export const TARGET_HOSTS = Object.freeze([
 
 export const DEFAULT_API_BASE_URL = "https://router-vitals-api.v1756251285.workers.dev";
 export const DEFAULT_CONFIG_URL = "https://router-vitals-api.v1756251285.workers.dev/config.json";
+export const LOCAL_DAILY_REPORT_LIMIT = 500;
+export const SERVER_DAILY_REPORT_SOFT_LIMIT = 500;
+export const SERVER_DAILY_REPORT_HARD_LIMIT = 1000;
+export const SERVER_DAILY_REPORT_SAMPLE_RATE = 0.1;
 
 export const ERROR_TYPES = Object.freeze([
   "none",

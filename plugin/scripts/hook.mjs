@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { loadRemoteConfig } from "./lib/config.mjs";
 import { PLUGIN_VERSION, bucketLatency, classifyError, classifyModel, createErrorHint, createTimeBucket, extractErrorStatusCode, hashLocalSessionId, matchTargetBaseUrl, normalizeTargetHost, pickSampleRate, shouldSample, validateReportPayload } from "./lib/policy.mjs";
-import { getDailyAnonymousId, incrementContribution, loadState, saveState } from "./lib/state.mjs";
+import { getDailyAnonymousId, hasReachedDailyReportLimit, incrementContribution, loadState, saveState } from "./lib/state.mjs";
 const eventName = process.argv[2] || "";
 main().catch(() => {
     process.exit(0);
@@ -70,6 +70,8 @@ async function reportCompletion({ eventName, input, state, config, sessionKey })
         return;
     const targetHost = normalizeTargetHost(currentMatch.host);
     if (!targetHost)
+        return;
+    if (hasReachedDailyReportLimit(state))
         return;
     const ok = eventName === "Stop";
     const sampleRate = pickSampleRate(ok, config);

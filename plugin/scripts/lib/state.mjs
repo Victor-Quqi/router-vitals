@@ -1,11 +1,13 @@
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
-import { createAnonymousId, getTodayKey } from "./policy.mjs";
+import { LOCAL_DAILY_REPORT_LIMIT, MODEL_CLASSES, createAnonymousId, getTodayKey } from "./policy.mjs";
 const STATE_VERSION = 1;
 const STATE_DIR_NAME = "anyrouter-status-monitor";
 const STATE_FILE_NAME = "state.json";
 const STATUS_CACHE_FILE_NAME = "status-cache.json";
+const CONTRIBUTION_RETENTION_DAYS = 120;
+const TURN_STATE_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
 export function getStatePath() {
     return join(getStateRoot(), STATE_DIR_NAME, STATE_FILE_NAME);
 }
@@ -74,14 +76,18 @@ export function incrementContribution(state, now = new Date()) {
 export function getTodayContributions(state, now = new Date()) {
     return state.contributions[getTodayKey(now)] ?? 0;
 }
-function normalizeState(value) {
+export function hasReachedDailyReportLimit(state, now = new Date()) {
+    return getTodayContributions(state, now) >= LOCAL_DAILY_REPORT_LIMIT;
+}
+function normalizeState(value, now = new Date()) {
     const record = isRecord(value) ? value : {};
+    const nowMs = now.getTime();
     return {
         version: STATE_VERSION,
         anonymous: normalizeAnonymous(record.anonymous),
-        pending: normalizeTurnMap(record.pending),
-        sessions: normalizeTurnMap(record.sessions),
-        contributions: normalizeContributions(record.contributions),
+        pending: normalizeTurnMap(record.pending, nowMs),
+        sessions: normalizeTurnMap(record.sessions, nowMs),
+        contributions: normalizeContributions(record.contributions, now),
         lastPayload: isRecord(record.lastPayload) ? record.lastPayload : null,
         lastReportAt: typeof record.lastReportAt === "string" ? record.lastReportAt : null
     };
@@ -94,20 +100,57 @@ function normalizeAnonymous(value) {
         return null;
     return { day: record.day, id: record.id };
 }
-function normalizeTurnMap(value) {
-    if (!value || typeof value !== "object" || Array.isArray(value))
-        return {};
-    return { ...value };
-}
-function normalizeContributions(value) {
+function normalizeTurnMap(value, nowMs) {
     if (!value || typeof value !== "object" || Array.isArray(value))
         return {};
     const result = {};
+    const cutoffMs = nowMs - TURN_STATE_RETENTION_MS;
+    for (const [key, item] of Object.entries(value)) {
+        const turn = normalizeTurnState(item);
+        if (!turn)
+            continue;
+        const updatedAtMs = getTurnUpdatedAtMs(turn);
+        if (updatedAtMs === null || updatedAtMs < cutoffMs)
+            continue;
+        result[key] = turn;
+    }
+    return result;
+}
+function normalizeTurnState(value) {
+    if (!isRecord(value))
+        return null;
+    const result = {};
+    if (typeof value.startedAtMs === "number" && Number.isFinite(value.startedAtMs))
+        result.startedAtMs = value.startedAtMs;
+    if (typeof value.updatedAtMs === "number" && Number.isFinite(value.updatedAtMs))
+        result.updatedAtMs = value.updatedAtMs;
+    if (typeof value.targetMatched === "boolean")
+        result.targetMatched = value.targetMatched;
+    if (typeof value.modelClass === "string" && MODEL_CLASSES.includes(value.modelClass)) {
+        result.modelClass = value.modelClass;
+    }
+    return Object.keys(result).length > 0 ? result : null;
+}
+function getTurnUpdatedAtMs(turn) {
+    const values = [turn.updatedAtMs, turn.startedAtMs].filter((value) => typeof value === "number" && Number.isFinite(value));
+    return values.length > 0 ? Math.max(...values) : null;
+}
+function normalizeContributions(value, now) {
+    if (!value || typeof value !== "object" || Array.isArray(value))
+        return {};
+    const result = {};
+    const cutoffKey = getRetentionCutoffKey(now);
     for (const [key, count] of Object.entries(value)) {
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(key) || key < cutoffKey)
+            continue;
         if (typeof count === "number" && Number.isFinite(count))
             result[key] = count;
     }
     return result;
+}
+function getRetentionCutoffKey(now) {
+    const cutoffMs = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - CONTRIBUTION_RETENTION_DAYS + 1);
+    return new Date(cutoffMs).toISOString().slice(0, 10);
 }
 function isRecord(value) {
     return Boolean(value && typeof value === "object" && !Array.isArray(value));

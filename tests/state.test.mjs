@@ -59,6 +59,48 @@ test("loadState can read legacy Claude plugin data state", async () => {
         await rm(root, { recursive: true, force: true });
     }
 });
+test("loadState prunes stale local counters and turn state", async () => {
+    const stateDir = await mkdtemp(join(tmpdir(), "router-vitals-state-"));
+    const statePath = join(stateDir, "anyrouter-status-monitor", "state.json");
+    const today = new Date().toISOString().slice(0, 10);
+    const freshMs = Date.now();
+    const staleMs = freshMs - 8 * 24 * 60 * 60 * 1000;
+    await mkdir(dirname(statePath), { recursive: true });
+    await writeFile(statePath, JSON.stringify({
+        version: 1,
+        contributions: {
+            "2000-01-01": 1,
+            [today]: 2
+        },
+        pending: {
+            fresh: { startedAtMs: freshMs, targetMatched: true, modelClass: "sonnet" },
+            stale: { startedAtMs: staleMs, targetMatched: true, modelClass: "opus" }
+        },
+        sessions: {
+            fresh: { updatedAtMs: freshMs, modelClass: "sonnet" },
+            stale: { updatedAtMs: staleMs, modelClass: "opus" }
+        }
+    }), "utf8");
+    try {
+        await withEnv({
+            ANYROUTER_STATUS_STATE_DIR: stateDir,
+            XDG_STATE_HOME: undefined,
+            LOCALAPPDATA: undefined,
+            APPDATA: undefined,
+            CLAUDE_PLUGIN_DATA: undefined
+        }, async () => {
+            const state = await loadState();
+            assert.deepEqual(state.contributions, { [today]: 2 });
+            assert.equal("fresh" in state.pending, true);
+            assert.equal("stale" in state.pending, false);
+            assert.equal("fresh" in state.sessions, true);
+            assert.equal("stale" in state.sessions, false);
+        });
+    }
+    finally {
+        await rm(stateDir, { recursive: true, force: true });
+    }
+});
 async function withEnv(values, run) {
     const previous = new Map();
     for (const key of ENV_KEYS) {

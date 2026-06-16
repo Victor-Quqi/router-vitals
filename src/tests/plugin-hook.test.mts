@@ -1,11 +1,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { createServer, type Server, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
+import { LOCAL_DAILY_REPORT_LIMIT } from "../plugin/scripts/lib/policy.mjs";
 const hookPath = resolve("plugin/scripts/hook.mjs");
 
 test("plugin hook uploads only for matched AnyRouter sessions", async () => {
@@ -88,6 +89,62 @@ test("plugin hook uploads only for matched AnyRouter sessions", async () => {
       ...commonEnv,
       ANTHROPIC_BASE_URL: "https://anyrouter.top"
     });
+  } finally {
+    server.close();
+    await rm(stateDir, { recursive: true, force: true });
+  }
+});
+
+test("plugin hook skips uploads after the local daily contribution limit", async () => {
+  const received: Array<Record<string, any>> = [];
+  const server = createServer((req, res) => {
+    if (req.method === "GET" && req.url === "/config.json") {
+      const base = `http://127.0.0.1:${serverPort(server)}`;
+      respondJson(res, {
+        reportingEnabled: true,
+        apiBaseUrl: base,
+        targetBaseUrlHosts: ["anyrouter.top", "a-ocnfniawgw.cn-shanghai.fcapp.run"],
+        sampleRateSuccess: 1,
+        sampleRateFailure: 1,
+        minPluginVersion: "0.1.0",
+        statusWindows: ["5m", "15m", "60m"]
+      });
+      return;
+    }
+
+    if (req.method === "POST" && req.url === "/v1/report") {
+      received.push({});
+      respondJson(res, { ok: true });
+      return;
+    }
+
+    res.writeHead(404);
+    res.end();
+  });
+
+  await listen(server);
+  const stateDir = await mkdtemp(join(tmpdir(), "router-vitals-"));
+  const statePath = join(stateDir, "anyrouter-status-monitor", "state.json");
+  const today = new Date().toISOString().slice(0, 10);
+
+  await mkdir(dirname(statePath), { recursive: true });
+  await writeFile(statePath, JSON.stringify({
+    version: 1,
+    contributions: { [today]: LOCAL_DAILY_REPORT_LIMIT }
+  }), "utf8");
+
+  try {
+    const commonEnv = {
+      ...process.env,
+      ANYROUTER_STATUS_STATE_DIR: stateDir,
+      ANYROUTER_STATUS_CONFIG_URL: `http://127.0.0.1:${serverPort(server)}/config.json`,
+      ANTHROPIC_BASE_URL: "https://anyrouter.top"
+    };
+
+    await runHook("UserPromptSubmit", { session_id: "session-limit" }, commonEnv);
+    await runHook("Stop", { session_id: "session-limit" }, commonEnv);
+
+    assert.equal(received.length, 0);
   } finally {
     server.close();
     await rm(stateDir, { recursive: true, force: true });

@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import worker, { handleReport, handleRequest } from "../worker/src/index.mjs";
 import { buildStatusFromRows } from "../worker/src/status.mjs";
+import { SERVER_DAILY_REPORT_HARD_LIMIT, SERVER_DAILY_REPORT_SAMPLE_RATE, SERVER_DAILY_REPORT_SOFT_LIMIT } from "../shared/policy.mjs";
 
 test("worker rejects unknown report fields before touching D1", async () => {
   const request = new Request("https://api.example.test/v1/report", {
@@ -50,6 +51,31 @@ test("worker rejects reports without target host before touching D1", async () =
   const body = await response.json();
   assert.equal(body.error, "invalid_payload");
   assert.match(body.details.join("\n"), /missing field: targetHost/);
+});
+
+test("worker samples reports over the anonymous daily soft limit", async () => {
+  const db = dailyLimitedDb(SERVER_DAILY_REPORT_SOFT_LIMIT + 1);
+  const dropped = await withMathRandom(SERVER_DAILY_REPORT_SAMPLE_RATE, () =>
+    handleReport(reportRequest("anon_dailyLimitabcdefghijklmnop"), { DB: db })
+  );
+
+  assert.equal(dropped.status, 204);
+  assert.equal(db.sampleWrites, 0);
+
+  const accepted = await withMathRandom(SERVER_DAILY_REPORT_SAMPLE_RATE - 0.01, () =>
+    handleReport(reportRequest("anon_dailyLimitAcceptedabcdefghij"), { DB: db })
+  );
+
+  assert.equal(accepted.status, 200);
+  assert.equal(db.sampleWrites, 1);
+});
+
+test("worker drops all reports over the anonymous daily hard limit before sample writes", async () => {
+  const db = dailyLimitedDb(SERVER_DAILY_REPORT_HARD_LIMIT + 1);
+  const response = await handleReport(reportRequest("anon_dailyHardLimitabcdefghijkl"), { DB: db });
+
+  assert.equal(response.status, 204);
+  assert.equal(db.sampleWrites, 0);
 });
 
 test("config endpoint exposes fixed AnyRouter hosts", async () => {
@@ -124,6 +150,7 @@ test("scheduled purge caps all retained D1 tables at 90 days", async () => {
   }
 
   assert.deepEqual(calls.map((call) => call.query), [
+    "DELETE FROM daily_report_counts WHERE updated_at < ?",
     "DELETE FROM samples_raw WHERE created_at < ?",
     "DELETE FROM target_error_observations WHERE minute < ?",
     "DELETE FROM target_model_error_observations WHERE minute < ?",
@@ -135,10 +162,11 @@ test("scheduled purge caps all retained D1 tables at 90 days", async () => {
   const cutoffMs = nowMs - ninetyDaysMs;
   const cutoffMinute = Math.floor(cutoffMs / 60000);
   assert.equal(calls[0]!.values[0], cutoffMs);
-  assert.equal(calls[1]!.values[0], cutoffMinute);
+  assert.equal(calls[1]!.values[0], cutoffMs);
   assert.equal(calls[2]!.values[0], cutoffMinute);
   assert.equal(calls[3]!.values[0], cutoffMinute);
   assert.equal(calls[4]!.values[0], cutoffMinute);
+  assert.equal(calls[5]!.values[0], cutoffMinute);
 });
 
 test("status aggregation returns insufficient data under sample floor", () => {
@@ -328,4 +356,58 @@ function statusDb() {
       return statement;
     }
   };
+}
+
+function reportRequest(anonymousId: string): Request {
+  return new Request("https://api.example.test/v1/report", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      ok: true,
+      errorType: "none",
+      errorStatusCode: null,
+      errorHint: null,
+      modelClass: "sonnet",
+      latencyBucket: "lt_3s",
+      timeBucket: 30000000,
+      pluginVersion: "0.1.0",
+      anonymousId,
+      sampleRate: 1,
+      targetMatched: true,
+      targetHost: "anyrouter.top"
+    })
+  });
+}
+
+function dailyLimitedDb(count: number) {
+  const db = {
+    sampleWrites: 0,
+    prepare(query: string) {
+      const statement = {
+        bind() {
+          return statement;
+        },
+        async all<T = Record<string, unknown>>() {
+          if (query.includes("daily_report_counts")) return { results: [{ count }] as T[] };
+          return { results: [] as T[] };
+        },
+        async run() {
+          if (query.includes("samples_raw")) db.sampleWrites += 1;
+          return {};
+        }
+      };
+      return statement;
+    }
+  };
+  return db;
+}
+
+async function withMathRandom<T>(value: number, run: () => Promise<T>): Promise<T> {
+  const original = Math.random;
+  Math.random = () => value;
+  try {
+    return await run();
+  } finally {
+    Math.random = original;
+  }
 }
