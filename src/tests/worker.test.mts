@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { handleReport, handleRequest } from "../worker/src/index.mjs";
+import worker, { handleReport, handleRequest } from "../worker/src/index.mjs";
 import { buildStatusFromRows } from "../worker/src/status.mjs";
 
 test("worker rejects unknown report fields before touching D1", async () => {
@@ -38,6 +38,44 @@ test("config endpoint is also available as config.json", async () => {
   const response = await handleRequest(new Request("https://api.example.test/config.json"), {});
   const body = await response.json();
   assert.equal(body.apiBaseUrl, "https://api.example.test");
+});
+
+test("scheduled purge caps all retained D1 tables at 90 days", async () => {
+  const nowMs = Date.UTC(2026, 0, 1, 0, 0, 0);
+  const originalNow = Date.now;
+  const calls: RecordedQuery[] = [];
+  const pending: Array<Promise<unknown>> = [];
+
+  Date.now = () => nowMs;
+  try {
+    await worker.scheduled({}, {
+      DB: recordingDb(calls),
+      RAW_SAMPLE_RETENTION_HOURS: 999999,
+      ERROR_DETAIL_RETENTION_DAYS: 999999
+    }, {
+      waitUntil(promise) {
+        pending.push(Promise.resolve(promise));
+      }
+    });
+    await Promise.all(pending);
+  } finally {
+    Date.now = originalNow;
+  }
+
+  assert.deepEqual(calls.map((call) => call.query), [
+    "DELETE FROM samples_raw WHERE created_at < ?",
+    "DELETE FROM error_observations WHERE minute < ?",
+    "DELETE FROM minute_aggregates WHERE minute < ?",
+    "DELETE FROM model_minute_aggregates WHERE minute < ?"
+  ]);
+
+  const ninetyDaysMs = 90 * 24 * 60 * 60 * 1000;
+  const cutoffMs = nowMs - ninetyDaysMs;
+  const cutoffMinute = Math.floor(cutoffMs / 60000);
+  assert.equal(calls[0]!.values[0], cutoffMs);
+  assert.equal(calls[1]!.values[0], cutoffMinute);
+  assert.equal(calls[2]!.values[0], cutoffMinute);
+  assert.equal(calls[3]!.values[0], cutoffMinute);
 });
 
 test("status aggregation returns insufficient data under sample floor", () => {
@@ -149,6 +187,33 @@ function failingDb() {
   return {
     prepare() {
       throw new Error("D1 should not be used for invalid payloads");
+    }
+  };
+}
+
+interface RecordedQuery {
+  query: string;
+  values: unknown[];
+}
+
+function recordingDb(calls: RecordedQuery[]) {
+  return {
+    prepare(query: string) {
+      const record: RecordedQuery = { query, values: [] };
+      calls.push(record);
+      const statement = {
+        bind(...values: unknown[]) {
+          record.values = values;
+          return statement;
+        },
+        async all<T = Record<string, unknown>>() {
+          return { results: [] as T[] };
+        },
+        async run() {
+          return {};
+        }
+      };
+      return statement;
     }
   };
 }

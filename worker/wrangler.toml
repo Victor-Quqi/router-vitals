@@ -2,6 +2,9 @@ name = "router-vitals-api"
 main = "src/index.mjs"
 compatibility_date = "2026-06-01"
 
+[triggers]
+crons = ["17 * * * *"]
+
 [[d1_databases]]
 binding = "DB"
 database_name = "router-vitals"

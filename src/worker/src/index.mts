@@ -62,13 +62,15 @@ const ERROR_COLUMNS: Record<ErrorType, string> = Object.freeze({
 });
 
 const isolateRateLimit = new Map<string, { count: number; resetAt: number }>();
+const MAX_RETENTION_DAYS = 90;
+const MAX_RETENTION_HOURS = MAX_RETENTION_DAYS * 24;
 
 export default {
   async fetch(request: Request, env: WorkerEnv): Promise<Response> {
     return handleRequest(request, env);
   },
   async scheduled(_event: unknown, env: WorkerEnv, ctx: ScheduledContext): Promise<void> {
-    ctx.waitUntil(purgeOldSamples(env));
+    ctx.waitUntil(purgeExpiredData(env));
   }
 };
 
@@ -257,15 +259,26 @@ async function incrementErrorObservation(db: D1Database, payload: ReportPayload,
   ).run();
 }
 
-async function purgeOldSamples(env: WorkerEnv): Promise<void> {
+async function purgeExpiredData(env: WorkerEnv): Promise<void> {
   if (!env?.DB) return;
-  const retentionHours = Number(env.RAW_SAMPLE_RETENTION_HOURS || 24);
-  const cutoff = Date.now() - Math.max(1, retentionHours) * 60 * 60 * 1000;
+  const nowMs = Date.now();
+  const retentionHours = parseBoundedRetention(env.RAW_SAMPLE_RETENTION_HOURS, 24, 1, MAX_RETENTION_HOURS);
+  const cutoff = nowMs - retentionHours * 60 * 60 * 1000;
   await env.DB.prepare("DELETE FROM samples_raw WHERE created_at < ?").bind(cutoff).run();
 
-  const detailRetentionDays = Number(env.ERROR_DETAIL_RETENTION_DAYS || 31);
-  const cutoffMinute = Math.floor((Date.now() - Math.max(1, detailRetentionDays) * 24 * 60 * 60 * 1000) / 60000);
+  const detailRetentionDays = parseBoundedRetention(env.ERROR_DETAIL_RETENTION_DAYS, 31, 1, MAX_RETENTION_DAYS);
+  const cutoffMinute = Math.floor((nowMs - detailRetentionDays * 24 * 60 * 60 * 1000) / 60000);
   await env.DB.prepare("DELETE FROM error_observations WHERE minute < ?").bind(cutoffMinute).run();
+
+  const aggregateCutoffMinute = Math.floor((nowMs - MAX_RETENTION_DAYS * 24 * 60 * 60 * 1000) / 60000);
+  await env.DB.prepare("DELETE FROM minute_aggregates WHERE minute < ?").bind(aggregateCutoffMinute).run();
+  await env.DB.prepare("DELETE FROM model_minute_aggregates WHERE minute < ?").bind(aggregateCutoffMinute).run();
+}
+
+function parseBoundedRetention(value: string | number | undefined, fallback: number, min: number, max: number): number {
+  const parsed = Number(value ?? fallback);
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.min(max, Math.max(min, parsed));
 }
 
 function allowRate(key: string, limit: number, windowMs: number): boolean {

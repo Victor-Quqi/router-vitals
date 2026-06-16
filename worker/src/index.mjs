@@ -24,12 +24,14 @@ const ERROR_COLUMNS = Object.freeze({
     unknown: "err_unknown"
 });
 const isolateRateLimit = new Map();
+const MAX_RETENTION_DAYS = 90;
+const MAX_RETENTION_HOURS = MAX_RETENTION_DAYS * 24;
 export default {
     async fetch(request, env) {
         return handleRequest(request, env);
     },
     async scheduled(_event, env, ctx) {
-        ctx.waitUntil(purgeOldSamples(env));
+        ctx.waitUntil(purgeExpiredData(env));
     }
 };
 export async function handleRequest(request, env) {
@@ -168,15 +170,25 @@ async function incrementErrorObservation(db, payload, nowMs, minute) {
       updated_at = ?
   `).bind(minute, payload.errorType, statusKey, statusCode, hintKey, errorHint, nowMs, nowMs).run();
 }
-async function purgeOldSamples(env) {
+async function purgeExpiredData(env) {
     if (!env?.DB)
         return;
-    const retentionHours = Number(env.RAW_SAMPLE_RETENTION_HOURS || 24);
-    const cutoff = Date.now() - Math.max(1, retentionHours) * 60 * 60 * 1000;
+    const nowMs = Date.now();
+    const retentionHours = parseBoundedRetention(env.RAW_SAMPLE_RETENTION_HOURS, 24, 1, MAX_RETENTION_HOURS);
+    const cutoff = nowMs - retentionHours * 60 * 60 * 1000;
     await env.DB.prepare("DELETE FROM samples_raw WHERE created_at < ?").bind(cutoff).run();
-    const detailRetentionDays = Number(env.ERROR_DETAIL_RETENTION_DAYS || 31);
-    const cutoffMinute = Math.floor((Date.now() - Math.max(1, detailRetentionDays) * 24 * 60 * 60 * 1000) / 60000);
+    const detailRetentionDays = parseBoundedRetention(env.ERROR_DETAIL_RETENTION_DAYS, 31, 1, MAX_RETENTION_DAYS);
+    const cutoffMinute = Math.floor((nowMs - detailRetentionDays * 24 * 60 * 60 * 1000) / 60000);
     await env.DB.prepare("DELETE FROM error_observations WHERE minute < ?").bind(cutoffMinute).run();
+    const aggregateCutoffMinute = Math.floor((nowMs - MAX_RETENTION_DAYS * 24 * 60 * 60 * 1000) / 60000);
+    await env.DB.prepare("DELETE FROM minute_aggregates WHERE minute < ?").bind(aggregateCutoffMinute).run();
+    await env.DB.prepare("DELETE FROM model_minute_aggregates WHERE minute < ?").bind(aggregateCutoffMinute).run();
+}
+function parseBoundedRetention(value, fallback, min, max) {
+    const parsed = Number(value ?? fallback);
+    if (!Number.isFinite(parsed))
+        return fallback;
+    return Math.min(max, Math.max(min, parsed));
 }
 function allowRate(key, limit, windowMs) {
     const now = Date.now();
