@@ -10,6 +10,7 @@ import {
   extractErrorStatusCode,
   hashLocalSessionId,
   matchTargetBaseUrl,
+  normalizeTargetHost,
   pickSampleRate,
   shouldSample,
   validateReportPayload,
@@ -111,6 +112,8 @@ async function reportCompletion({
   if (!pending?.targetMatched || config.reportingEnabled === false) return;
   const currentMatch = matchTargetBaseUrl(process.env.ANTHROPIC_BASE_URL, config.targetBaseUrlHosts);
   if (!currentMatch.matched) return;
+  const targetHost = normalizeTargetHost(currentMatch.host);
+  if (!targetHost) return;
 
   const ok = eventName === "Stop";
   const sampleRate = pickSampleRate(ok, config);
@@ -128,7 +131,8 @@ async function reportCompletion({
     pluginVersion: PLUGIN_VERSION,
     anonymousId,
     sampleRate,
-    targetMatched: true
+    targetMatched: true,
+    targetHost
   };
 
   const validation = validateReportPayload(payload);

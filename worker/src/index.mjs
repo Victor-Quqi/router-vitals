@@ -1,4 +1,4 @@
-import { DEFAULT_REMOTE_CONFIG, ERROR_TYPES, LATENCY_BUCKETS, validateReportPayload } from "../../shared/policy.mjs";
+import { DEFAULT_REMOTE_CONFIG, ERROR_TYPES, LATENCY_BUCKETS, normalizeTargetHost, validateReportPayload } from "../../shared/policy.mjs";
 import { buildStatusFromRows, getStatusWindowSpec, parseStatusWindow } from "./status.mjs";
 const JSON_HEADERS = {
     "content-type": "application/json; charset=utf-8",
@@ -72,13 +72,16 @@ export async function handleReport(request, env) {
     const payload = rawPayload;
     if (!allowRate(`anon:${payload.anonymousId}`, 30, 60000))
         return json({ error: "rate_limited" }, 429);
+    const targetHost = normalizeTargetHost(payload.targetHost);
+    if (!targetHost)
+        return json({ error: "invalid_payload", details: ["invalid targetHost"] }, 400);
     const nowMs = Date.now();
     const minute = Math.floor(nowMs / 60000);
-    await insertRawSample(env.DB, payload, nowMs, minute);
-    await incrementAggregate(env.DB, payload, nowMs, minute);
-    await incrementModelAggregate(env.DB, payload, nowMs, minute);
-    await incrementErrorObservation(env.DB, payload, nowMs, minute);
-    await incrementModelErrorObservation(env.DB, payload, nowMs, minute);
+    await insertRawSample(env.DB, payload, nowMs, minute, targetHost);
+    await incrementTargetAggregate(env.DB, payload, nowMs, minute, targetHost);
+    await incrementTargetModelAggregate(env.DB, payload, nowMs, minute, targetHost);
+    await incrementTargetErrorObservation(env.DB, payload, nowMs, minute, targetHost);
+    await incrementTargetModelErrorObservation(env.DB, payload, nowMs, minute, targetHost);
     return json({ ok: true });
 }
 export async function handleStatus(url, env) {
@@ -91,9 +94,13 @@ export async function handleStatus(url, env) {
         return json({ error: "invalid_window" }, 400);
     if (!spec)
         return json({ error: "invalid_window" }, 400);
+    const targetHostResult = parseStatusTargetHost(url.searchParams.get("targetHost"));
+    if (targetHostResult === undefined)
+        return json({ error: "invalid_target_host" }, 400);
+    const targetHost = targetHostResult;
     const nowMs = Date.now();
     const cacheTtlMs = getStatusCacheTtlMs(windowValue);
-    const cacheKey = `status:${windowValue}`;
+    const cacheKey = `status:${windowValue}:${targetHost || "all"}`;
     const bypassCache = url.searchParams.get("refresh") === "1";
     const cached = bypassCache ? undefined : statusResponseCache.get(cacheKey);
     if (cached && cached.expiresAt > nowMs) {
@@ -102,20 +109,152 @@ export async function handleStatus(url, env) {
     const nowMinute = Math.floor(nowMs / 60000);
     const sinceMinute = nowMinute - minutes + 1;
     const [result, modelResult, modelErrorDetailResult] = await Promise.all([
-        env.DB
-            .prepare("SELECT * FROM minute_aggregates WHERE minute >= ? ORDER BY minute ASC")
-            .bind(sinceMinute)
-            .all(),
-        env.DB
+        queryAggregates(env.DB, sinceMinute, targetHost),
+        queryModelAggregates(env.DB, sinceMinute, targetHost),
+        queryModelErrorDetails(env.DB, sinceMinute, nowMinute, spec.bucketMinutes, targetHost)
+    ]);
+    const body = JSON.stringify(buildStatusFromRows(result.results || [], windowValue, modelResult.results || [], nowMinute, modelErrorDetailResult.results || []));
+    statusResponseCache.set(cacheKey, { body, expiresAt: nowMs + cacheTtlMs });
+    return jsonText(body, 200, bypassCache ? { "cache-control": "no-store" } : statusCacheHeaders(cacheTtlMs));
+}
+async function insertRawSample(db, payload, nowMs, minute, targetHost) {
+    await db.prepare(`
+    INSERT INTO samples_raw (
+      id, created_at, minute, ok, error_type, model_class, latency_bucket, time_bucket,
+      plugin_version, anonymous_id, sample_rate, target_matched, error_status_code, error_hint, target_host
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).bind(crypto.randomUUID(), nowMs, minute, payload.ok ? 1 : 0, payload.errorType, payload.modelClass, payload.latencyBucket, payload.timeBucket, payload.pluginVersion, payload.anonymousId, payload.sampleRate, payload.targetMatched ? 1 : 0, payload.errorStatusCode ?? null, payload.errorHint ?? null, targetHost).run();
+}
+async function incrementTargetAggregate(db, payload, nowMs, minute, targetHost) {
+    const latencyColumn = LATENCY_COLUMNS[payload.latencyBucket] || LATENCY_COLUMNS.unknown;
+    const errorColumn = ERROR_COLUMNS[payload.errorType] || ERROR_COLUMNS.unknown;
+    const successDelta = payload.ok ? 1 : 0;
+    const failureDelta = payload.ok ? 0 : 1;
+    await db.prepare(`
+    INSERT INTO target_minute_aggregates (
+      target_host, minute, total_samples, success_samples, failure_samples, ${latencyColumn}, ${errorColumn}, updated_at
+    ) VALUES (?, ?, 1, ?, ?, 1, 1, ?)
+    ON CONFLICT(target_host, minute) DO UPDATE SET
+      total_samples = total_samples + 1,
+      success_samples = success_samples + ?,
+      failure_samples = failure_samples + ?,
+      ${latencyColumn} = ${latencyColumn} + 1,
+      ${errorColumn} = ${errorColumn} + 1,
+      updated_at = ?
+  `).bind(targetHost, minute, successDelta, failureDelta, nowMs, successDelta, failureDelta, nowMs).run();
+}
+async function incrementTargetModelAggregate(db, payload, nowMs, minute, targetHost) {
+    const successDelta = payload.ok ? 1 : 0;
+    const failureDelta = payload.ok ? 0 : 1;
+    await db.prepare(`
+    INSERT INTO target_model_minute_aggregates (
+      target_host, minute, model_class, total_samples, success_samples, failure_samples, updated_at
+    ) VALUES (?, ?, ?, 1, ?, ?, ?)
+    ON CONFLICT(target_host, minute, model_class) DO UPDATE SET
+      total_samples = total_samples + 1,
+      success_samples = success_samples + ?,
+      failure_samples = failure_samples + ?,
+      updated_at = ?
+  `).bind(targetHost, minute, payload.modelClass, successDelta, failureDelta, nowMs, successDelta, failureDelta, nowMs).run();
+}
+async function incrementTargetErrorObservation(db, payload, nowMs, minute, targetHost) {
+    if (payload.ok)
+        return;
+    const statusCode = payload.errorStatusCode ?? null;
+    const errorHint = payload.errorHint || null;
+    const statusKey = statusCode === null ? "none" : String(statusCode);
+    const hintKey = errorHint || "none";
+    await db.prepare(`
+    INSERT INTO target_error_observations (
+      target_host, minute, error_type, status_key, status_code, hint_key, error_hint, count, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?)
+    ON CONFLICT(target_host, minute, error_type, status_key, hint_key) DO UPDATE SET
+      count = count + 1,
+      updated_at = ?
+  `).bind(targetHost, minute, payload.errorType, statusKey, statusCode, hintKey, errorHint, nowMs, nowMs).run();
+}
+async function incrementTargetModelErrorObservation(db, payload, nowMs, minute, targetHost) {
+    if (payload.ok)
+        return;
+    const statusCode = payload.errorStatusCode ?? null;
+    const errorHint = payload.errorHint || null;
+    const statusKey = statusCode === null ? "none" : String(statusCode);
+    const hintKey = errorHint || "none";
+    await db.prepare(`
+    INSERT INTO target_model_error_observations (
+      target_host, minute, model_class, error_type, status_key, status_code, hint_key, error_hint, count, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?)
+    ON CONFLICT(target_host, minute, model_class, error_type, status_key, hint_key) DO UPDATE SET
+      count = count + 1,
+      updated_at = ?
+  `).bind(targetHost, minute, payload.modelClass, payload.errorType, statusKey, statusCode, hintKey, errorHint, nowMs, nowMs).run();
+}
+async function queryAggregates(db, sinceMinute, targetHost) {
+    if (!targetHost) {
+        return db
             .prepare(`
-        SELECT minute, model_class, total_samples, success_samples, failure_samples
-        FROM model_minute_aggregates
+        SELECT
+          minute,
+          SUM(total_samples) AS total_samples,
+          SUM(success_samples) AS success_samples,
+          SUM(failure_samples) AS failure_samples,
+          SUM(latency_lt_3s) AS latency_lt_3s,
+          SUM(latency_3_10s) AS latency_3_10s,
+          SUM(latency_10_30s) AS latency_10_30s,
+          SUM(latency_30_60s) AS latency_30_60s,
+          SUM(latency_gt_60s) AS latency_gt_60s,
+          SUM(latency_unknown) AS latency_unknown,
+          SUM(err_none) AS err_none,
+          SUM(err_server_error) AS err_server_error,
+          SUM(err_rate_limited) AS err_rate_limited,
+          SUM(err_network_error) AS err_network_error,
+          SUM(err_auth_error) AS err_auth_error,
+          SUM(err_timeout) AS err_timeout,
+          SUM(err_unknown) AS err_unknown
+        FROM target_minute_aggregates
         WHERE minute >= ?
+        GROUP BY minute
+        ORDER BY minute ASC
+      `)
+            .bind(sinceMinute)
+            .all();
+    }
+    return db
+        .prepare("SELECT * FROM target_minute_aggregates WHERE target_host = ? AND minute >= ? ORDER BY minute ASC")
+        .bind(targetHost, sinceMinute)
+        .all();
+}
+async function queryModelAggregates(db, sinceMinute, targetHost) {
+    if (!targetHost) {
+        return db
+            .prepare(`
+        SELECT
+          minute,
+          model_class,
+          SUM(total_samples) AS total_samples,
+          SUM(success_samples) AS success_samples,
+          SUM(failure_samples) AS failure_samples
+        FROM target_model_minute_aggregates
+        WHERE minute >= ?
+        GROUP BY minute, model_class
         ORDER BY minute ASC, model_class ASC
       `)
             .bind(sinceMinute)
-            .all(),
-        env.DB
+            .all();
+    }
+    return db
+        .prepare(`
+      SELECT minute, model_class, total_samples, success_samples, failure_samples
+      FROM target_model_minute_aggregates
+      WHERE target_host = ? AND minute >= ?
+      ORDER BY minute ASC, model_class ASC
+    `)
+        .bind(targetHost, sinceMinute)
+        .all();
+}
+async function queryModelErrorDetails(db, sinceMinute, nowMinute, bucketMinutes, targetHost) {
+    if (!targetHost) {
+        return db
             .prepare(`
         SELECT bucket_index, model_class, error_type, status_code, error_hint, SUM(count) AS count
         FROM (
@@ -126,90 +265,34 @@ export async function handleStatus(url, env) {
             status_code,
             error_hint,
             count
-          FROM model_error_observations
+          FROM target_model_error_observations
           WHERE minute >= ? AND minute <= ?
         )
         GROUP BY bucket_index, model_class, error_type, status_code, error_hint
         ORDER BY bucket_index ASC, model_class ASC, count DESC
       `)
-            .bind(sinceMinute, spec.bucketMinutes, sinceMinute, nowMinute)
-            .all()
-    ]);
-    const body = JSON.stringify(buildStatusFromRows(result.results || [], windowValue, modelResult.results || [], nowMinute, modelErrorDetailResult.results || []));
-    statusResponseCache.set(cacheKey, { body, expiresAt: nowMs + cacheTtlMs });
-    return jsonText(body, 200, bypassCache ? { "cache-control": "no-store" } : statusCacheHeaders(cacheTtlMs));
-}
-async function insertRawSample(db, payload, nowMs, minute) {
-    await db.prepare(`
-    INSERT INTO samples_raw (
-      id, created_at, minute, ok, error_type, model_class, latency_bucket, time_bucket,
-      plugin_version, anonymous_id, sample_rate, target_matched, error_status_code, error_hint
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).bind(crypto.randomUUID(), nowMs, minute, payload.ok ? 1 : 0, payload.errorType, payload.modelClass, payload.latencyBucket, payload.timeBucket, payload.pluginVersion, payload.anonymousId, payload.sampleRate, payload.targetMatched ? 1 : 0, payload.errorStatusCode ?? null, payload.errorHint ?? null).run();
-}
-async function incrementAggregate(db, payload, nowMs, minute) {
-    const latencyColumn = LATENCY_COLUMNS[payload.latencyBucket] || LATENCY_COLUMNS.unknown;
-    const errorColumn = ERROR_COLUMNS[payload.errorType] || ERROR_COLUMNS.unknown;
-    const successDelta = payload.ok ? 1 : 0;
-    const failureDelta = payload.ok ? 0 : 1;
-    await db.prepare(`
-    INSERT INTO minute_aggregates (
-      minute, total_samples, success_samples, failure_samples, ${latencyColumn}, ${errorColumn}, updated_at
-    ) VALUES (?, 1, ?, ?, 1, 1, ?)
-    ON CONFLICT(minute) DO UPDATE SET
-      total_samples = total_samples + 1,
-      success_samples = success_samples + ?,
-      failure_samples = failure_samples + ?,
-      ${latencyColumn} = ${latencyColumn} + 1,
-      ${errorColumn} = ${errorColumn} + 1,
-      updated_at = ?
-  `).bind(minute, successDelta, failureDelta, nowMs, successDelta, failureDelta, nowMs).run();
-}
-async function incrementModelAggregate(db, payload, nowMs, minute) {
-    const successDelta = payload.ok ? 1 : 0;
-    const failureDelta = payload.ok ? 0 : 1;
-    await db.prepare(`
-    INSERT INTO model_minute_aggregates (
-      minute, model_class, total_samples, success_samples, failure_samples, updated_at
-    ) VALUES (?, ?, 1, ?, ?, ?)
-    ON CONFLICT(minute, model_class) DO UPDATE SET
-      total_samples = total_samples + 1,
-      success_samples = success_samples + ?,
-      failure_samples = failure_samples + ?,
-      updated_at = ?
-  `).bind(minute, payload.modelClass, successDelta, failureDelta, nowMs, successDelta, failureDelta, nowMs).run();
-}
-async function incrementErrorObservation(db, payload, nowMs, minute) {
-    if (payload.ok)
-        return;
-    const statusCode = payload.errorStatusCode ?? null;
-    const errorHint = payload.errorHint || null;
-    const statusKey = statusCode === null ? "none" : String(statusCode);
-    const hintKey = errorHint || "none";
-    await db.prepare(`
-    INSERT INTO error_observations (
-      minute, error_type, status_key, status_code, hint_key, error_hint, count, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, 1, ?)
-    ON CONFLICT(minute, error_type, status_key, hint_key) DO UPDATE SET
-      count = count + 1,
-      updated_at = ?
-  `).bind(minute, payload.errorType, statusKey, statusCode, hintKey, errorHint, nowMs, nowMs).run();
-}
-async function incrementModelErrorObservation(db, payload, nowMs, minute) {
-    if (payload.ok)
-        return;
-    const statusCode = payload.errorStatusCode ?? null;
-    const errorHint = payload.errorHint || null;
-    const statusKey = statusCode === null ? "none" : String(statusCode);
-    const hintKey = errorHint || "none";
-    await db.prepare(`
-    INSERT INTO model_error_observations (
-      minute, model_class, error_type, status_key, status_code, hint_key, error_hint, count, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?)
-    ON CONFLICT(minute, model_class, error_type, status_key, hint_key) DO UPDATE SET
-      count = count + 1,
-      updated_at = ?
-  `).bind(minute, payload.modelClass, payload.errorType, statusKey, statusCode, hintKey, errorHint, nowMs, nowMs).run();
+            .bind(sinceMinute, bucketMinutes, sinceMinute, nowMinute)
+            .all();
+    }
+    return db
+        .prepare(`
+      SELECT bucket_index, model_class, error_type, status_code, error_hint, SUM(count) AS count
+      FROM (
+        SELECT
+          CAST((minute - ?) / ? AS INTEGER) AS bucket_index,
+          model_class,
+          error_type,
+          status_code,
+          error_hint,
+          count
+        FROM target_model_error_observations
+        WHERE target_host = ? AND minute >= ? AND minute <= ?
+      )
+      GROUP BY bucket_index, model_class, error_type, status_code, error_hint
+      ORDER BY bucket_index ASC, model_class ASC, count DESC
+    `)
+        .bind(sinceMinute, bucketMinutes, targetHost, sinceMinute, nowMinute)
+        .all();
 }
 async function purgeExpiredData(env) {
     if (!env?.DB)
@@ -220,11 +303,11 @@ async function purgeExpiredData(env) {
     await env.DB.prepare("DELETE FROM samples_raw WHERE created_at < ?").bind(cutoff).run();
     const detailRetentionDays = parseBoundedRetention(env.ERROR_DETAIL_RETENTION_DAYS, 31, 1, MAX_RETENTION_DAYS);
     const cutoffMinute = Math.floor((nowMs - detailRetentionDays * 24 * 60 * 60 * 1000) / 60000);
-    await env.DB.prepare("DELETE FROM error_observations WHERE minute < ?").bind(cutoffMinute).run();
-    await env.DB.prepare("DELETE FROM model_error_observations WHERE minute < ?").bind(cutoffMinute).run();
+    await env.DB.prepare("DELETE FROM target_error_observations WHERE minute < ?").bind(cutoffMinute).run();
+    await env.DB.prepare("DELETE FROM target_model_error_observations WHERE minute < ?").bind(cutoffMinute).run();
     const aggregateCutoffMinute = Math.floor((nowMs - MAX_RETENTION_DAYS * 24 * 60 * 60 * 1000) / 60000);
-    await env.DB.prepare("DELETE FROM minute_aggregates WHERE minute < ?").bind(aggregateCutoffMinute).run();
-    await env.DB.prepare("DELETE FROM model_minute_aggregates WHERE minute < ?").bind(aggregateCutoffMinute).run();
+    await env.DB.prepare("DELETE FROM target_minute_aggregates WHERE minute < ?").bind(aggregateCutoffMinute).run();
+    await env.DB.prepare("DELETE FROM target_model_minute_aggregates WHERE minute < ?").bind(aggregateCutoffMinute).run();
 }
 function parseBoundedRetention(value, fallback, min, max) {
     const parsed = Number(value ?? fallback);
@@ -241,6 +324,11 @@ function allowRate(key, limit, windowMs) {
     }
     item.count += 1;
     return item.count <= limit;
+}
+function parseStatusTargetHost(value) {
+    if (!value || value === "all")
+        return null;
+    return normalizeTargetHost(value) ?? undefined;
 }
 function getStatusCacheTtlMs(windowValue) {
     if (windowValue === "24h")

@@ -16,6 +16,7 @@ test("worker rejects unknown report fields before touching D1", async () => {
             anonymousId: "anon_abcdefghijklmnop",
             sampleRate: 1,
             targetMatched: true,
+            targetHost: "anyrouter.top",
             actualUrl: "https://anyrouter.top"
         })
     });
@@ -23,6 +24,28 @@ test("worker rejects unknown report fields before touching D1", async () => {
     assert.equal(response.status, 400);
     const body = await response.json();
     assert.equal(body.error, "invalid_payload");
+});
+test("worker rejects reports without target host before touching D1", async () => {
+    const request = new Request("https://api.example.test/v1/report", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+            ok: true,
+            errorType: "none",
+            modelClass: "sonnet",
+            latencyBucket: "lt_3s",
+            timeBucket: 30000000,
+            pluginVersion: "0.1.0",
+            anonymousId: "anon_abcdefghijklmnop",
+            sampleRate: 1,
+            targetMatched: true
+        })
+    });
+    const response = await handleReport(request, { DB: failingDb() });
+    assert.equal(response.status, 400);
+    const body = await response.json();
+    assert.equal(body.error, "invalid_payload");
+    assert.match(body.details.join("\n"), /missing field: targetHost/);
 });
 test("config endpoint exposes fixed AnyRouter hosts", async () => {
     const response = await handleRequest(new Request("https://api.example.test/v1/config"), {});
@@ -41,6 +64,7 @@ test("status endpoint caches reads and refresh can bypass cache", async () => {
     assert.equal(first.status, 200);
     assert.equal(first.headers.get("cache-control"), "public, max-age=20");
     assert.equal(db.calls.length, 3);
+    assert.match(db.calls[0].query, /FROM target_minute_aggregates/);
     const second = await handleRequest(new Request("https://api.example.test/v1/status?window=15m"), { DB: db });
     assert.equal(second.status, 200);
     assert.equal(db.calls.length, 3);
@@ -48,6 +72,22 @@ test("status endpoint caches reads and refresh can bypass cache", async () => {
     assert.equal(refreshed.status, 200);
     assert.equal(refreshed.headers.get("cache-control"), "no-store");
     assert.equal(db.calls.length, 6);
+});
+test("status endpoint can filter by target host", async () => {
+    const db = statusDb();
+    const response = await handleRequest(new Request("https://api.example.test/v1/status?window=15m&targetHost=anyrouter.top&refresh=1"), { DB: db });
+    assert.equal(response.status, 200);
+    assert.equal(db.calls.length, 3);
+    assert.match(db.calls[0].query, /target_minute_aggregates/);
+    assert.match(db.calls[1].query, /target_model_minute_aggregates/);
+    assert.match(db.calls[2].query, /target_model_error_observations/);
+    assert.equal(db.calls[0].values[0], "anyrouter.top");
+});
+test("status endpoint rejects unknown target host filters", async () => {
+    const response = await handleRequest(new Request("https://api.example.test/v1/status?window=15m&targetHost=api.anthropic.com"), { DB: statusDb() });
+    assert.equal(response.status, 400);
+    const body = await response.json();
+    assert.equal(body.error, "invalid_target_host");
 });
 test("scheduled purge caps all retained D1 tables at 90 days", async () => {
     const nowMs = Date.UTC(2026, 0, 1, 0, 0, 0);
@@ -72,10 +112,10 @@ test("scheduled purge caps all retained D1 tables at 90 days", async () => {
     }
     assert.deepEqual(calls.map((call) => call.query), [
         "DELETE FROM samples_raw WHERE created_at < ?",
-        "DELETE FROM error_observations WHERE minute < ?",
-        "DELETE FROM model_error_observations WHERE minute < ?",
-        "DELETE FROM minute_aggregates WHERE minute < ?",
-        "DELETE FROM model_minute_aggregates WHERE minute < ?"
+        "DELETE FROM target_error_observations WHERE minute < ?",
+        "DELETE FROM target_model_error_observations WHERE minute < ?",
+        "DELETE FROM target_minute_aggregates WHERE minute < ?",
+        "DELETE FROM target_model_minute_aggregates WHERE minute < ?"
     ]);
     const ninetyDaysMs = 90 * 24 * 60 * 60 * 1000;
     const cutoffMs = nowMs - ninetyDaysMs;
@@ -241,9 +281,11 @@ function statusDb() {
     return {
         calls,
         prepare(query) {
-            calls.push(query);
+            const record = { query, values: [] };
+            calls.push(record);
             const statement = {
-                bind() {
+                bind(...values) {
+                    record.values = values;
                     return statement;
                 },
                 async all() {

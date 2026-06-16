@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { loadRemoteConfig } from "./lib/config.mjs";
-import { PLUGIN_VERSION, bucketLatency, classifyError, classifyModel, createErrorHint, createTimeBucket, extractErrorStatusCode, hashLocalSessionId, matchTargetBaseUrl, pickSampleRate, shouldSample, validateReportPayload } from "./lib/policy.mjs";
+import { PLUGIN_VERSION, bucketLatency, classifyError, classifyModel, createErrorHint, createTimeBucket, extractErrorStatusCode, hashLocalSessionId, matchTargetBaseUrl, normalizeTargetHost, pickSampleRate, shouldSample, validateReportPayload } from "./lib/policy.mjs";
 import { getDailyAnonymousId, incrementContribution, loadState, saveState } from "./lib/state.mjs";
 const eventName = process.argv[2] || "";
 main().catch(() => {
@@ -68,6 +68,9 @@ async function reportCompletion({ eventName, input, state, config, sessionKey })
     const currentMatch = matchTargetBaseUrl(process.env.ANTHROPIC_BASE_URL, config.targetBaseUrlHosts);
     if (!currentMatch.matched)
         return;
+    const targetHost = normalizeTargetHost(currentMatch.host);
+    if (!targetHost)
+        return;
     const ok = eventName === "Stop";
     const sampleRate = pickSampleRate(ok, config);
     if (!shouldSample(sampleRate))
@@ -84,7 +87,8 @@ async function reportCompletion({ eventName, input, state, config, sessionKey })
         pluginVersion: PLUGIN_VERSION,
         anonymousId,
         sampleRate,
-        targetMatched: true
+        targetMatched: true,
+        targetHost
     };
     const validation = validateReportPayload(payload);
     if (!validation.ok)

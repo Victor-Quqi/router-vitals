@@ -4,6 +4,7 @@ type ServiceState = "available" | "unstable" | "down" | "insufficient_data";
 type ModelClass = "haiku" | "sonnet" | "opus" | "unknown";
 type BucketState = "empty" | "success" | "mixed" | "failure";
 type RefreshOptions = { bypassCache?: boolean };
+type TargetHostFilter = "all" | "main" | "optimized";
 
 interface TimelineMeta {
   bucketMinutes: number;
@@ -116,6 +117,7 @@ const modelLabels: Record<ModelClass, string> = {
 
 let activeWindow = "60m";
 let activeErrorModel: ModelClass = "opus";
+let activeTargetHost: TargetHostFilter = "all";
 let latestStatusData: StatusData | null = null;
 const openErrorKeys = new Set<string>();
 const autoRefreshWindows = new Set(["60m", "24h"]);
@@ -123,6 +125,12 @@ const autoRefreshMs = 30000;
 let autoRefreshTimer: number | undefined;
 let autoRefreshEnabled = false;
 let loadSequence = 0;
+let manualRefreshTimer: number | undefined;
+
+const targetHostParams: Record<Exclude<TargetHostFilter, "all">, string> = {
+  main: "anyrouter.top",
+  optimized: "a-ocnfniawgw.cn-shanghai.fcapp.run"
+};
 
 const refreshButton = getElement("refreshButton") as HTMLButtonElement;
 const autoRefreshControl = getElement("autoRefreshControl") as HTMLLabelElement;
@@ -153,8 +161,19 @@ for (const element of document.querySelectorAll("[data-error-model]")) {
 }
 
 refreshButton.addEventListener("click", () => {
+  playManualRefreshSpin();
   void loadStatus({ bypassCache: true });
 });
+
+for (const element of document.querySelectorAll("[data-target-host]")) {
+  const button = element as HTMLButtonElement;
+  button.addEventListener("click", () => {
+    activeTargetHost = normalizeTargetHostFilter(button.dataset.targetHost);
+    document.querySelectorAll("[data-target-host]").forEach((item) => item.classList.toggle("active", item === button));
+    openErrorKeys.clear();
+    void loadStatus();
+  });
+}
 
 autoRefreshToggle.addEventListener("change", () => {
   autoRefreshEnabled = autoRefreshToggle.checked;
@@ -170,6 +189,7 @@ async function loadStatus(options: RefreshOptions = {}): Promise<void> {
   refreshButton.disabled = true;
   try {
     const params = new URLSearchParams({ window: requestedWindow });
+    if (activeTargetHost !== "all") params.set("targetHost", targetHostParams[activeTargetHost]);
     if (options.bypassCache) params.set("refresh", "1");
     const response = await fetch(`${API_BASE.replace(/\/+$/, "")}/v1/status?${params}`, {
       cache: options.bypassCache ? "no-store" : "default",
@@ -189,6 +209,7 @@ function syncRefreshControls(): void {
   const supportsAutoRefresh = autoRefreshWindows.has(activeWindow);
   autoRefreshControl.hidden = !supportsAutoRefresh;
   autoRefreshToggle.checked = supportsAutoRefresh && autoRefreshEnabled;
+  refreshButton.classList.toggle("spinning", supportsAutoRefresh && autoRefreshEnabled);
 
   if (autoRefreshTimer !== undefined) {
     window.clearInterval(autoRefreshTimer);
@@ -200,6 +221,17 @@ function syncRefreshControls(): void {
       void loadStatus();
     }, autoRefreshMs);
   }
+}
+
+function playManualRefreshSpin(): void {
+  if (manualRefreshTimer !== undefined) window.clearTimeout(manualRefreshTimer);
+  refreshButton.classList.remove("manualSpin");
+  void refreshButton.offsetWidth;
+  refreshButton.classList.add("manualSpin");
+  manualRefreshTimer = window.setTimeout(() => {
+    refreshButton.classList.remove("manualSpin");
+    manualRefreshTimer = undefined;
+  }, 700);
 }
 
 function render(data: StatusData): void {
@@ -303,7 +335,7 @@ function minuteToIso(minute: number): string {
 function renderErrorsForModel(data: StatusData): void {
   const model = findModelStatus(data, activeErrorModel);
   const errors = data.modelErrors?.[activeErrorModel] || [];
-  setText("failureCount", `${modelLabels[activeErrorModel]} · ${formatWindowLabel(data.window)} · 失败轮次 ${model?.failureCount ?? 0}`);
+  setText("failureCount", `${formatWindowLabel(data.window)} · 失败轮次 ${model?.failureCount ?? 0}`);
   renderErrors(errors);
 }
 
@@ -314,7 +346,7 @@ function renderErrors(errors: ErrorStatus[]): void {
   if (errors.length === 0) {
     const empty = document.createElement("div");
     empty.className = "stateDetail";
-    empty.textContent = `${modelLabels[activeErrorModel]} 当前窗口没有主要错误类型`;
+    empty.textContent = "当前窗口没有主要错误类型";
     root.append(empty);
     return;
   }
@@ -524,6 +556,11 @@ function normalizeServiceState(value: unknown): ServiceState {
 function normalizeModelClass(value: unknown): ModelClass {
   if (value === "opus" || value === "sonnet" || value === "haiku" || value === "unknown") return value;
   return "unknown";
+}
+
+function normalizeTargetHostFilter(value: unknown): TargetHostFilter {
+  if (value === "main" || value === "optimized") return value;
+  return "all";
 }
 
 function findModelStatus(data: StatusData, modelClass: ModelClass): ModelStatus | undefined {

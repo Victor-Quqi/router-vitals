@@ -69,6 +69,7 @@ test("plugin hook uploads only for matched AnyRouter sessions", async () => {
     assert.equal(payload.modelClass, "sonnet");
     assert.equal(payload.errorStatusCode, null);
     assert.equal(payload.errorHint, null);
+    assert.equal(payload.targetHost, "anyrouter.top");
     assert.equal("baseUrl" in payload, false);
     assert.equal("session_id" in payload, false);
 

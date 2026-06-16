@@ -58,7 +58,9 @@ body {
 
 .topActions {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
+  justify-content: flex-end;
   gap: 10px;
   text-align: right;
 }
@@ -90,6 +92,48 @@ body {
 .githubLink:focus-visible {
   box-shadow: 0 0 0 3px rgb(47 129 247 / 32%);
   border-radius: 50%;
+}
+
+.endpointTabs {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(72px, 1fr));
+  gap: 3px;
+  width: 248px;
+  max-width: min(100%, 248px);
+  padding: 3px;
+  border: 1px solid rgb(139 148 158 / 18%);
+  border-radius: 999px;
+  background: #0d1117;
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 4%);
+}
+
+.endpointTabs button {
+  min-height: 26px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 12px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.endpointTabs button.active {
+  background: #1f6feb;
+  color: #fff;
+  box-shadow: 0 8px 20px rgb(47 129 247 / 22%), inset 0 1px 0 rgb(255 255 255 / 18%);
+}
+
+.endpointTabs button:hover:not(.active) {
+  background: rgb(139 148 158 / 9%);
+  color: var(--text);
+}
+
+.endpointTabs button:focus-visible {
+  outline: 2px solid var(--blue);
+  outline-offset: 2px;
 }
 
 .mark {
@@ -259,7 +303,7 @@ article span {
   font-size: 12px;
   cursor: pointer;
   user-select: none;
-  transition: border-color 140ms ease, color 140ms ease, background 140ms ease;
+  transition: border-color 140ms ease, color 140ms ease, background 140ms ease, box-shadow 140ms ease;
 }
 
 .autoRefresh[hidden] {
@@ -277,18 +321,26 @@ article span {
 }
 
 .autoRefresh:has(input:checked) {
-  background: rgb(46 160 67 / 10%);
-  color: #7ee787;
+  border-color: rgb(47 129 247 / 42%);
+  background: #1f6feb;
+  color: #fff;
+  box-shadow: 0 8px 20px rgb(47 129 247 / 22%), inset 0 1px 0 rgb(255 255 255 / 18%);
 }
 
 .autoRefresh input:checked ~ .switchText {
-  color: #7ee787;
+  color: #fff;
 }
 
 .autoRefresh:hover,
 .autoRefresh:focus-within {
   background: rgb(139 148 158 / 9%);
   color: var(--text);
+}
+
+.autoRefresh:has(input:checked):hover,
+.autoRefresh:has(input:checked):focus-within {
+  background: #1f6feb;
+  color: #fff;
 }
 
 .refreshButton {
@@ -308,6 +360,7 @@ article span {
 .refreshButton svg {
   width: 16px;
   height: 16px;
+  transform-origin: 50% 50%;
 }
 
 .refreshButton path {
@@ -329,9 +382,34 @@ article span {
   transform: translateY(1px);
 }
 
-.refreshButton:disabled {
+.refreshButton.manualSpin,
+.refreshButton.spinning {
+  border-color: rgb(47 129 247 / 42%);
+  background: rgb(47 129 247 / 9%);
+  color: #58a6ff;
+}
+
+.refreshButton.manualSpin svg {
+  animation: refreshSpin 700ms ease-in-out 1;
+}
+
+.refreshButton.spinning svg {
+  animation: refreshSpin 1800ms linear infinite;
+}
+
+.refreshButton:disabled:not(.manualSpin):not(.spinning) {
   color: var(--muted);
   cursor: wait;
+}
+
+.refreshButton:disabled:is(.manualSpin, .spinning) {
+  cursor: wait;
+}
+
+@keyframes refreshSpin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .metrics {
@@ -724,6 +802,10 @@ footer {
   .refreshControls {
     justify-content: flex-start;
     text-align: left;
+  }
+
+  .endpointTabs {
+    width: min(100%, 248px);
   }
 
   .metrics {

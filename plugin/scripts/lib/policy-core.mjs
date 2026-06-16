@@ -1,4 +1,4 @@
-export const PLUGIN_VERSION = "0.1.8";
+export const PLUGIN_VERSION = "0.1.9";
 export const TARGET_HOSTS = Object.freeze([
     "anyrouter.top",
     "a-ocnfniawgw.cn-shanghai.fcapp.run"
@@ -34,7 +34,8 @@ export const REPORT_FIELDS = Object.freeze([
     "pluginVersion",
     "anonymousId",
     "sampleRate",
-    "targetMatched"
+    "targetMatched",
+    "targetHost"
 ]);
 const REQUIRED_REPORT_FIELDS = Object.freeze([
     "ok",
@@ -45,7 +46,8 @@ const REQUIRED_REPORT_FIELDS = Object.freeze([
     "pluginVersion",
     "anonymousId",
     "sampleRate",
-    "targetMatched"
+    "targetMatched",
+    "targetHost"
 ]);
 const STATUS_WINDOWS = Object.freeze(["5m", "15m", "60m", "90m", "24h", "7d", "30d"]);
 export const DEFAULT_REMOTE_CONFIG = Object.freeze({
@@ -54,7 +56,7 @@ export const DEFAULT_REMOTE_CONFIG = Object.freeze({
     targetBaseUrlHosts: TARGET_HOSTS,
     sampleRateSuccess: 1,
     sampleRateFailure: 1,
-    minPluginVersion: "0.1.0",
+    minPluginVersion: PLUGIN_VERSION,
     statusWindows: ["60m", "24h", "7d", "30d"]
 });
 export function normalizeHostFromBaseUrl(value) {
@@ -70,12 +72,16 @@ export function normalizeHostFromBaseUrl(value) {
 export function normalizeTargetHosts(value) {
     if (!Array.isArray(value))
         return [...TARGET_HOSTS];
-    const allowed = new Set(TARGET_HOSTS);
     const hosts = value
-        .filter((host) => typeof host === "string")
-        .map((host) => host.trim().toLowerCase())
-        .filter((host) => allowed.has(host));
+        .map(normalizeTargetHost)
+        .filter((host) => host !== null);
     return hosts.length > 0 ? [...new Set(hosts)] : [...TARGET_HOSTS];
+}
+export function normalizeTargetHost(value) {
+    if (typeof value !== "string")
+        return null;
+    const host = value.trim().toLowerCase();
+    return TARGET_HOSTS.includes(host) ? host : null;
 }
 export function matchTargetBaseUrl(baseUrl, targetHosts = TARGET_HOSTS) {
     const host = normalizeHostFromBaseUrl(baseUrl);
@@ -317,6 +323,8 @@ export function validateReportPayload(payload) {
         errors.push("invalid sampleRate");
     if (report.targetMatched !== true)
         errors.push("targetMatched must be true");
+    if ("targetHost" in report && normalizeTargetHost(report.targetHost) === null)
+        errors.push("invalid targetHost");
     return { ok: errors.length === 0, errors };
 }
 export function sanitizeRemoteConfig(value) {

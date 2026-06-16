@@ -8,6 +8,7 @@ import {
   createErrorHint,
   extractErrorStatusCode,
   matchTargetBaseUrl,
+  normalizeTargetHost,
   sanitizeErrorHint,
   sanitizeRemoteConfig,
   validateReportPayload
@@ -39,6 +40,12 @@ test("remote target hosts are constrained to baked AnyRouter hosts", () => {
   assert.equal(config.sampleRateFailure, 0);
 });
 
+test("target host normalization only accepts fixed AnyRouter hosts", () => {
+  assert.equal(normalizeTargetHost("ANYROUTER.TOP"), "anyrouter.top");
+  assert.equal(normalizeTargetHost("https://anyrouter.top"), null);
+  assert.equal(normalizeTargetHost("api.anthropic.com"), null);
+});
+
 test("latency buckets are stable", () => {
   assert.equal(bucketLatency(100), "lt_3s");
   assert.equal(bucketLatency(3000), "3_10s");
@@ -58,6 +65,7 @@ test("report payload rejects actual URLs and station fields", () => {
     anonymousId: "anon_abcdefghijklmnop",
     sampleRate: 1,
     targetMatched: true,
+    targetHost: "anyrouter.top",
     baseUrl: "https://anyrouter.top",
     stationId: "anyrouter"
   };
@@ -66,6 +74,43 @@ test("report payload rejects actual URLs and station fields", () => {
   assert.equal(validation.ok, false);
   assert.match(validation.errors.join("\n"), /unknown field: baseUrl/);
   assert.match(validation.errors.join("\n"), /unknown field: stationId/);
+});
+
+test("report payload requires target host", () => {
+  const payload = {
+    ok: true,
+    errorType: "none",
+    modelClass: "sonnet",
+    latencyBucket: "3_10s",
+    timeBucket: 30000000,
+    pluginVersion: "0.1.0",
+    anonymousId: "anon_abcdefghijklmnop",
+    sampleRate: 1,
+    targetMatched: true
+  };
+
+  const validation = validateReportPayload(payload);
+  assert.equal(validation.ok, false);
+  assert.match(validation.errors.join("\n"), /missing field: targetHost/);
+});
+
+test("report payload rejects full URL as target host", () => {
+  const payload = {
+    ok: true,
+    errorType: "none",
+    modelClass: "sonnet",
+    latencyBucket: "3_10s",
+    timeBucket: 30000000,
+    pluginVersion: "0.1.0",
+    anonymousId: "anon_abcdefghijklmnop",
+    sampleRate: 1,
+    targetMatched: true,
+    targetHost: "https://anyrouter.top"
+  };
+
+  const validation = validateReportPayload(payload);
+  assert.equal(validation.ok, false);
+  assert.match(validation.errors.join("\n"), /invalid targetHost/);
 });
 
 test("classifies Claude StopFailure error fields", () => {
@@ -102,8 +147,10 @@ test("report payload accepts optional sanitized error details", () => {
     pluginVersion: PLUGIN_VERSION,
     anonymousId: "anon_abcdefghijklmnop",
     sampleRate: 1,
-    targetMatched: true
+    targetMatched: true,
+    targetHost: "anyrouter.top"
   };
 
   assert.equal(validateReportPayload(payload).ok, true);
+  assert.equal(validateReportPayload({ ...payload, targetHost: "api.anthropic.com" }).ok, false);
 });

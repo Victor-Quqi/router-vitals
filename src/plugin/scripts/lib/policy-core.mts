@@ -1,4 +1,4 @@
-export const PLUGIN_VERSION = "0.1.8";
+export const PLUGIN_VERSION = "0.1.9";
 
 export const TARGET_HOSTS = Object.freeze([
   "anyrouter.top",
@@ -40,7 +40,8 @@ export const REPORT_FIELDS = Object.freeze([
   "pluginVersion",
   "anonymousId",
   "sampleRate",
-  "targetMatched"
+  "targetMatched",
+  "targetHost"
 ] as const);
 
 const REQUIRED_REPORT_FIELDS = Object.freeze([
@@ -52,7 +53,8 @@ const REQUIRED_REPORT_FIELDS = Object.freeze([
   "pluginVersion",
   "anonymousId",
   "sampleRate",
-  "targetMatched"
+  "targetMatched",
+  "targetHost"
 ] as const);
 
 const STATUS_WINDOWS = Object.freeze(["5m", "15m", "60m", "90m", "24h", "7d", "30d"] as const);
@@ -60,6 +62,7 @@ const STATUS_WINDOWS = Object.freeze(["5m", "15m", "60m", "90m", "24h", "7d", "3
 export type ErrorType = (typeof ERROR_TYPES)[number];
 export type ModelClass = (typeof MODEL_CLASSES)[number];
 export type LatencyBucket = (typeof LATENCY_BUCKETS)[number];
+export type TargetHost = (typeof TARGET_HOSTS)[number];
 export type ReportField = (typeof REPORT_FIELDS)[number];
 export type StatusWindow = (typeof STATUS_WINDOWS)[number];
 
@@ -75,6 +78,7 @@ export interface ReportPayload {
   anonymousId: string;
   sampleRate: number;
   targetMatched: true;
+  targetHost: TargetHost;
 }
 
 export interface RemoteConfig {
@@ -95,7 +99,7 @@ export const DEFAULT_REMOTE_CONFIG: RemoteConfig = Object.freeze({
   targetBaseUrlHosts: TARGET_HOSTS,
   sampleRateSuccess: 1,
   sampleRateFailure: 1,
-  minPluginVersion: "0.1.0",
+  minPluginVersion: PLUGIN_VERSION,
   statusWindows: ["60m", "24h", "7d", "30d"] as const
 });
 
@@ -110,12 +114,16 @@ export function normalizeHostFromBaseUrl(value: unknown): string | null {
 
 export function normalizeTargetHosts(value: unknown): string[] {
   if (!Array.isArray(value)) return [...TARGET_HOSTS];
-  const allowed = new Set<string>(TARGET_HOSTS);
   const hosts = value
-    .filter((host) => typeof host === "string")
-    .map((host) => host.trim().toLowerCase())
-    .filter((host) => allowed.has(host));
+    .map(normalizeTargetHost)
+    .filter((host): host is TargetHost => host !== null);
   return hosts.length > 0 ? [...new Set(hosts)] : [...TARGET_HOSTS];
+}
+
+export function normalizeTargetHost(value: unknown): TargetHost | null {
+  if (typeof value !== "string") return null;
+  const host = value.trim().toLowerCase();
+  return (TARGET_HOSTS as readonly string[]).includes(host) ? host as TargetHost : null;
 }
 
 export function matchTargetBaseUrl(baseUrl: unknown, targetHosts: unknown = TARGET_HOSTS): { matched: boolean; host: string | null } {
@@ -344,6 +352,7 @@ export function validateReportPayload(payload: unknown): { ok: boolean; errors: 
   if (typeof report.anonymousId !== "string" || !/^anon_[A-Za-z0-9_-]{16,80}$/.test(report.anonymousId)) errors.push("invalid anonymousId");
   if (typeof report.sampleRate !== "number" || !Number.isFinite(report.sampleRate) || report.sampleRate <= 0 || report.sampleRate > 1) errors.push("invalid sampleRate");
   if (report.targetMatched !== true) errors.push("targetMatched must be true");
+  if ("targetHost" in report && normalizeTargetHost(report.targetHost) === null) errors.push("invalid targetHost");
 
   return { ok: errors.length === 0, errors };
 }

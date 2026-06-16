@@ -44,14 +44,14 @@ statusLine 配置示例：
 
 Any Router 入口：
 
-- `anyrouter.top`
-- `a-ocnfniawgw.cn-shanghai.fcapp.run`
+- 主站直连
+- 大陆优化
 
-这些情况直接跳过：`ANTHROPIC_BASE_URL` 为空、格式无效、host 落在列表外；本轮开始时命中但结束时已经切到别的 host；本轮缺少 `UserPromptSubmit` 起点；采样未命中；上报 API 暂时不可用。
+这些情况直接跳过：`ANTHROPIC_BASE_URL` 为空、格式无效、host 不属于内置端点；本轮开始时命中但结束时已经切到别的 host；本轮缺少 `UserPromptSubmit` 起点；采样未命中；上报 API 暂时不可用。
 
 状态页按 Claude Code 用户轮次计数，一轮对应一条观察事件。插件读取 `ANTHROPIC_BASE_URL` 判断入口；请求本身仍由 Claude Code 走原来的上游。
 
-提交字段：成功/失败、错误分类、HTTP 状态码、脱敏截断后的错误摘要、模型类别、耗时区间、分钟级时间桶、插件版本、匿名 ID、采样率和目标命中标记。
+提交字段：成功/失败、错误分类、HTTP 状态码、脱敏截断后的错误摘要、模型类别、耗时区间、分钟级时间桶、插件版本、匿名 ID、采样率、目标命中标记和端点类别。
 
 这些内容留在本机：实际 URL、prompt、response、token、cookie、key、账号、`session_id`、文件路径、完整日志、精确时间戳。
 

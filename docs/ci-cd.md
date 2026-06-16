@@ -40,10 +40,10 @@ API token 至少需要能编辑 Workers、D1 和 Pages。
 - `CLOUDFLARE_D1_DATABASE_ID`
 - `STATUS_API_BASE_URL`
 
-`STATUS_API_BASE_URL` 应该是 Worker API 域名，例如：
+`STATUS_API_BASE_URL` 填 Worker API origin：
 
 ```text
-https://api.status.example.com
+<worker-api-origin>
 ```
 
 Pages 项目名默认写死为 `router-vitals`。如果 Cloudflare Pages 项目使用其他名字，改 `.github/workflows/deploy-cloudflare.yml` 里的 `pages deploy` 命令。

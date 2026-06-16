@@ -46,6 +46,7 @@ const modelLabels = {
 };
 let activeWindow = "60m";
 let activeErrorModel = "opus";
+let activeTargetHost = "all";
 let latestStatusData = null;
 const openErrorKeys = new Set();
 const autoRefreshWindows = new Set(["60m", "24h"]);
@@ -53,6 +54,11 @@ const autoRefreshMs = 30000;
 let autoRefreshTimer;
 let autoRefreshEnabled = false;
 let loadSequence = 0;
+let manualRefreshTimer;
+const targetHostParams = {
+    main: "anyrouter.top",
+    optimized: "a-ocnfniawgw.cn-shanghai.fcapp.run"
+};
 const refreshButton = getElement("refreshButton");
 const autoRefreshControl = getElement("autoRefreshControl");
 const autoRefreshToggle = getElement("autoRefreshToggle");
@@ -81,8 +87,18 @@ for (const element of document.querySelectorAll("[data-error-model]")) {
     });
 }
 refreshButton.addEventListener("click", () => {
+    playManualRefreshSpin();
     void loadStatus({ bypassCache: true });
 });
+for (const element of document.querySelectorAll("[data-target-host]")) {
+    const button = element;
+    button.addEventListener("click", () => {
+        activeTargetHost = normalizeTargetHostFilter(button.dataset.targetHost);
+        document.querySelectorAll("[data-target-host]").forEach((item) => item.classList.toggle("active", item === button));
+        openErrorKeys.clear();
+        void loadStatus();
+    });
+}
 autoRefreshToggle.addEventListener("change", () => {
     autoRefreshEnabled = autoRefreshToggle.checked;
     syncRefreshControls();
@@ -95,6 +111,8 @@ async function loadStatus(options = {}) {
     refreshButton.disabled = true;
     try {
         const params = new URLSearchParams({ window: requestedWindow });
+        if (activeTargetHost !== "all")
+            params.set("targetHost", targetHostParams[activeTargetHost]);
         if (options.bypassCache)
             params.set("refresh", "1");
         const response = await fetch(`${API_BASE.replace(/\/+$/, "")}/v1/status?${params}`, {
@@ -120,6 +138,7 @@ function syncRefreshControls() {
     const supportsAutoRefresh = autoRefreshWindows.has(activeWindow);
     autoRefreshControl.hidden = !supportsAutoRefresh;
     autoRefreshToggle.checked = supportsAutoRefresh && autoRefreshEnabled;
+    refreshButton.classList.toggle("spinning", supportsAutoRefresh && autoRefreshEnabled);
     if (autoRefreshTimer !== undefined) {
         window.clearInterval(autoRefreshTimer);
         autoRefreshTimer = undefined;
@@ -129,6 +148,17 @@ function syncRefreshControls() {
             void loadStatus();
         }, autoRefreshMs);
     }
+}
+function playManualRefreshSpin() {
+    if (manualRefreshTimer !== undefined)
+        window.clearTimeout(manualRefreshTimer);
+    refreshButton.classList.remove("manualSpin");
+    void refreshButton.offsetWidth;
+    refreshButton.classList.add("manualSpin");
+    manualRefreshTimer = window.setTimeout(() => {
+        refreshButton.classList.remove("manualSpin");
+        manualRefreshTimer = undefined;
+    }, 700);
 }
 function render(data) {
     latestStatusData = data;
@@ -218,7 +248,7 @@ function minuteToIso(minute) {
 function renderErrorsForModel(data) {
     const model = findModelStatus(data, activeErrorModel);
     const errors = data.modelErrors?.[activeErrorModel] || [];
-    setText("failureCount", `${modelLabels[activeErrorModel]} · ${formatWindowLabel(data.window)} · 失败轮次 ${model?.failureCount ?? 0}`);
+    setText("failureCount", `${formatWindowLabel(data.window)} · 失败轮次 ${model?.failureCount ?? 0}`);
     renderErrors(errors);
 }
 function renderErrors(errors) {
@@ -227,7 +257,7 @@ function renderErrors(errors) {
     if (errors.length === 0) {
         const empty = document.createElement("div");
         empty.className = "stateDetail";
-        empty.textContent = `${modelLabels[activeErrorModel]} 当前窗口没有主要错误类型`;
+        empty.textContent = "当前窗口没有主要错误类型";
         root.append(empty);
         return;
     }
@@ -423,6 +453,11 @@ function normalizeModelClass(value) {
     if (value === "opus" || value === "sonnet" || value === "haiku" || value === "unknown")
         return value;
     return "unknown";
+}
+function normalizeTargetHostFilter(value) {
+    if (value === "main" || value === "optimized")
+        return value;
+    return "all";
 }
 function findModelStatus(data, modelClass) {
     return (data.models || []).find((model) => model.modelClass === modelClass);
