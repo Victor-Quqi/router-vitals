@@ -3,13 +3,14 @@ import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { createAnonymousId, getTodayKey } from "./policy.mjs";
 const STATE_VERSION = 1;
+const STATE_DIR_NAME = "anyrouter-status-monitor";
+const STATE_FILE_NAME = "state.json";
+const STATUS_CACHE_FILE_NAME = "status-cache.json";
 export function getStatePath() {
-    const root = process.env.ANYROUTER_STATUS_STATE_DIR ||
-        process.env.XDG_STATE_HOME ||
-        process.env.LOCALAPPDATA ||
-        process.env.CLAUDE_PLUGIN_DATA ||
-        join(homedir(), ".local", "state");
-    return join(root, "anyrouter-status-monitor", "state.json");
+    return join(getStateRoot(), STATE_DIR_NAME, STATE_FILE_NAME);
+}
+export function getStatusCachePath() {
+    return join(getStateRoot(), STATE_DIR_NAME, STATUS_CACHE_FILE_NAME);
 }
 export async function loadState() {
     const path = getStatePath();
@@ -19,8 +20,37 @@ export async function loadState() {
         return normalizeState(parsed);
     }
     catch {
-        return normalizeState({});
+        return loadLegacyPluginDataState(path);
     }
+}
+export async function loadStatusCache() {
+    try {
+        const raw = await readFile(getStatusCachePath(), "utf8");
+        const parsed = JSON.parse(raw);
+        if (!isRecord(parsed))
+            return null;
+        if (typeof parsed.apiBaseUrl !== "string")
+            return null;
+        if (typeof parsed.fetchedAtMs !== "number" || !Number.isFinite(parsed.fetchedAtMs))
+            return null;
+        if (parsed.status !== null && !isRecord(parsed.status))
+            return null;
+        return {
+            apiBaseUrl: parsed.apiBaseUrl,
+            fetchedAtMs: parsed.fetchedAtMs,
+            status: parsed.status
+        };
+    }
+    catch {
+        return null;
+    }
+}
+export async function saveStatusCache(cache) {
+    const path = getStatusCachePath();
+    await mkdir(dirname(path), { recursive: true });
+    const tmpPath = `${path}.${process.pid}.tmp`;
+    await writeFile(tmpPath, `${JSON.stringify(cache)}\n`, "utf8");
+    await rename(tmpPath, path);
 }
 export async function saveState(state) {
     const path = getStatePath();
@@ -81,4 +111,26 @@ function normalizeContributions(value) {
 }
 function isRecord(value) {
     return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
+function getStateRoot() {
+    return (process.env.ANYROUTER_STATUS_STATE_DIR ||
+        process.env.XDG_STATE_HOME ||
+        process.env.LOCALAPPDATA ||
+        process.env.APPDATA ||
+        join(homedir(), ".local", "state"));
+}
+async function loadLegacyPluginDataState(primaryPath) {
+    const legacyRoot = process.env.CLAUDE_PLUGIN_DATA;
+    if (process.env.ANYROUTER_STATUS_STATE_DIR || !legacyRoot)
+        return normalizeState({});
+    const legacyPath = join(legacyRoot, STATE_DIR_NAME, STATE_FILE_NAME);
+    if (legacyPath === primaryPath)
+        return normalizeState({});
+    try {
+        const raw = await readFile(legacyPath, "utf8");
+        return normalizeState(JSON.parse(raw));
+    }
+    catch {
+        return normalizeState({});
+    }
 }

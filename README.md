@@ -61,7 +61,7 @@ Any Router 入口：
 
 - `ANYROUTER_STATUS_API_BASE_URL`：上报 API base URL。
 - `ANYROUTER_STATUS_CONFIG_URL`：远程配置 JSON URL。
-- `ANYROUTER_STATUS_STATE_DIR`：本地状态目录；Claude Code 插件环境下默认优先使用 `${CLAUDE_PLUGIN_DATA}`。
+- `ANYROUTER_STATUS_STATE_DIR`：本地状态目录。默认使用系统用户 state 目录，让 hooks 和手动配置的 statusLine 读同一份状态。
 
 ## 本地检查
 
@@ -77,7 +77,7 @@ node plugin/scripts/preview.mjs
 node plugin/scripts/statusline.mjs
 ```
 
-statusLine 只是展示层；hooks 仍按上面的规则运行。
+statusLine 只是展示层；hooks 仍按上面的规则运行。Claude Code 会在状态变化时重跑 statusLine；这里不配置定时轮询，避免长程任务期间持续请求状态 API。`今日贡献` 每次运行都读取本地 state，成功提交后在下一次 statusLine 运行时更新；`近 60m 状态` 来自 Worker API，本地缓存 60 秒。
 
 ## 维护入口
 

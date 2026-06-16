@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 import { loadRemoteConfig } from "./lib/config.mjs";
 import { matchTargetBaseUrl } from "./lib/policy.mjs";
-import { getTodayContributions, loadState } from "./lib/state.mjs";
+import { getTodayContributions, loadState, loadStatusCache, saveStatusCache } from "./lib/state.mjs";
+const STATUS_CACHE_TTL_MS = 60 * 1000;
 main().catch(() => {
     console.log("Any Router 近 60m 状态: 状态暂缺");
 });
@@ -13,10 +14,24 @@ async function main() {
         console.log(`Any Router 近 60m 状态: 未匹配目标站 · 贡献暂停 · 今日贡献 ${count} 条`);
         return;
     }
-    const status = await fetchStatus(config.apiBaseUrl);
+    const status = await getCachedStatus(config.apiBaseUrl);
     const statusText = formatStatus(status);
     const contributionText = config.reportingEnabled === false ? "贡献暂停" : "贡献开启";
     console.log(`Any Router 近 60m 状态: ${statusText} · ${contributionText} · 今日贡献 ${count} 条`);
+}
+async function getCachedStatus(apiBaseUrl) {
+    const nowMs = Date.now();
+    const cached = await loadStatusCache();
+    if (cached?.apiBaseUrl === apiBaseUrl && cached.fetchedAtMs + STATUS_CACHE_TTL_MS > nowMs) {
+        return cached.status;
+    }
+    const status = await fetchStatus(apiBaseUrl);
+    await saveStatusCache({
+        apiBaseUrl,
+        fetchedAtMs: nowMs,
+        status: status ? { ...status } : null
+    });
+    return status;
 }
 async function fetchStatus(apiBaseUrl) {
     try {
