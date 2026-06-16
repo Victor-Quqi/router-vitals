@@ -35,6 +35,20 @@ test("config endpoint is also available as config.json", async () => {
     const body = await response.json();
     assert.equal(body.apiBaseUrl, "https://api.example.test");
 });
+test("status endpoint caches reads and refresh can bypass cache", async () => {
+    const db = statusDb();
+    const first = await handleRequest(new Request("https://api.example.test/v1/status?window=15m"), { DB: db });
+    assert.equal(first.status, 200);
+    assert.equal(first.headers.get("cache-control"), "public, max-age=20");
+    assert.equal(db.calls.length, 3);
+    const second = await handleRequest(new Request("https://api.example.test/v1/status?window=15m"), { DB: db });
+    assert.equal(second.status, 200);
+    assert.equal(db.calls.length, 3);
+    const refreshed = await handleRequest(new Request("https://api.example.test/v1/status?window=15m&refresh=1"), { DB: db });
+    assert.equal(refreshed.status, 200);
+    assert.equal(refreshed.headers.get("cache-control"), "no-store");
+    assert.equal(db.calls.length, 6);
+});
 test("scheduled purge caps all retained D1 tables at 90 days", async () => {
     const nowMs = Date.UTC(2026, 0, 1, 0, 0, 0);
     const originalNow = Date.now;
@@ -158,13 +172,13 @@ test("status aggregation builds model trend buckets", () => {
     assert.equal(status.timeline.bucketCount, 18);
     assert.equal(status.timeline.bucketMinutes, 5);
     assert.equal(status.models.length, 4);
-    assert.equal(status.models[0].modelClass, "haiku");
-    assert.equal(status.models[0].buckets.at(-1).state, "empty");
+    assert.equal(status.models[0].modelClass, "opus");
+    assert.equal(status.models[0].buckets.at(-1).state, "failure");
     assert.equal(status.models[1].modelClass, "sonnet");
     assert.equal(status.models[1].buckets.at(-2).state, "success");
     assert.equal(status.models[1].buckets.at(-1).state, "mixed");
-    assert.equal(status.models[2].modelClass, "opus");
-    assert.equal(status.models[2].buckets.at(-1).state, "failure");
+    assert.equal(status.models[2].modelClass, "haiku");
+    assert.equal(status.models[2].buckets.at(-1).state, "empty");
     assert.equal(status.models[3].modelClass, "unknown");
 });
 function failingDb() {
@@ -182,6 +196,27 @@ function recordingDb(calls) {
             const statement = {
                 bind(...values) {
                     record.values = values;
+                    return statement;
+                },
+                async all() {
+                    return { results: [] };
+                },
+                async run() {
+                    return {};
+                }
+            };
+            return statement;
+        }
+    };
+}
+function statusDb() {
+    const calls = [];
+    return {
+        calls,
+        prepare(query) {
+            calls.push(query);
+            const statement = {
+                bind() {
                     return statement;
                 },
                 async all() {

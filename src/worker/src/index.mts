@@ -35,7 +35,7 @@ interface ScheduledContext {
   waitUntil(promise: Promise<unknown>): void;
 }
 
-const JSON_HEADERS: HeadersInit = {
+const JSON_HEADERS: Record<string, string> = {
   "content-type": "application/json; charset=utf-8",
   "access-control-allow-origin": "*",
   "access-control-allow-methods": "GET,POST,OPTIONS",
@@ -62,6 +62,7 @@ const ERROR_COLUMNS: Record<ErrorType, string> = Object.freeze({
 });
 
 const isolateRateLimit = new Map<string, { count: number; resetAt: number }>();
+const statusResponseCache = new Map<string, { body: string; expiresAt: number }>();
 const MAX_RETENTION_DAYS = 90;
 const MAX_RETENTION_HOURS = MAX_RETENTION_DAYS * 24;
 
@@ -125,7 +126,16 @@ export async function handleStatus(url: URL, env: WorkerEnv): Promise<Response> 
   const minutes = parseStatusWindow(windowValue);
   if (!minutes) return json({ error: "invalid_window" }, 400);
 
-  const nowMinute = Math.floor(Date.now() / 60000);
+  const nowMs = Date.now();
+  const cacheTtlMs = getStatusCacheTtlMs(windowValue);
+  const cacheKey = `status:${windowValue}`;
+  const bypassCache = url.searchParams.get("refresh") === "1";
+  const cached = bypassCache ? undefined : statusResponseCache.get(cacheKey);
+  if (cached && cached.expiresAt > nowMs) {
+    return jsonText(cached.body, 200, statusCacheHeaders(cacheTtlMs));
+  }
+
+  const nowMinute = Math.floor(nowMs / 60000);
   const sinceMinute = nowMinute - minutes + 1;
   const [result, modelResult, errorDetailResult] = await Promise.all([
     env.DB
@@ -154,13 +164,16 @@ export async function handleStatus(url: URL, env: WorkerEnv): Promise<Response> 
       .all<ErrorDetailRow>()
   ]);
 
-  return json(buildStatusFromRows(
+  const body = JSON.stringify(buildStatusFromRows(
     result.results || [],
     windowValue,
     modelResult.results || [],
     nowMinute,
     errorDetailResult.results || []
   ));
+  statusResponseCache.set(cacheKey, { body, expiresAt: nowMs + cacheTtlMs });
+
+  return jsonText(body, 200, bypassCache ? { "cache-control": "no-store" } : statusCacheHeaders(cacheTtlMs));
 }
 
 async function insertRawSample(db: D1Database, payload: ReportPayload, nowMs: number, minute: number): Promise<void> {
@@ -290,6 +303,21 @@ function allowRate(key: string, limit: number, windowMs: number): boolean {
   }
   item.count += 1;
   return item.count <= limit;
+}
+
+function getStatusCacheTtlMs(windowValue: string): number {
+  if (windowValue === "24h") return 60_000;
+  if (windowValue === "7d") return 5 * 60_000;
+  if (windowValue === "30d") return 10 * 60_000;
+  return 20_000;
+}
+
+function statusCacheHeaders(ttlMs: number): Record<string, string> {
+  return { "cache-control": `public, max-age=${Math.max(0, Math.floor(ttlMs / 1000))}` };
+}
+
+function jsonText(body: string, status = 200, headers: Record<string, string> = {}): Response {
+  return new Response(body, { status, headers: { ...JSON_HEADERS, ...headers } });
 }
 
 function json(value: unknown, status = 200): Response {

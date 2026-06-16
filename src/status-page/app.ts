@@ -3,6 +3,7 @@ const API_BASE = window.ANYROUTER_STATUS_API_BASE || "https://api.status.example
 type ServiceState = "available" | "unstable" | "down" | "insufficient_data";
 type ModelClass = "haiku" | "sonnet" | "opus" | "unknown";
 type BucketState = "empty" | "success" | "mixed" | "failure";
+type RefreshOptions = { bypassCache?: boolean };
 
 interface TimelineMeta {
   bucketMinutes: number;
@@ -105,14 +106,23 @@ const errorLabels: Record<string, { title: string; detail: string }> = {
 };
 
 const modelLabels: Record<ModelClass, string> = {
-  haiku: "haiku",
-  sonnet: "sonnet",
-  opus: "opus",
-  unknown: "unknown"
+  opus: "Opus",
+  sonnet: "Sonnet",
+  haiku: "Haiku",
+  unknown: "Unknown"
 };
 
 let activeWindow = "60m";
 const openErrorKeys = new Set<string>();
+const autoRefreshWindows = new Set(["60m", "24h"]);
+const autoRefreshMs = 30000;
+let autoRefreshTimer: number | undefined;
+let autoRefreshEnabled = false;
+let loadSequence = 0;
+
+const refreshButton = getElement("refreshButton") as HTMLButtonElement;
+const autoRefreshControl = getElement("autoRefreshControl") as HTMLLabelElement;
+const autoRefreshToggle = getElement("autoRefreshToggle") as HTMLInputElement;
 
 for (const element of document.querySelectorAll("[data-window]")) {
   const button = element as HTMLButtonElement;
@@ -120,22 +130,58 @@ for (const element of document.querySelectorAll("[data-window]")) {
     if (!button.dataset.window) return;
     activeWindow = button.dataset.window;
     document.querySelectorAll("[data-window]").forEach((item) => item.classList.toggle("active", item === button));
+    syncRefreshControls();
     void loadStatus();
   });
 }
 
-void loadStatus();
-setInterval(loadStatus, 30000);
+refreshButton.addEventListener("click", () => {
+  void loadStatus({ bypassCache: true });
+});
 
-async function loadStatus(): Promise<void> {
+autoRefreshToggle.addEventListener("change", () => {
+  autoRefreshEnabled = autoRefreshToggle.checked;
+  syncRefreshControls();
+});
+
+syncRefreshControls();
+void loadStatus();
+
+async function loadStatus(options: RefreshOptions = {}): Promise<void> {
+  const sequence = ++loadSequence;
+  const requestedWindow = activeWindow;
+  refreshButton.disabled = true;
   try {
-    const response = await fetch(`${API_BASE.replace(/\/+$/, "")}/v1/status?window=${activeWindow}`, {
+    const params = new URLSearchParams({ window: requestedWindow });
+    if (options.bypassCache) params.set("refresh", "1");
+    const response = await fetch(`${API_BASE.replace(/\/+$/, "")}/v1/status?${params}`, {
+      cache: options.bypassCache ? "no-store" : "default",
       headers: { accept: "application/json" }
     });
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    render(await response.json() as StatusData);
+    const data = await response.json() as StatusData;
+    if (sequence === loadSequence) render(data);
   } catch {
-    renderUnavailable();
+    if (sequence === loadSequence) renderUnavailable();
+  } finally {
+    if (sequence === loadSequence) refreshButton.disabled = false;
+  }
+}
+
+function syncRefreshControls(): void {
+  const supportsAutoRefresh = autoRefreshWindows.has(activeWindow);
+  autoRefreshControl.hidden = !supportsAutoRefresh;
+  autoRefreshToggle.checked = supportsAutoRefresh && autoRefreshEnabled;
+
+  if (autoRefreshTimer !== undefined) {
+    window.clearInterval(autoRefreshTimer);
+    autoRefreshTimer = undefined;
+  }
+
+  if (supportsAutoRefresh && autoRefreshEnabled) {
+    autoRefreshTimer = window.setInterval(() => {
+      void loadStatus();
+    }, autoRefreshMs);
   }
 }
 

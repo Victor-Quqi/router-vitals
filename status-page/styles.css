@@ -55,6 +55,32 @@ body {
   gap: 12px;
 }
 
+.topActions {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  text-align: right;
+}
+
+.githubLink {
+  display: inline-flex;
+  align-items: center;
+  min-height: 34px;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel-2);
+  color: var(--text);
+  font-size: 13px;
+  text-decoration: none;
+}
+
+.githubLink:hover,
+.githubLink:focus-visible {
+  border-color: var(--blue);
+  outline: 0;
+}
+
 .mark {
   display: inline-grid;
   place-items: center;
@@ -134,6 +160,11 @@ article span {
   flex: 0 0 auto;
 }
 
+.summaryControls {
+  display: grid;
+  gap: 10px;
+}
+
 .stateDetail {
   margin-top: 10px;
   color: var(--muted);
@@ -165,6 +196,60 @@ article span {
 .windowTabs button.active {
   background: var(--blue);
   color: #fff;
+}
+
+.refreshControls {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.autoRefresh {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 34px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel-2);
+  color: var(--muted);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.autoRefresh[hidden] {
+  display: none;
+}
+
+.autoRefresh input {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--blue);
+}
+
+.refreshButton {
+  min-height: 34px;
+  padding: 0 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel-2);
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.refreshButton:hover,
+.refreshButton:focus-visible {
+  border-color: var(--blue);
+  outline: 0;
+}
+
+.refreshButton:disabled {
+  color: var(--muted);
+  cursor: wait;
 }
 
 .metrics {
@@ -217,7 +302,7 @@ article em {
   cursor: help;
 }
 
-.help::after {
+.tooltip[data-tip]::after {
   position: absolute;
   left: 50%;
   bottom: calc(100% + 8px);
@@ -238,8 +323,8 @@ article em {
   z-index: 10;
 }
 
-.help:hover::after,
-.help:focus-visible::after {
+.tooltip[data-tip]:hover::after,
+.tooltip[data-tip]:focus-visible::after {
   opacity: 1;
   transform: translateX(-50%) translateY(0);
 }
@@ -505,6 +590,12 @@ footer {
 
   .windowTabs {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .topActions,
+  .refreshControls {
+    justify-content: flex-start;
+    text-align: left;
   }
 
   .metrics {

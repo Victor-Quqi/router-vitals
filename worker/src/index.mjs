@@ -24,6 +24,7 @@ const ERROR_COLUMNS = Object.freeze({
     unknown: "err_unknown"
 });
 const isolateRateLimit = new Map();
+const statusResponseCache = new Map();
 const MAX_RETENTION_DAYS = 90;
 const MAX_RETENTION_HOURS = MAX_RETENTION_DAYS * 24;
 export default {
@@ -84,7 +85,15 @@ export async function handleStatus(url, env) {
     const minutes = parseStatusWindow(windowValue);
     if (!minutes)
         return json({ error: "invalid_window" }, 400);
-    const nowMinute = Math.floor(Date.now() / 60000);
+    const nowMs = Date.now();
+    const cacheTtlMs = getStatusCacheTtlMs(windowValue);
+    const cacheKey = `status:${windowValue}`;
+    const bypassCache = url.searchParams.get("refresh") === "1";
+    const cached = bypassCache ? undefined : statusResponseCache.get(cacheKey);
+    if (cached && cached.expiresAt > nowMs) {
+        return jsonText(cached.body, 200, statusCacheHeaders(cacheTtlMs));
+    }
+    const nowMinute = Math.floor(nowMs / 60000);
     const sinceMinute = nowMinute - minutes + 1;
     const [result, modelResult, errorDetailResult] = await Promise.all([
         env.DB
@@ -112,7 +121,9 @@ export async function handleStatus(url, env) {
             .bind(sinceMinute)
             .all()
     ]);
-    return json(buildStatusFromRows(result.results || [], windowValue, modelResult.results || [], nowMinute, errorDetailResult.results || []));
+    const body = JSON.stringify(buildStatusFromRows(result.results || [], windowValue, modelResult.results || [], nowMinute, errorDetailResult.results || []));
+    statusResponseCache.set(cacheKey, { body, expiresAt: nowMs + cacheTtlMs });
+    return jsonText(body, 200, bypassCache ? { "cache-control": "no-store" } : statusCacheHeaders(cacheTtlMs));
 }
 async function insertRawSample(db, payload, nowMs, minute) {
     await db.prepare(`
@@ -199,6 +210,21 @@ function allowRate(key, limit, windowMs) {
     }
     item.count += 1;
     return item.count <= limit;
+}
+function getStatusCacheTtlMs(windowValue) {
+    if (windowValue === "24h")
+        return 60_000;
+    if (windowValue === "7d")
+        return 5 * 60_000;
+    if (windowValue === "30d")
+        return 10 * 60_000;
+    return 20_000;
+}
+function statusCacheHeaders(ttlMs) {
+    return { "cache-control": `public, max-age=${Math.max(0, Math.floor(ttlMs / 1000))}` };
+}
+function jsonText(body, status = 200, headers = {}) {
+    return new Response(body, { status, headers: { ...JSON_HEADERS, ...headers } });
 }
 function json(value, status = 200) {
     return new Response(JSON.stringify(value), { status, headers: JSON_HEADERS });

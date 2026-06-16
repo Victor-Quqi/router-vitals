@@ -20,7 +20,10 @@
             <p>Claude Code 社区轮次观测</p>
           </div>
         </div>
-        <div class="updated" id="updated">等待数据</div>
+        <div class="topActions">
+          <a class="githubLink" href="https://github.com/Victor-Quqi/router-vitals" target="_blank" rel="noreferrer">GitHub</a>
+          <div class="updated" id="updated">等待数据</div>
+        </div>
       </header>
 
       <section class="summary" aria-live="polite">
@@ -28,7 +31,7 @@
           <div class="stateLine">
             <div class="state" id="state">加载中</div>
             <button
-              class="help stateHelp"
+              class="help tooltip stateHelp"
               type="button"
               aria-label="总状态判断说明"
               data-tip="少于 5 条为样本不足；成功率 >= 90% 为可用，50% 到 90% 以下为不稳定，低于 50% 为不可用。"
@@ -36,26 +39,35 @@
           </div>
           <div class="stateDetail" id="stateDetail">正在读取最近观测结果</div>
         </div>
-        <div class="windowTabs" role="tablist" aria-label="时间窗口">
-          <button class="active" data-window="60m" type="button">近60分钟</button>
-          <button data-window="24h" type="button">近24小时</button>
-          <button data-window="7d" type="button">近7天</button>
-          <button data-window="30d" type="button">近30天</button>
+        <div class="summaryControls">
+          <div class="windowTabs" role="tablist" aria-label="时间窗口">
+            <button class="active" data-window="60m" type="button">近60分钟</button>
+            <button data-window="24h" type="button">近24小时</button>
+            <button data-window="7d" type="button">近7天</button>
+            <button data-window="30d" type="button">近30天</button>
+          </div>
+          <div class="refreshControls">
+            <label class="autoRefresh" id="autoRefreshControl">
+              <input id="autoRefreshToggle" type="checkbox">
+              <span>自动刷新</span>
+            </label>
+            <button class="refreshButton" id="refreshButton" type="button">刷新</button>
+          </div>
         </div>
       </section>
 
       <section class="metrics" aria-label="状态指标">
         <article>
-          <span>轮次成功率 <button class="help" type="button" aria-label="轮次成功率说明" data-tip="成功轮次 / 总轮次。样本少于 5 时不判断可用状态。">?</button></span>
+          <span>轮次成功率 <button class="help tooltip" type="button" aria-label="轮次成功率说明" data-tip="成功轮次 / 总轮次。样本少于 5 时不判断可用状态。">?</button></span>
           <strong id="availability">--</strong>
           <em id="availabilityMath">--</em>
         </article>
         <article>
-          <span>轮次数 <button class="help" type="button" aria-label="轮次数说明" data-tip="当前时间窗口内完成并上报的 Claude Code 用户轮次，不是底层 API 请求次数。">?</button></span>
+          <span>轮次数 <button class="help tooltip" type="button" aria-label="轮次数说明" data-tip="当前时间窗口内完成并上报的 Claude Code 用户轮次，不是底层 API 请求次数。">?</button></span>
           <strong id="sampleCount">--</strong>
         </article>
         <article>
-          <span>失败轮次 <button class="help" type="button" aria-label="失败轮次说明" data-tip="StopFailure 上报的失败轮次数。">?</button></span>
+          <span>失败轮次 <button class="help tooltip" type="button" aria-label="失败轮次说明" data-tip="StopFailure 上报的失败轮次数。">?</button></span>
           <strong id="failureCountMetric">--</strong>
         </article>
       </section>
@@ -76,7 +88,7 @@
 
       <section class="panel">
         <div class="panelHeader">
-          <h2>主要错误类型 <button class="help" type="button" aria-label="错误类型说明" data-tip="点击错误类型可查看 HTTP 状态码和错误摘要。">?</button></h2>
+          <h2>主要错误类型</h2>
           <span id="failureCount">当前窗口 --</span>
         </div>
         <div id="errors" class="errorList"></div>

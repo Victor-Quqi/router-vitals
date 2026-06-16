@@ -6,7 +6,7 @@ const ERROR_ORDER = Object.freeze([
     ["timeout", "err_timeout"],
     ["unknown", "err_unknown"]
 ]);
-const MODEL_ORDER = Object.freeze(["haiku", "sonnet", "opus", "unknown"]);
+const MODEL_ORDER = Object.freeze(["opus", "sonnet", "haiku", "unknown"]);
 const WINDOW_SPECS = Object.freeze({
     "5m": { minutes: 5, bucketMinutes: 1, bucketCount: 5 },
     "15m": { minutes: 15, bucketMinutes: 1, bucketCount: 15 },
