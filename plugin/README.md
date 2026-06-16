@@ -1,6 +1,6 @@
 # Any Router Status Monitor Plugin
 
-Claude Code 插件包。上报规则、payload schema 和脱敏边界以仓库根目录 [README.md](../README.md) 和 `scripts/lib/policy-core.mjs` 为准。
+Claude Code 插件包。上报规则、payload schema 和脱敏边界以 [docs/reporting.md](../docs/reporting.md) 和 `scripts/lib/policy-core.mjs` 为准。
 
 状态页：https://router-vitals.pages.dev/
 
