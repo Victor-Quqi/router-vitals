@@ -562,12 +562,6 @@ function formatWindowLabel(value?: string): string {
   return windowLabels[value || ""] || windowLabels[activeWindow] || activeWindow;
 }
 
-function formatDuration(minutes: number): string {
-  if (minutes >= 1440) return `${minutes / 1440}天`;
-  if (minutes >= 60) return `${minutes / 60}小时`;
-  return `${minutes}分钟`;
-}
-
 function formatBucketTooltip(bucket: TrendBucket): string {
   const total = bucket.total ?? 0;
   const success = bucket.success ?? 0;

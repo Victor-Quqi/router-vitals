@@ -460,13 +460,6 @@ function formatStateDetail(data) {
 function formatWindowLabel(value) {
     return windowLabels[value || ""] || windowLabels[activeWindow] || activeWindow;
 }
-function formatDuration(minutes) {
-    if (minutes >= 1440)
-        return `${minutes / 1440}天`;
-    if (minutes >= 60)
-        return `${minutes / 60}小时`;
-    return `${minutes}分钟`;
-}
 function formatBucketTooltip(bucket) {
     const total = bucket.total ?? 0;
     const success = bucket.success ?? 0;
