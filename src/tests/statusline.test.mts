@@ -131,23 +131,22 @@ test("statusLine explains when DISABLE_AUTOUPDATER blocks plugin auto-update", a
     const output = await runStatusLine({
       ...process.env,
       ANYROUTER_STATUS_STATE_DIR: stateDir,
+      ANYROUTER_STATUS_CLAUDE_HOME: join(stateDir, "claude"),
       ANYROUTER_STATUS_CONFIG_URL: `http://127.0.0.1:${serverPort(server)}/config.json`,
       ANTHROPIC_BASE_URL: "https://api.anthropic.com",
       DISABLE_AUTOUPDATER: "1",
+      DISABLE_INSTALLATION_CHECKS: "0",
       FORCE_AUTOUPDATE_PLUGINS: "0"
     });
 
-    assert.match(output, /插件有新版 9\.9\.9/);
-    assert.match(output, /DISABLE_AUTOUPDATER 已阻止插件自动更新/);
-    assert.match(output, /设置 env/);
-    assert.match(output, /FORCE_AUTOUPDATE_PLUGINS=1/);
+    assert.match(output, /插件更新失败: DISABLE_AUTOUPDATER 阻止更新/);
   } finally {
     server.close();
     await rm(stateDir, { recursive: true, force: true });
   }
 });
 
-test("statusLine points to marketplace auto-update when plugin auto-update is forced", async () => {
+test("statusLine shows that automatic update has not completed yet", async () => {
   const stateDir = await mkdtemp(join(tmpdir(), "router-vitals-statusline-"));
   const server = createServer((req, res) => {
     if (req.method === "GET" && req.url === "/config.json") {
@@ -167,15 +166,60 @@ test("statusLine points to marketplace auto-update when plugin auto-update is fo
     const output = await runStatusLine({
       ...process.env,
       ANYROUTER_STATUS_STATE_DIR: stateDir,
+      ANYROUTER_STATUS_CLAUDE_HOME: join(stateDir, "claude"),
       ANYROUTER_STATUS_CONFIG_URL: `http://127.0.0.1:${serverPort(server)}/config.json`,
       ANTHROPIC_BASE_URL: "https://api.anthropic.com",
       DISABLE_AUTOUPDATER: "1",
+      DISABLE_INSTALLATION_CHECKS: "0",
       FORCE_AUTOUPDATE_PLUGINS: "1"
     });
 
     assert.match(output, /插件有新版 9\.9\.9/);
-    assert.match(output, /FORCE_AUTOUPDATE_PLUGINS 已开启/);
-    assert.match(output, /Marketplace auto-update/);
+    assert.match(output, /自动更新未完成/);
+    assert.doesNotMatch(output, /FORCE_AUTOUPDATE_PLUGINS 已开启/);
+  } finally {
+    server.close();
+    await rm(stateDir, { recursive: true, force: true });
+  }
+});
+
+test("statusLine reports when marketplace auto-update is disabled", async () => {
+  const stateDir = await mkdtemp(join(tmpdir(), "router-vitals-statusline-"));
+  const claudeHome = join(stateDir, "claude");
+  const pluginsDir = join(claudeHome, "plugins");
+  const server = createServer((req, res) => {
+    if (req.method === "GET" && req.url === "/config.json") {
+      respondJson(res, {
+        latestPluginVersion: "9.9.9"
+      });
+      return;
+    }
+
+    res.writeHead(404);
+    res.end();
+  });
+
+  await mkdir(pluginsDir, { recursive: true });
+  await writeFile(join(pluginsDir, "known_marketplaces.json"), JSON.stringify({
+    "router-vitals": {
+      autoUpdate: false
+    }
+  }), "utf8");
+  await listen(server);
+
+  try {
+    const output = await runStatusLine({
+      ...process.env,
+      ANYROUTER_STATUS_STATE_DIR: stateDir,
+      ANYROUTER_STATUS_CLAUDE_HOME: claudeHome,
+      ANYROUTER_STATUS_CONFIG_URL: `http://127.0.0.1:${serverPort(server)}/config.json`,
+      ANTHROPIC_BASE_URL: "https://api.anthropic.com",
+      DISABLE_AUTOUPDATER: "0",
+      DISABLE_INSTALLATION_CHECKS: "0",
+      FORCE_AUTOUPDATE_PLUGINS: "1"
+    });
+
+    assert.match(output, /插件更新失败: Marketplace auto-update 未开启/);
   } finally {
     server.close();
     await rm(stateDir, { recursive: true, force: true });
@@ -202,6 +246,7 @@ test("statusLine warns when installation checks are disabled", async () => {
     const output = await runStatusLine({
       ...process.env,
       ANYROUTER_STATUS_STATE_DIR: stateDir,
+      ANYROUTER_STATUS_CLAUDE_HOME: join(stateDir, "claude"),
       ANYROUTER_STATUS_CONFIG_URL: `http://127.0.0.1:${serverPort(server)}/config.json`,
       ANTHROPIC_BASE_URL: "https://api.anthropic.com",
       DISABLE_AUTOUPDATER: "1",
@@ -209,9 +254,58 @@ test("statusLine warns when installation checks are disabled", async () => {
       FORCE_AUTOUPDATE_PLUGINS: "1"
     });
 
-    assert.match(output, /插件有新版 9\.9\.9/);
-    assert.match(output, /DISABLE_INSTALLATION_CHECKS=1 可能导致自动更新失败/);
-    assert.match(output, /手动更新/);
+    assert.match(output, /插件更新失败: DISABLE_INSTALLATION_CHECKS 已开启/);
+  } finally {
+    server.close();
+    await rm(stateDir, { recursive: true, force: true });
+  }
+});
+
+test("statusLine reports when the latest plugin is cached but not active", async () => {
+  const stateDir = await mkdtemp(join(tmpdir(), "router-vitals-statusline-"));
+  const claudeHome = join(stateDir, "claude");
+  const pluginsDir = join(claudeHome, "plugins");
+  const server = createServer((req, res) => {
+    if (req.method === "GET" && req.url === "/config.json") {
+      respondJson(res, {
+        latestPluginVersion: "9.9.9"
+      });
+      return;
+    }
+
+    res.writeHead(404);
+    res.end();
+  });
+
+  await mkdir(join(pluginsDir, "cache", "router-vitals", "anyrouter-status-monitor", "9.9.9"), { recursive: true });
+  await writeFile(join(pluginsDir, "installed_plugins.json"), JSON.stringify({
+    version: 2,
+    plugins: {
+      "anyrouter-status-monitor@router-vitals": [
+        {
+          scope: "user",
+          installPath: join(pluginsDir, "cache", "router-vitals", "anyrouter-status-monitor", "0.1.12"),
+          version: "0.1.12"
+        }
+      ]
+    }
+  }), "utf8");
+  await listen(server);
+
+  try {
+    const output = await runStatusLine({
+      ...process.env,
+      ANYROUTER_STATUS_STATE_DIR: stateDir,
+      ANYROUTER_STATUS_CLAUDE_HOME: claudeHome,
+      ANYROUTER_STATUS_CONFIG_URL: `http://127.0.0.1:${serverPort(server)}/config.json`,
+      ANTHROPIC_BASE_URL: "https://api.anthropic.com",
+      DISABLE_AUTOUPDATER: "1",
+      DISABLE_INSTALLATION_CHECKS: "1",
+      FORCE_AUTOUPDATE_PLUGINS: "1"
+    });
+
+    assert.match(output, /插件更新失败: 已下载 9\.9\.9，仍运行 0\.1\.12/);
+    assert.match(output, /DISABLE_INSTALLATION_CHECKS 可能阻止切换/);
   } finally {
     server.close();
     await rm(stateDir, { recursive: true, force: true });

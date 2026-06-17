@@ -1,13 +1,26 @@
 #!/usr/bin/env node
+import { constants } from "node:fs";
+import { access, readFile } from "node:fs/promises";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import { loadRemoteConfig } from "./lib/config.mjs";
 import { LOCAL_DAILY_REPORT_LIMIT, PLUGIN_VERSION, matchTargetBaseUrl } from "./lib/policy.mjs";
 import { getTodayContributions, loadState, loadStatusCache, saveStatusCache } from "./lib/state.mjs";
 
 const STATUS_CACHE_TTL_MS = 60 * 1000;
+const MARKETPLACE_NAME = "router-vitals";
+const PLUGIN_NAME = "anyrouter-status-monitor";
+const PLUGIN_ID = `${PLUGIN_NAME}@${MARKETPLACE_NAME}`;
 
 interface StatusSummary {
   state?: string;
   label?: string;
+}
+
+interface ClaudePluginUpdateState {
+  marketplaceAutoUpdate: boolean | null;
+  installedVersion: string | null;
+  latestVersionCached: boolean;
 }
 
 main().catch(() => {
@@ -18,7 +31,7 @@ async function main() {
   const [state, config] = await Promise.all([loadState(), loadRemoteConfig()]);
   const target = matchTargetBaseUrl(process.env.ANTHROPIC_BASE_URL, config.targetBaseUrlHosts);
   const count = getTodayContributions(state);
-  const updateHint = formatUpdateHint(config.latestPluginVersion);
+  const updateHint = await formatUpdateHint(config.latestPluginVersion);
   const suffix = updateHint ? ` · ${updateHint}` : "";
 
   if (!target.matched) {
@@ -76,31 +89,98 @@ function formatContributionCount(count: number): string {
   return `今日贡献 ${count} 条`;
 }
 
-function formatUpdateHint(latestPluginVersion: string): string | null {
+async function formatUpdateHint(latestPluginVersion: string): Promise<string | null> {
   if (comparePluginVersions(latestPluginVersion, PLUGIN_VERSION) <= 0) return null;
 
   const globalAutoUpdaterDisabled = isTruthyEnv(process.env.DISABLE_AUTOUPDATER);
   const pluginAutoUpdaterForced = isTruthyEnv(process.env.FORCE_AUTOUPDATE_PLUGINS);
   const installationChecksDisabled = isTruthyEnv(process.env.DISABLE_INSTALLATION_CHECKS);
+  const updateState = await loadClaudePluginUpdateState(latestPluginVersion);
+
+  if (updateState.latestVersionCached && comparePluginVersions(latestPluginVersion, updateState.installedVersion || PLUGIN_VERSION) > 0) {
+    const activeVersion = updateState.installedVersion || PLUGIN_VERSION;
+    const installChecksNote = installationChecksDisabled ? " · DISABLE_INSTALLATION_CHECKS 可能阻止切换" : "";
+    return `插件更新失败: 已下载 ${latestPluginVersion}，仍运行 ${activeVersion}${installChecksNote}`;
+  }
+
+  if (updateState.marketplaceAutoUpdate === false) {
+    return `插件更新失败: Marketplace auto-update 未开启`;
+  }
 
   if (globalAutoUpdaterDisabled && !pluginAutoUpdaterForced) {
-    const installChecksNote = installationChecksDisabled ? " · DISABLE_INSTALLATION_CHECKS=1 也可能导致自动更新失败" : "";
-    return `插件有新版 ${latestPluginVersion} · DISABLE_AUTOUPDATER 已阻止插件自动更新${installChecksNote} · 在设置 env 加 FORCE_AUTOUPDATE_PLUGINS=1 或手动更新`;
+    const installChecksNote = installationChecksDisabled ? "；DISABLE_INSTALLATION_CHECKS 也可能阻止更新" : "";
+    return `插件更新失败: DISABLE_AUTOUPDATER 阻止更新${installChecksNote}`;
   }
 
   if (installationChecksDisabled) {
-    return `插件有新版 ${latestPluginVersion} · DISABLE_INSTALLATION_CHECKS=1 可能导致自动更新失败 · 手动更新`;
+    return `插件更新失败: DISABLE_INSTALLATION_CHECKS 已开启`;
   }
 
-  if (pluginAutoUpdaterForced) {
-    return `插件有新版 ${latestPluginVersion} · FORCE_AUTOUPDATE_PLUGINS 已开启 · 确认 Marketplace auto-update 已开启`;
-  }
+  return `插件有新版 ${latestPluginVersion} · 自动更新未完成`;
+}
 
-  return `插件有新版 ${latestPluginVersion} · 开启 Marketplace auto-update 或手动更新`;
+async function loadClaudePluginUpdateState(latestPluginVersion: string): Promise<ClaudePluginUpdateState> {
+  const claudeHome = process.env.ANYROUTER_STATUS_CLAUDE_HOME || join(homedir(), ".claude");
+  const [marketplaceAutoUpdate, installedVersion, latestVersionCached] = await Promise.all([
+    readMarketplaceAutoUpdate(claudeHome),
+    readInstalledPluginVersion(claudeHome),
+    pathExists(join(claudeHome, "plugins", "cache", MARKETPLACE_NAME, PLUGIN_NAME, latestPluginVersion))
+  ]);
+
+  return {
+    marketplaceAutoUpdate,
+    installedVersion,
+    latestVersionCached
+  };
+}
+
+async function readMarketplaceAutoUpdate(claudeHome: string): Promise<boolean | null> {
+  try {
+    const raw = await readFile(join(claudeHome, "plugins", "known_marketplaces.json"), "utf8");
+    const parsed = JSON.parse(raw);
+    if (!isRecord(parsed)) return null;
+    const marketplace = parsed[MARKETPLACE_NAME];
+    if (!isRecord(marketplace) || typeof marketplace.autoUpdate !== "boolean") return null;
+    return marketplace.autoUpdate;
+  } catch {
+    return null;
+  }
+}
+
+async function readInstalledPluginVersion(claudeHome: string): Promise<string | null> {
+  try {
+    const raw = await readFile(join(claudeHome, "plugins", "installed_plugins.json"), "utf8");
+    const parsed = JSON.parse(raw);
+    if (!isRecord(parsed) || !isRecord(parsed.plugins)) return null;
+    const installs = parsed.plugins[PLUGIN_ID];
+    if (!Array.isArray(installs)) return null;
+    const versions = installs
+      .filter(isRecord)
+      .map((install) => install.version)
+      .filter((version): version is string => typeof version === "string" && parsePluginVersion(version) !== null)
+      .sort(comparePluginVersions)
+      .reverse();
+    return versions[0] || null;
+  } catch {
+    return null;
+  }
+}
+
+async function pathExists(path: string): Promise<boolean> {
+  try {
+    await access(path, constants.F_OK);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function isTruthyEnv(value: string | undefined): boolean {
   return /^(1|true|yes|on)$/i.test(value ?? "");
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
 }
 
 function comparePluginVersions(left: string, right: string): number {
