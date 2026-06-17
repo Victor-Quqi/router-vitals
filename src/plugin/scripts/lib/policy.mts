@@ -1,6 +1,6 @@
 import { createHash, randomBytes } from "node:crypto";
 
-export * from "../../../shared/policy-core.mjs";
+export * from "./policy-core.mjs";
 
 export function createAnonymousId(): string {
   return `anon_${randomBytes(18).toString("base64url")}`;
