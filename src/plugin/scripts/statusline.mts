@@ -81,13 +81,19 @@ function formatUpdateHint(latestPluginVersion: string): string | null {
 
   const globalAutoUpdaterDisabled = isTruthyEnv(process.env.DISABLE_AUTOUPDATER);
   const pluginAutoUpdaterForced = isTruthyEnv(process.env.FORCE_AUTOUPDATE_PLUGINS);
+  const installationChecksDisabled = isTruthyEnv(process.env.DISABLE_INSTALLATION_CHECKS);
 
   if (globalAutoUpdaterDisabled && !pluginAutoUpdaterForced) {
-    return `插件有新版 ${latestPluginVersion} · DISABLE_AUTOUPDATER 已阻止插件自动更新 · 在设置 env 加 FORCE_AUTOUPDATE_PLUGINS=1 或手动更新`;
+    const installChecksNote = installationChecksDisabled ? " · DISABLE_INSTALLATION_CHECKS=1 也可能导致自动更新失败" : "";
+    return `插件有新版 ${latestPluginVersion} · DISABLE_AUTOUPDATER 已阻止插件自动更新${installChecksNote} · 在设置 env 加 FORCE_AUTOUPDATE_PLUGINS=1 或手动更新`;
+  }
+
+  if (installationChecksDisabled) {
+    return `插件有新版 ${latestPluginVersion} · DISABLE_INSTALLATION_CHECKS=1 可能导致自动更新失败 · 手动更新`;
   }
 
   if (pluginAutoUpdaterForced) {
-    return `插件有新版 ${latestPluginVersion} · FORCE_AUTOUPDATE_PLUGINS 已开启 · Marketplace auto-update 应为开启`;
+    return `插件有新版 ${latestPluginVersion} · FORCE_AUTOUPDATE_PLUGINS 已开启 · 确认 Marketplace auto-update 已开启`;
   }
 
   return `插件有新版 ${latestPluginVersion} · 开启 Marketplace auto-update 或手动更新`;

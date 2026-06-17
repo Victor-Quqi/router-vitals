@@ -63,7 +63,7 @@ If a Claude Code session is already running, run `/reload-plugins` inside that s
 
 **Keep the plugin up to date.** Older versions may use outdated reporting rules, target endpoints, or status logic, which can skip your local contributions or make the status line less accurate.
 
-Auto-update is optional. If you allow Claude Code auto-updates, open `/plugins` -> `Marketplaces` -> `router-vitals`, then choose `Enable auto-update`.
+To let the plugin update automatically, open `/plugins` -> `Marketplaces` -> `router-vitals`, then confirm `Enable auto-update` is enabled.
 
 If you intentionally set `DISABLE_AUTOUPDATER=1` to stop Claude Code itself from updating, but still want plugin auto-updates, open Claude Code Settings as JSON, find `env`, and add:
 
@@ -74,7 +74,7 @@ If you intentionally set `DISABLE_AUTOUPDATER=1` to stop Claude Code itself from
 }
 ```
 
-Restart Claude Code after saving. `Enable auto-update` under `/plugins` -> `Marketplaces` -> `router-vitals` should normally be enabled; check that location if needed. `FORCE_AUTOUPDATE_PLUGINS` is a Claude Code implementation detail for plugin auto-update override; if your environment disables it, the status line still shows update notices and the manual commands above remain the reliable path.
+Restart Claude Code after saving. `Enable auto-update` under `/plugins` -> `Marketplaces` -> `router-vitals` should normally be enabled; check that location if needed. `FORCE_AUTOUPDATE_PLUGINS` is a Claude Code implementation detail for plugin auto-update override. Do not also set `DISABLE_INSTALLATION_CHECKS=1`; it may make plugin auto-update fail, with the newer version present in cache while the installed version still points to the old one. If you see `Auto-update failed: no write permission to npm prefix`, Claude Code's updater cannot write to the global npm prefix, so this automatic path has already failed; use the manual commands above, or fix the Claude Code installation/permissions reported by `/doctor`.
 
 ## Learn more
 
