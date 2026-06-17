@@ -31,7 +31,6 @@ statusLine 大致显示：`Any Router 近 60m 状态: 可用 · 贡献开启 · 
 有新版时会追加更新提示。命令行更新：
 
 ```bash
-claude plugin marketplace update router-vitals
 claude plugin update anyrouter-status-monitor@router-vitals
 ```
 

@@ -55,7 +55,6 @@ Linux/macOS 换成对应的绝对路径。
 有新版时会追加更新提示。命令行手动更新：
 
 ```bash
-claude plugin marketplace update router-vitals
 claude plugin update anyrouter-status-monitor@router-vitals
 ```
 

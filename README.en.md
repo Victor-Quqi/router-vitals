@@ -55,7 +55,6 @@ Once configured, the status line looks roughly like: `Any Router 近 60m 状态:
 When a newer plugin version is available, the status line appends an update hint. You can update manually from the CLI:
 
 ```bash
-claude plugin marketplace update router-vitals
 claude plugin update anyrouter-status-monitor@router-vitals
 ```
 
