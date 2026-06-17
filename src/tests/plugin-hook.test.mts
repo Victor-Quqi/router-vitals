@@ -54,11 +54,13 @@ test("plugin hook uploads only for matched AnyRouter sessions", async () => {
       ...commonEnv,
       ANTHROPIC_BASE_URL: "https://anyrouter.top"
     });
+    const sessionATranscript = join(stateDir, "session-a.jsonl");
+    await writeTranscriptModel(sessionATranscript, "claude-sonnet-4");
     await runHook("UserPromptSubmit", { session_id: "session-a" }, {
       ...commonEnv,
       ANTHROPIC_BASE_URL: "https://anyrouter.top"
     });
-    await runHook("Stop", { session_id: "session-a" }, {
+    await runHook("Stop", { session_id: "session-a", transcript_path: sessionATranscript }, {
       ...commonEnv,
       ANTHROPIC_BASE_URL: "https://anyrouter.top/v1/messages"
     });
@@ -74,6 +76,52 @@ test("plugin hook uploads only for matched AnyRouter sessions", async () => {
     assert.equal("baseUrl" in payload, false);
     assert.equal("session_id" in payload, false);
 
+    await runHook("SessionStart", { session_id: "session-c", model: "claude-opus-4-1-20250805" }, {
+      ...commonEnv,
+      ANTHROPIC_BASE_URL: "https://anyrouter.top"
+    });
+    const sessionCTranscript = join(stateDir, "session-c.jsonl");
+    await writeTranscriptModel(sessionCTranscript, "claude-3-5-haiku-latest");
+    await runHook("UserPromptSubmit", { session_id: "session-c" }, {
+      ...commonEnv,
+      ANTHROPIC_BASE_URL: "https://anyrouter.top"
+    });
+    await runHook("Stop", { session_id: "session-c", transcript_path: sessionCTranscript }, {
+      ...commonEnv,
+      ANTHROPIC_BASE_URL: "https://anyrouter.top/v1/messages"
+    });
+
+    assert.equal(received.length, 2);
+    assert.equal(received[1]!.modelClass, "haiku");
+
+    const sessionDTranscript = join(stateDir, "session-d.jsonl");
+    await writeTranscriptModel(sessionDTranscript, "claude-3-5-haiku-latest");
+    await runHook("UserPromptSubmit", { session_id: "session-d" }, {
+      ...commonEnv,
+      ANTHROPIC_BASE_URL: "https://anyrouter.top"
+    });
+    await runHook("Stop", { session_id: "session-d", transcript_path: sessionDTranscript }, {
+      ...commonEnv,
+      ANTHROPIC_BASE_URL: "https://anyrouter.top/v1/messages"
+    });
+
+    assert.equal(received.length, 3);
+    assert.equal(received[2]!.modelClass, "haiku");
+
+    const sessionETranscript = join(stateDir, "session-e.jsonl");
+    await writeTranscriptModel(sessionETranscript, "claude-opus-4-1-20250805", "2000-01-01T00:00:00.000Z");
+    await runHook("UserPromptSubmit", { session_id: "session-e" }, {
+      ...commonEnv,
+      ANTHROPIC_BASE_URL: "https://anyrouter.top"
+    });
+    await runHook("StopFailure", { session_id: "session-e", transcript_path: sessionETranscript, message: "server 500" }, {
+      ...commonEnv,
+      ANTHROPIC_BASE_URL: "https://anyrouter.top/v1/messages"
+    });
+
+    assert.equal(received.length, 4);
+    assert.equal(received[3]!.modelClass, "unknown");
+
     await runHook("UserPromptSubmit", { session_id: "session-b" }, {
       ...commonEnv,
       ANTHROPIC_BASE_URL: "https://api.anthropic.com"
@@ -83,7 +131,7 @@ test("plugin hook uploads only for matched AnyRouter sessions", async () => {
       ANTHROPIC_BASE_URL: "https://api.anthropic.com"
     });
 
-    assert.equal(received.length, 1);
+    assert.equal(received.length, 4);
 
     await runHook("SessionEnd", { session_id: "session-a" }, {
       ...commonEnv,
@@ -150,6 +198,17 @@ test("plugin hook skips uploads after the local daily contribution limit", async
     await rm(stateDir, { recursive: true, force: true });
   }
 });
+
+async function writeTranscriptModel(path: string, model: string, timestamp?: string): Promise<void> {
+  await writeFile(path, `${JSON.stringify({
+    type: "assistant",
+    ...(timestamp ? { timestamp } : {}),
+    message: {
+      role: "assistant",
+      model
+    }
+  })}\n`, "utf8");
+}
 
 async function runHook(eventName: string, input: Record<string, unknown>, env: NodeJS.ProcessEnv): Promise<void> {
   await new Promise<void>((resolveRun, rejectRun) => {

@@ -2,7 +2,7 @@
 
 The plugin works at Claude Code user-turn granularity: `UserPromptSubmit` records the start of a turn, and `Stop` / `StopFailure` records the result. The status page also counts turns — one turn maps to one observation event.
 
-> The plugin only reads `ANTHROPIC_BASE_URL` to tell whether you're connected to Any Router; it never modifies, forwards, or proxies the requests Claude Code sends upstream. From Any Router's point of view, the requests it receives are identical whether or not this plugin is installed — no extra fingerprint. The plugin's own outbound requests (reporting, config, status) go only to the status Worker, never through Any Router.
+> The plugin uses `ANTHROPIC_BASE_URL` only to tell whether you're connected to Any Router; it never modifies, forwards, or proxies the requests Claude Code sends upstream. From Any Router's point of view, the requests it receives are identical whether or not this plugin is installed — no extra fingerprint. The plugin's own outbound requests (reporting, config, status) go only to the status Worker, never through Any Router.
 
 ## When an event is submitted
 
@@ -26,6 +26,8 @@ These cases are skipped: empty or invalid `ANTHROPIC_BASE_URL`, non-target hosts
 Submitted: success/failure, error class, HTTP status code, sanitized and truncated error hint, model class, latency bucket, minute-level time bucket, plugin version, anonymous ID, sample rate, target match marker, and target host class.
 
 Not submitted: actual URL, prompt, response, tokens, cookies, keys, account identifiers, `session_id`, file paths, full logs, and precise timestamps.
+
+To avoid carrying a stale model after switching models inside a Claude Code session, the plugin reads the tail of the local transcript file from the hook input and only extracts model metadata from recent assistant records for classification; it never submits transcript paths or content.
 
 ## Turning reporting off
 

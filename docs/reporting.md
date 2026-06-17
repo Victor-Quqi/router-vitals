@@ -2,7 +2,7 @@
 
 插件按 Claude Code 用户轮次工作：`UserPromptSubmit` 记一轮开始，`Stop` / `StopFailure` 后判断这轮结果。状态页也按轮次计数，一轮对应一条观察事件。
 
-> 插件只读 `ANTHROPIC_BASE_URL` 来判断你连的是不是 Any Router，从不修改、转发或代理 Claude Code 发往上游的请求。从 Any Router 的视角，装不装这个插件收到的请求完全一样，没有任何额外特征。插件自己的出站请求（上报、拉配置、拉状态）只发给状态站 Worker，不经过 Any Router。
+> 插件只用 `ANTHROPIC_BASE_URL` 判断你连的是不是 Any Router，从不修改、转发或代理 Claude Code 发往上游的请求。从 Any Router 的视角，装不装这个插件收到的请求完全一样，没有任何额外特征。插件自己的出站请求（上报、拉配置、拉状态）只发给状态站 Worker，不经过 Any Router。
 
 ## 什么时候才会上报
 
@@ -26,6 +26,8 @@ Any Router 入口：
 会提交：成功/失败、错误分类、HTTP 状态码、脱敏截断后的错误摘要、模型类别、耗时区间、分钟级时间桶、插件版本、匿名 ID、采样率、目标命中标记、端点类别。
 
 不会提交：真实 URL、prompt、response、token、cookie、key、账号、`session_id`、文件路径、完整日志、精确时间戳。
+
+为避免 Claude Code 会话内切换模型后串到旧模型，插件会在本机读取 hook 输入里的 transcript 文件尾部，只提取最近 assistant 记录中的模型元数据用于归类；不会提交 transcript 路径或内容。
 
 ## 关掉上报
 
