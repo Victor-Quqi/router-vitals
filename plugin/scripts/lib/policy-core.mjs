@@ -1,4 +1,4 @@
-export const PLUGIN_VERSION = "0.1.16";
+export const PLUGIN_VERSION = "0.1.17";
 export const TARGET_HOSTS = Object.freeze([
     "anyrouter.top",
     "a-ocnfniawgw.cn-shanghai.fcapp.run"

@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import worker, { handleReport, handleRequest } from "../worker/src/index.mjs";
+import { createMemoryResponseBodyCache } from "../worker/src/runtime-cache.mjs";
 import { buildStatusFromRows } from "../worker/src/status.mjs";
 import { PLUGIN_VERSION, SERVER_DAILY_REPORT_HARD_LIMIT, SERVER_DAILY_REPORT_SAMPLE_RATE, SERVER_DAILY_REPORT_SOFT_LIMIT } from "../shared/policy.mjs";
 
@@ -60,22 +61,44 @@ test("worker samples reports over the anonymous daily soft limit", async () => {
   );
 
   assert.equal(dropped.status, 204);
-  assert.equal(db.sampleWrites, 0);
+  assert.equal(db.reportBatches.length, 0);
 
   const accepted = await withMathRandom(SERVER_DAILY_REPORT_SAMPLE_RATE - 0.01, () =>
     handleReport(reportRequest("anon_dailyLimitAcceptedabcdefghij"), { DB: db })
   );
 
   assert.equal(accepted.status, 200);
-  assert.equal(db.sampleWrites, 1);
+  assert.equal(db.reportBatches.length, 1);
+  assert.equal(db.reportBatches[0]!.length, 2);
 });
 
-test("worker drops all reports over the anonymous daily hard limit before sample writes", async () => {
+test("worker drops all reports over the anonymous daily hard limit before report writes", async () => {
   const db = dailyLimitedDb(SERVER_DAILY_REPORT_HARD_LIMIT + 1);
   const response = await handleReport(reportRequest("anon_dailyHardLimitabcdefghijkl"), { DB: db });
 
   assert.equal(response.status, 204);
-  assert.equal(db.sampleWrites, 0);
+  assert.equal(db.reportBatches.length, 0);
+});
+
+test("worker batches report aggregate writes", async () => {
+  const successDb = dailyLimitedDb(1);
+  const success = await handleReport(reportRequest("anon_batchSuccessabcdefghijklmn"), { DB: successDb });
+  assert.equal(success.status, 200);
+  assert.equal(successDb.reportBatches.length, 1);
+  assert.deepEqual(successDb.reportBatches[0]!.map(normalizeSqlTable), [
+    "target_minute_aggregates",
+    "target_model_minute_aggregates"
+  ]);
+
+  const failureDb = dailyLimitedDb(1);
+  const failure = await handleReport(reportRequest("anon_batchFailureabcdefghijklmn", false), { DB: failureDb });
+  assert.equal(failure.status, 200);
+  assert.equal(failureDb.reportBatches.length, 1);
+  assert.deepEqual(failureDb.reportBatches[0]!.map(normalizeSqlTable), [
+    "target_minute_aggregates",
+    "target_model_minute_aggregates",
+    "target_model_error_observations"
+  ]);
 });
 
 test("config endpoint exposes fixed AnyRouter hosts", async () => {
@@ -94,17 +117,18 @@ test("config endpoint is also available as config.json", async () => {
 
 test("status endpoint caches reads and refresh can bypass cache", async () => {
   const db = statusDb();
-  const first = await handleRequest(new Request("https://api.example.test/v1/status?window=15m"), { DB: db });
+  const runtime = { statusCache: createMemoryResponseBodyCache() };
+  const first = await handleRequest(new Request("https://api.example.test/v1/status?window=15m"), { DB: db }, runtime);
   assert.equal(first.status, 200);
   assert.equal(first.headers.get("cache-control"), "public, max-age=20");
   assert.equal(db.calls.length, 3);
   assert.match(db.calls[0]!.query, /FROM target_minute_aggregates/);
 
-  const second = await handleRequest(new Request("https://api.example.test/v1/status?window=15m"), { DB: db });
+  const second = await handleRequest(new Request("https://api.example.test/v1/status?window=15m"), { DB: db }, runtime);
   assert.equal(second.status, 200);
   assert.equal(db.calls.length, 3);
 
-  const refreshed = await handleRequest(new Request("https://api.example.test/v1/status?window=15m&refresh=1"), { DB: db });
+  const refreshed = await handleRequest(new Request("https://api.example.test/v1/status?window=15m&refresh=1"), { DB: db }, runtime);
   assert.equal(refreshed.status, 200);
   assert.equal(refreshed.headers.get("cache-control"), "no-store");
   assert.equal(db.calls.length, 6);
@@ -138,7 +162,6 @@ test("scheduled purge caps all retained D1 tables at 90 days", async () => {
   try {
     await worker.scheduled({}, {
       DB: recordingDb(calls),
-      RAW_SAMPLE_RETENTION_HOURS: 999999,
       ERROR_DETAIL_RETENTION_DAYS: 999999
     }, {
       waitUntil(promise) {
@@ -152,8 +175,6 @@ test("scheduled purge caps all retained D1 tables at 90 days", async () => {
 
   assert.deepEqual(calls.map((call) => call.query), [
     "DELETE FROM daily_report_counts WHERE updated_at < ?",
-    "DELETE FROM samples_raw WHERE created_at < ?",
-    "DELETE FROM target_error_observations WHERE minute < ?",
     "DELETE FROM target_model_error_observations WHERE minute < ?",
     "DELETE FROM target_minute_aggregates WHERE minute < ?",
     "DELETE FROM target_model_minute_aggregates WHERE minute < ?"
@@ -163,11 +184,9 @@ test("scheduled purge caps all retained D1 tables at 90 days", async () => {
   const cutoffMs = nowMs - ninetyDaysMs;
   const cutoffMinute = Math.floor(cutoffMs / 60000);
   assert.equal(calls[0]!.values[0], cutoffMs);
-  assert.equal(calls[1]!.values[0], cutoffMs);
+  assert.equal(calls[1]!.values[0], cutoffMinute);
   assert.equal(calls[2]!.values[0], cutoffMinute);
   assert.equal(calls[3]!.values[0], cutoffMinute);
-  assert.equal(calls[4]!.values[0], cutoffMinute);
-  assert.equal(calls[5]!.values[0], cutoffMinute);
 });
 
 test("status aggregation returns insufficient data under sample floor", () => {
@@ -304,6 +323,9 @@ function failingDb() {
   return {
     prepare() {
       throw new Error("D1 should not be used for invalid payloads");
+    },
+    async batch() {
+      throw new Error("D1 should not be used for invalid payloads");
     }
   };
 }
@@ -331,6 +353,9 @@ function recordingDb(calls: RecordedQuery[]) {
         }
       };
       return statement;
+    },
+    async batch(statements: Array<{ run(): Promise<unknown> }>) {
+      return Promise.all(statements.map((statement) => statement.run()));
     }
   };
 }
@@ -355,19 +380,22 @@ function statusDb() {
         }
       };
       return statement;
+    },
+    async batch(statements: Array<{ run(): Promise<unknown> }>) {
+      return Promise.all(statements.map((statement) => statement.run()));
     }
   };
 }
 
-function reportRequest(anonymousId: string): Request {
+function reportRequest(anonymousId: string, ok = true): Request {
   return new Request("https://api.example.test/v1/report", {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({
-      ok: true,
-      errorType: "none",
-      errorStatusCode: null,
-      errorHint: null,
+      ok,
+      errorType: ok ? "none" : "server_error",
+      errorStatusCode: ok ? null : 503,
+      errorHint: ok ? null : "Service overloaded",
       modelClass: "sonnet",
       latencyBucket: "lt_3s",
       timeBucket: 30000000,
@@ -382,9 +410,10 @@ function reportRequest(anonymousId: string): Request {
 
 function dailyLimitedDb(count: number) {
   const db = {
-    sampleWrites: 0,
+    reportBatches: [] as string[][],
     prepare(query: string) {
       const statement = {
+        query,
         bind() {
           return statement;
         },
@@ -393,14 +422,25 @@ function dailyLimitedDb(count: number) {
           return { results: [] as T[] };
         },
         async run() {
-          if (query.includes("samples_raw")) db.sampleWrites += 1;
           return {};
         }
       };
       return statement;
+    },
+    async batch(statements: Array<{ run(): Promise<unknown> }>) {
+      db.reportBatches.push(statements.map(readStatementQuery));
+      return Promise.all(statements.map((statement) => statement.run()));
     }
   };
   return db;
+}
+
+function normalizeSqlTable(query: string): string {
+  return query.match(/INSERT INTO\s+([a-z_]+)/)?.[1] ?? "unknown";
+}
+
+function readStatementQuery(statement: { run(): Promise<unknown> }): string {
+  return "query" in statement && typeof statement.query === "string" ? statement.query : "";
 }
 
 async function withMathRandom<T>(value: number, run: () => Promise<T>): Promise<T> {

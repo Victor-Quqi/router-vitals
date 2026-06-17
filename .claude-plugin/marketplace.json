@@ -1,7 +1,7 @@
 {
   "name": "router-vitals",
   "description": "Anonymous community status monitoring plugins for Any Router.",
-  "version": "0.1.16",
+  "version": "0.1.17",
   "owner": {
     "name": "Victor-Quqi"
   },
@@ -11,14 +11,18 @@
       "source": "./plugin",
       "displayName": "Any Router Status Monitor",
       "description": "Anonymous Claude Code usage status reporter for Any Router.",
-      "version": "0.1.16",
+      "version": "0.1.17",
       "author": {
         "name": "router-vitals"
       },
       "homepage": "https://github.com/Victor-Quqi/router-vitals",
       "repository": "https://github.com/Victor-Quqi/router-vitals",
       "category": "monitoring",
-      "tags": ["status", "anyrouter", "claude-code"]
+      "tags": [
+        "status",
+        "anyrouter",
+        "claude-code"
+      ]
     }
   ]
 }

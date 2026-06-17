@@ -8,8 +8,10 @@
   "scripts": {
     "clean:build": "node -e \"require('node:fs').rmSync('.tsbuild/out',{recursive:true,force:true})\"",
     "build": "pnpm run clean:build && tsc -p tsconfig.build.json && node .tsbuild/out/_build/copy-output.mjs",
+    "check:version": "node scripts/version.mjs check",
+    "sync:version": "pnpm run build && node scripts/version.mjs sync",
     "typecheck": "tsc -p tsconfig.json",
-    "test": "pnpm run build && node --test tests/*.test.mjs",
+    "test": "pnpm run build && pnpm run check:version && node --test tests/*.test.mjs",
     "status:preview": "pnpm run build && node scripts/preview-status.mjs"
   },
   "engines": {
