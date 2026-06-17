@@ -6,11 +6,11 @@ const port = process.env.STATUS_PREVIEW_PORT || "8788";
 if (!/^\d+$/.test(port))
     throw new Error("STATUS_PREVIEW_PORT must be a numeric port");
 const pnpm = "pnpm";
+const wranglerDlxArgs = ["dlx", "--allow-build=esbuild,sharp,workerd", "wrangler@4"];
 const wranglerEnv = buildWranglerEnv();
 await runWrangler(["d1", "migrations", "apply", "router-vitals", "--local", "--config", wranglerConfig]);
 const dev = spawnPnpm([
-    "dlx",
-    "wrangler@4",
+    ...wranglerDlxArgs,
     "dev",
     "--config",
     wranglerConfig,
@@ -30,7 +30,7 @@ dev.on("exit", (code, signal) => {
 });
 function runWrangler(args) {
     return new Promise((resolve, reject) => {
-        const child = spawnPnpm(["dlx", "wrangler@4", ...args]);
+        const child = spawnPnpm([...wranglerDlxArgs, ...args]);
         child.on("error", reject);
         child.on("exit", (code) => {
             if (code === 0)
