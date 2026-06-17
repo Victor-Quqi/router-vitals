@@ -1,1 +1,1 @@
-export * from "../plugin/scripts/lib/policy-core.mjs";
+export * from "./policy-core.mjs";

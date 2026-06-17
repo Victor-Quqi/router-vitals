@@ -4,17 +4,20 @@ const mode = parseMode(process.argv[2]);
 const repoRoot = process.cwd();
 const pluginManifestPath = join(repoRoot, "plugin", ".claude-plugin", "plugin.json");
 const marketplacePath = join(repoRoot, ".claude-plugin", "marketplace.json");
-const policySourcePath = join(repoRoot, "src", "plugin", "scripts", "lib", "policy-core.mts");
-const policyOutputPath = join(repoRoot, "plugin", "scripts", "lib", "policy-core.mjs");
+const policyPaths = [
+    join(repoRoot, "src", "shared", "policy-core.mts"),
+    join(repoRoot, "shared", "policy-core.mjs"),
+    join(repoRoot, "plugin", "scripts", "lib", "policy-core.mjs")
+];
 const pluginManifest = await readJson(pluginManifestPath);
 const version = readVersion(pluginManifest, "plugin manifest");
 const mismatches = [];
-await checkPolicyVersion(policySourcePath, version, mismatches);
-await checkPolicyVersion(policyOutputPath, version, mismatches);
+for (const path of policyPaths)
+    await checkPolicyVersion(path, version, mismatches);
 await checkMarketplaceVersion(version, mismatches);
 if (mode === "sync") {
-    await syncPolicyVersion(policySourcePath, version);
-    await syncPolicyVersion(policyOutputPath, version);
+    for (const path of policyPaths)
+        await syncPolicyVersion(path, version);
     await syncMarketplaceVersion(version);
     console.log(`Synced plugin version ${version}`);
 }
