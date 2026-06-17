@@ -39,6 +39,4 @@ claude plugin update anyrouter-status-monitor@router-vitals
 
 **建议保持最新版本**。旧版本可能使用过期的上报规则、目标入口或状态判断逻辑，导致本机贡献被跳过，或状态栏显示不准。
 
-想让插件自动更新，在 `/plugins` -> `Marketplaces` -> `router-vitals` 里确认 `Enable auto-update` 已开启。如果用户用 `DISABLE_AUTOUPDATER=1` 关闭 Claude Code 自身更新，但仍想允许插件自动更新，在 Claude Code Settings JSON 的 `env` 里加 `"FORCE_AUTOUPDATE_PLUGINS": "1"`，重启 Claude Code；该 marketplace 的 auto-update 正常应为开启，不确定时看一下这个位置。不要同时设置 `DISABLE_INSTALLATION_CHECKS=1`，它可能导致插件自动更新失败。
-
 hooks 和 statusLine 是两条独立路径；statusLine 报错时，Claude Code 会继续跑 hooks。这里不配置定时轮询，近 60m 状态在本地缓存 60 秒。

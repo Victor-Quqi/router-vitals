@@ -63,19 +63,6 @@ If a Claude Code session is already running, run `/reload-plugins` inside that s
 
 **Keep the plugin up to date.** Older versions may use outdated reporting rules, target endpoints, or status logic, which can skip your local contributions or make the status line less accurate.
 
-To let the plugin update automatically, open `/plugins` -> `Marketplaces` -> `router-vitals`, then confirm `Enable auto-update` is enabled.
-
-If you intentionally set `DISABLE_AUTOUPDATER=1` to stop Claude Code itself from updating, but still want plugin auto-updates, open Claude Code Settings as JSON, find `env`, and add:
-
-```json
-"env": {
-  "DISABLE_AUTOUPDATER": "1",
-  "FORCE_AUTOUPDATE_PLUGINS": "1"
-}
-```
-
-Restart Claude Code after saving. `Enable auto-update` under `/plugins` -> `Marketplaces` -> `router-vitals` should normally be enabled; check that location if needed. `FORCE_AUTOUPDATE_PLUGINS` is a Claude Code implementation detail for plugin auto-update override. Do not also set `DISABLE_INSTALLATION_CHECKS=1`; it may make plugin auto-update fail.
-
 ## Learn more
 
 - [What gets reported, and how privacy is handled](docs/reporting.en.md)
