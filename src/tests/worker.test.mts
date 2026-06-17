@@ -56,15 +56,19 @@ test("worker rejects reports without target host before touching D1", async () =
 
 test("worker samples reports over the anonymous daily soft limit", async () => {
   const db = dailyLimitedDb(SERVER_DAILY_REPORT_SOFT_LIMIT + 1);
-  const dropped = await withMathRandom(SERVER_DAILY_REPORT_SAMPLE_RATE, () =>
-    handleReport(reportRequest("anon_dailyLimitabcdefghijklmnop"), { DB: db })
+  const dropped = await handleReport(
+    reportRequest("anon_dailyLimitabcdefghijklmnop"),
+    { DB: db },
+    { random: () => SERVER_DAILY_REPORT_SAMPLE_RATE }
   );
 
   assert.equal(dropped.status, 204);
   assert.equal(db.reportBatches.length, 0);
 
-  const accepted = await withMathRandom(SERVER_DAILY_REPORT_SAMPLE_RATE - 0.01, () =>
-    handleReport(reportRequest("anon_dailyLimitAcceptedabcdefghij"), { DB: db })
+  const accepted = await handleReport(
+    reportRequest("anon_dailyLimitAcceptedabcdefghij"),
+    { DB: db },
+    { random: () => SERVER_DAILY_REPORT_SAMPLE_RATE - 0.01 }
   );
 
   assert.equal(accepted.status, 200);
@@ -441,14 +445,4 @@ function normalizeSqlTable(query: string): string {
 
 function readStatementQuery(statement: { run(): Promise<unknown> }): string {
   return "query" in statement && typeof statement.query === "string" ? statement.query : "";
-}
-
-async function withMathRandom<T>(value: number, run: () => Promise<T>): Promise<T> {
-  const original = Math.random;
-  Math.random = () => value;
-  try {
-    return await run();
-  } finally {
-    Math.random = original;
-  }
 }

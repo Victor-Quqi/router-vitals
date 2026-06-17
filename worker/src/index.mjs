@@ -1,4 +1,4 @@
-import { DEFAULT_REMOTE_CONFIG, ERROR_TYPES, LATENCY_BUCKETS, SERVER_DAILY_REPORT_SAMPLE_RATE, normalizeTargetHost, validateReportPayload } from "../../shared/policy.mjs";
+import { DEFAULT_REMOTE_CONFIG, SERVER_DAILY_REPORT_SAMPLE_RATE, normalizeTargetHost, validateReportPayload } from "../../shared/policy.mjs";
 import { createPlatformResponseBodyCache } from "./runtime-cache.mjs";
 import { createSqlReportStore } from "./storage.mjs";
 import { buildStatusFromRows, getStatusWindowSpec, parseStatusWindow } from "./status.mjs";
@@ -65,7 +65,8 @@ export async function handleReport(request, env, runtime = createRuntimeServices
         return json({ error: "invalid_payload", details: ["invalid targetHost"] }, 400);
     const nowMs = Date.now();
     const dailyDecision = await store.reserveDailyReportSlot(payload.anonymousId, nowMs);
-    if (dailyDecision === "drop" || (dailyDecision === "sample" && Math.random() >= SERVER_DAILY_REPORT_SAMPLE_RATE)) {
+    const random = runtime.random ?? Math.random;
+    if (dailyDecision === "drop" || (dailyDecision === "sample" && random() >= SERVER_DAILY_REPORT_SAMPLE_RATE)) {
         return new Response(null, { status: 204, headers: JSON_HEADERS });
     }
     await store.recordReport({
@@ -137,10 +138,4 @@ function jsonText(body, status = 200, headers = {}) {
 }
 function json(value, status = 200) {
     return new Response(JSON.stringify(value), { status, headers: JSON_HEADERS });
-}
-export function getAllowedWorkerValues() {
-    return {
-        errors: ERROR_TYPES,
-        latencies: LATENCY_BUCKETS
-    };
 }

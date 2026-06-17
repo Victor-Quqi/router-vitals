@@ -1,7 +1,5 @@
 import {
   DEFAULT_REMOTE_CONFIG,
-  ERROR_TYPES,
-  LATENCY_BUCKETS,
   SERVER_DAILY_REPORT_SAMPLE_RATE,
   normalizeTargetHost,
   validateReportPayload,
@@ -37,6 +35,7 @@ interface ScheduledContext {
 export interface RuntimeServices {
   reportStore?: ReportStore;
   statusCache?: ResponseBodyCache | null;
+  random?: () => number;
 }
 
 const JSON_HEADERS: Record<string, string> = {
@@ -110,7 +109,8 @@ export async function handleReport(
 
   const nowMs = Date.now();
   const dailyDecision = await store.reserveDailyReportSlot(payload.anonymousId, nowMs);
-  if (dailyDecision === "drop" || (dailyDecision === "sample" && Math.random() >= SERVER_DAILY_REPORT_SAMPLE_RATE)) {
+  const random = runtime.random ?? Math.random;
+  if (dailyDecision === "drop" || (dailyDecision === "sample" && random() >= SERVER_DAILY_REPORT_SAMPLE_RATE)) {
     return new Response(null, { status: 204, headers: JSON_HEADERS });
   }
 
@@ -196,11 +196,4 @@ function jsonText(body: string, status = 200, headers: Record<string, string> = 
 
 function json(value: unknown, status = 200): Response {
   return new Response(JSON.stringify(value), { status, headers: JSON_HEADERS });
-}
-
-export function getAllowedWorkerValues(): { errors: typeof ERROR_TYPES; latencies: typeof LATENCY_BUCKETS } {
-  return {
-    errors: ERROR_TYPES,
-    latencies: LATENCY_BUCKETS
-  };
 }
