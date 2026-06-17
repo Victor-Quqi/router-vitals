@@ -1,30 +1,15 @@
-const ERROR_ORDER = Object.freeze([
-  ["server_error", "err_server_error"],
-  ["rate_limited", "err_rate_limited"],
-  ["network_error", "err_network_error"],
-  ["auth_error", "err_auth_error"],
-  ["timeout", "err_timeout"],
-  ["unknown", "err_unknown"]
-] as const);
+import {
+  STATUS_ERROR_COLUMNS,
+  STATUS_MODEL_ORDER,
+  STATUS_STATE_THRESHOLDS,
+  STATUS_WINDOW_SPECS,
+  type ErrorType,
+  type ModelClass,
+  type StatusWindow
+} from "../../shared/policy.mjs";
 
-const MODEL_ORDER = Object.freeze(["opus", "sonnet", "haiku", "unknown"] as const);
-
-const WINDOW_SPECS = Object.freeze({
-  "5m": { minutes: 5, bucketMinutes: 1, bucketCount: 5 },
-  "15m": { minutes: 15, bucketMinutes: 1, bucketCount: 15 },
-  "60m": { minutes: 60, bucketMinutes: 5, bucketCount: 12 },
-  "90m": { minutes: 90, bucketMinutes: 5, bucketCount: 18 },
-  "24h": { minutes: 24 * 60, bucketMinutes: 60, bucketCount: 24 },
-  "7d": { minutes: 7 * 24 * 60, bucketMinutes: 6 * 60, bucketCount: 28 },
-  "30d": { minutes: 30 * 24 * 60, bucketMinutes: 24 * 60, bucketCount: 30 }
-} as const);
-
-type ErrorType = (typeof ERROR_ORDER)[number][0];
-type ErrorColumn = (typeof ERROR_ORDER)[number][1];
-type ModelClass = (typeof MODEL_ORDER)[number];
-type StatusWindow = keyof typeof WINDOW_SPECS;
 type BucketState = "empty" | "success" | "mixed" | "failure";
-type ServiceState = "insufficient_data" | "down" | "unstable" | "available";
+type ServiceState = keyof typeof STATUS_STATE_THRESHOLDS;
 
 export interface WindowSpec {
   minutes: number;
@@ -136,11 +121,11 @@ interface ErrorDetails {
 }
 
 export function parseStatusWindow(value: string): number | null {
-  return isStatusWindow(value) ? WINDOW_SPECS[value].minutes : null;
+  return isStatusWindow(value) ? STATUS_WINDOW_SPECS[value].minutes : null;
 }
 
 export function getStatusWindowSpec(value: string): WindowSpec | null {
-  return isStatusWindow(value) ? { ...WINDOW_SPECS[value] } : null;
+  return isStatusWindow(value) ? { ...STATUS_WINDOW_SPECS[value] } : null;
 }
 
 export function buildStatusFromRows(
@@ -177,12 +162,7 @@ export function buildStatusFromRows(
       availabilityFormula: "successCount / sampleCount",
       sampleCountDefinition: "Completed Claude Code user turns observed by the plugin in this window.",
       trendBucketRule: "empty=no samples; success=only successful turns; mixed=successful and failed turns; failure=only failed turns.",
-      stateThresholds: {
-        insufficient_data: "sampleCount < 5",
-        down: "availability < 50%",
-        unstable: "50% <= availability < 90%",
-        available: "availability >= 90%"
-      }
+      stateThresholds: { ...STATUS_STATE_THRESHOLDS }
     }
   };
 }
@@ -205,7 +185,7 @@ function buildModelTimelines(
 ): ModelTimeline[] {
   const startMinute = nowMinute - spec.minutes + 1;
   const models = new Map<ModelClass, ModelTimeline>();
-  for (const modelClass of MODEL_ORDER) getModelTimeline(models, modelClass, spec, startMinute, nowMinute);
+  for (const modelClass of STATUS_MODEL_ORDER) getModelTimeline(models, modelClass, spec, startMinute, nowMinute);
 
   for (const row of rows) {
     const minute = Number(row.minute);
@@ -233,7 +213,7 @@ function buildModelTimelines(
 
   return [...models.values()]
     .map(finalizeModelTimeline)
-    .sort((a, b) => MODEL_ORDER.indexOf(a.modelClass) - MODEL_ORDER.indexOf(b.modelClass));
+    .sort((a, b) => STATUS_MODEL_ORDER.indexOf(a.modelClass) - STATUS_MODEL_ORDER.indexOf(b.modelClass));
 }
 
 function getModelTimeline(
@@ -307,7 +287,7 @@ function buildModelErrorBreakdowns(
   rows: ModelErrorDetailRow[]
 ): Record<ModelClass, ErrorBreakdown[]> {
   const grouped = new Map<ModelClass, { rows: ModelErrorDetailRow[]; counts: Record<ErrorType, number> }>();
-  for (const modelClass of MODEL_ORDER) grouped.set(modelClass, createErrorGroup());
+  for (const modelClass of STATUS_MODEL_ORDER) grouped.set(modelClass, createErrorGroup());
 
   for (const row of rows) {
     const modelClass = normalizeModelClass(row.model_class);
@@ -321,7 +301,7 @@ function buildModelErrorBreakdowns(
   }
 
   const failureCounts = new Map(models.map((model) => [model.modelClass, model.failureCount]));
-  return Object.fromEntries(MODEL_ORDER.map((modelClass) => {
+  return Object.fromEntries(STATUS_MODEL_ORDER.map((modelClass) => {
     const item = grouped.get(modelClass) || createErrorGroup();
     return [modelClass, buildErrorBreakdown(item.counts, failureCounts.get(modelClass) || 0, item.rows)];
   })) as Record<ModelClass, ErrorBreakdown[]>;
@@ -341,7 +321,7 @@ function getGroupedErrors(
 function createErrorGroup(): { rows: ModelErrorDetailRow[]; counts: Record<ErrorType, number> } {
   return {
     rows: [],
-    counts: Object.fromEntries(ERROR_ORDER.map(([key]) => [key, 0])) as Record<ErrorType, number>
+    counts: Object.fromEntries(STATUS_ERROR_COLUMNS.map(([key]) => [key, 0])) as Record<ErrorType, number>
   };
 }
 
@@ -360,14 +340,14 @@ function sumRows(rows: AggregateRow[]): Totals {
     total_samples: 0,
     success_samples: 0,
     failure_samples: 0,
-    errors: Object.fromEntries(ERROR_ORDER.map(([key]) => [key, 0]))
+    errors: Object.fromEntries(STATUS_ERROR_COLUMNS.map(([key]) => [key, 0]))
   } as Totals;
 
   for (const row of rows) {
     totals.total_samples += Number(row.total_samples || 0);
     totals.success_samples += Number(row.success_samples || 0);
     totals.failure_samples += Number(row.failure_samples || 0);
-    for (const [key, column] of ERROR_ORDER) totals.errors[key] += Number(row[column] || 0);
+    for (const [key, column] of STATUS_ERROR_COLUMNS) totals.errors[key] += Number(row[column] || 0);
   }
 
   return totals;
@@ -379,7 +359,7 @@ function buildErrorBreakdown(
   detailRows: ErrorDetailRow[] = []
 ): ErrorBreakdown[] {
   const details = buildErrorDetails(detailRows);
-  return ERROR_ORDER
+  return STATUS_ERROR_COLUMNS
     .map(([type]) => ({
       type,
       count: counts[type] || 0,
@@ -463,11 +443,11 @@ function labelForState(state: ServiceState, errors: ErrorBreakdown[]): string {
 }
 
 function normalizeModelClass(value: unknown): ModelClass {
-  return MODEL_ORDER.includes(value as ModelClass) ? value as ModelClass : "unknown";
+  return STATUS_MODEL_ORDER.includes(value as ModelClass) ? value as ModelClass : "unknown";
 }
 
 function normalizeErrorType(value: unknown): ErrorType {
-  return ERROR_ORDER.some(([type]) => type === value) ? value as ErrorType : "unknown";
+  return STATUS_ERROR_COLUMNS.some(([type]) => type === value) ? value as ErrorType : "unknown";
 }
 
 function minuteToIso(minute: number): string {
@@ -475,5 +455,5 @@ function minuteToIso(minute: number): string {
 }
 
 function isStatusWindow(value: string): value is StatusWindow {
-  return value in WINDOW_SPECS;
+  return value in STATUS_WINDOW_SPECS;
 }

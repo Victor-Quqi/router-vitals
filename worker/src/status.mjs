@@ -1,26 +1,9 @@
-const ERROR_ORDER = Object.freeze([
-    ["server_error", "err_server_error"],
-    ["rate_limited", "err_rate_limited"],
-    ["network_error", "err_network_error"],
-    ["auth_error", "err_auth_error"],
-    ["timeout", "err_timeout"],
-    ["unknown", "err_unknown"]
-]);
-const MODEL_ORDER = Object.freeze(["opus", "sonnet", "haiku", "unknown"]);
-const WINDOW_SPECS = Object.freeze({
-    "5m": { minutes: 5, bucketMinutes: 1, bucketCount: 5 },
-    "15m": { minutes: 15, bucketMinutes: 1, bucketCount: 15 },
-    "60m": { minutes: 60, bucketMinutes: 5, bucketCount: 12 },
-    "90m": { minutes: 90, bucketMinutes: 5, bucketCount: 18 },
-    "24h": { minutes: 24 * 60, bucketMinutes: 60, bucketCount: 24 },
-    "7d": { minutes: 7 * 24 * 60, bucketMinutes: 6 * 60, bucketCount: 28 },
-    "30d": { minutes: 30 * 24 * 60, bucketMinutes: 24 * 60, bucketCount: 30 }
-});
+import { STATUS_ERROR_COLUMNS, STATUS_MODEL_ORDER, STATUS_STATE_THRESHOLDS, STATUS_WINDOW_SPECS } from "../../shared/policy.mjs";
 export function parseStatusWindow(value) {
-    return isStatusWindow(value) ? WINDOW_SPECS[value].minutes : null;
+    return isStatusWindow(value) ? STATUS_WINDOW_SPECS[value].minutes : null;
 }
 export function getStatusWindowSpec(value) {
-    return isStatusWindow(value) ? { ...WINDOW_SPECS[value] } : null;
+    return isStatusWindow(value) ? { ...STATUS_WINDOW_SPECS[value] } : null;
 }
 export function buildStatusFromRows(rows, windowValue, modelRows = [], nowMinute = Math.floor(Date.now() / 60000), modelErrorDetailRows = []) {
     const spec = getStatusWindowSpec(windowValue);
@@ -49,12 +32,7 @@ export function buildStatusFromRows(rows, windowValue, modelRows = [], nowMinute
             availabilityFormula: "successCount / sampleCount",
             sampleCountDefinition: "Completed Claude Code user turns observed by the plugin in this window.",
             trendBucketRule: "empty=no samples; success=only successful turns; mixed=successful and failed turns; failure=only failed turns.",
-            stateThresholds: {
-                insufficient_data: "sampleCount < 5",
-                down: "availability < 50%",
-                unstable: "50% <= availability < 90%",
-                available: "availability >= 90%"
-            }
+            stateThresholds: { ...STATUS_STATE_THRESHOLDS }
         }
     };
 }
@@ -70,7 +48,7 @@ function buildTimelineMeta(spec, nowMinute) {
 function buildModelTimelines(rows, spec, nowMinute, errorRows = []) {
     const startMinute = nowMinute - spec.minutes + 1;
     const models = new Map();
-    for (const modelClass of MODEL_ORDER)
+    for (const modelClass of STATUS_MODEL_ORDER)
         getModelTimeline(models, modelClass, spec, startMinute, nowMinute);
     for (const row of rows) {
         const minute = Number(row.minute);
@@ -97,7 +75,7 @@ function buildModelTimelines(rows, spec, nowMinute, errorRows = []) {
     attachBucketErrors(models, errorRows);
     return [...models.values()]
         .map(finalizeModelTimeline)
-        .sort((a, b) => MODEL_ORDER.indexOf(a.modelClass) - MODEL_ORDER.indexOf(b.modelClass));
+        .sort((a, b) => STATUS_MODEL_ORDER.indexOf(a.modelClass) - STATUS_MODEL_ORDER.indexOf(b.modelClass));
 }
 function getModelTimeline(models, modelClass, spec, startMinute, nowMinute) {
     const current = models.get(modelClass);
@@ -159,7 +137,7 @@ function attachBucketErrors(models, rows) {
 }
 function buildModelErrorBreakdowns(models, rows) {
     const grouped = new Map();
-    for (const modelClass of MODEL_ORDER)
+    for (const modelClass of STATUS_MODEL_ORDER)
         grouped.set(modelClass, createErrorGroup());
     for (const row of rows) {
         const modelClass = normalizeModelClass(row.model_class);
@@ -173,7 +151,7 @@ function buildModelErrorBreakdowns(models, rows) {
         grouped.set(modelClass, item);
     }
     const failureCounts = new Map(models.map((model) => [model.modelClass, model.failureCount]));
-    return Object.fromEntries(MODEL_ORDER.map((modelClass) => {
+    return Object.fromEntries(STATUS_MODEL_ORDER.map((modelClass) => {
         const item = grouped.get(modelClass) || createErrorGroup();
         return [modelClass, buildErrorBreakdown(item.counts, failureCounts.get(modelClass) || 0, item.rows)];
     }));
@@ -189,7 +167,7 @@ function getGroupedErrors(grouped, key) {
 function createErrorGroup() {
     return {
         rows: [],
-        counts: Object.fromEntries(ERROR_ORDER.map(([key]) => [key, 0]))
+        counts: Object.fromEntries(STATUS_ERROR_COLUMNS.map(([key]) => [key, 0]))
     };
 }
 function finalizeModelTimeline(model) {
@@ -206,20 +184,20 @@ function sumRows(rows) {
         total_samples: 0,
         success_samples: 0,
         failure_samples: 0,
-        errors: Object.fromEntries(ERROR_ORDER.map(([key]) => [key, 0]))
+        errors: Object.fromEntries(STATUS_ERROR_COLUMNS.map(([key]) => [key, 0]))
     };
     for (const row of rows) {
         totals.total_samples += Number(row.total_samples || 0);
         totals.success_samples += Number(row.success_samples || 0);
         totals.failure_samples += Number(row.failure_samples || 0);
-        for (const [key, column] of ERROR_ORDER)
+        for (const [key, column] of STATUS_ERROR_COLUMNS)
             totals.errors[key] += Number(row[column] || 0);
     }
     return totals;
 }
 function buildErrorBreakdown(counts, failureCount, detailRows = []) {
     const details = buildErrorDetails(detailRows);
-    return ERROR_ORDER
+    return STATUS_ERROR_COLUMNS
         .map(([type]) => ({
         type,
         count: counts[type] || 0,
@@ -305,14 +283,14 @@ function labelForState(state, errors) {
     return "样本不足，暂不判断可用状态";
 }
 function normalizeModelClass(value) {
-    return MODEL_ORDER.includes(value) ? value : "unknown";
+    return STATUS_MODEL_ORDER.includes(value) ? value : "unknown";
 }
 function normalizeErrorType(value) {
-    return ERROR_ORDER.some(([type]) => type === value) ? value : "unknown";
+    return STATUS_ERROR_COLUMNS.some(([type]) => type === value) ? value : "unknown";
 }
 function minuteToIso(minute) {
     return new Date(minute * 60000).toISOString();
 }
 function isStatusWindow(value) {
-    return value in WINDOW_SPECS;
+    return value in STATUS_WINDOW_SPECS;
 }

@@ -19,6 +19,7 @@ export const ERROR_TYPES = Object.freeze([
     "unknown"
 ]);
 export const MODEL_CLASSES = Object.freeze(["haiku", "sonnet", "opus", "unknown"]);
+export const STATUS_MODEL_ORDER = Object.freeze(["opus", "sonnet", "haiku", "unknown"]);
 export const LATENCY_BUCKETS = Object.freeze([
     "lt_3s",
     "3_10s",
@@ -27,6 +28,29 @@ export const LATENCY_BUCKETS = Object.freeze([
     "gt_60s",
     "unknown"
 ]);
+export const STATUS_ERROR_COLUMNS = Object.freeze([
+    ["server_error", "err_server_error"],
+    ["rate_limited", "err_rate_limited"],
+    ["network_error", "err_network_error"],
+    ["auth_error", "err_auth_error"],
+    ["timeout", "err_timeout"],
+    ["unknown", "err_unknown"]
+]);
+export const STATUS_WINDOW_SPECS = Object.freeze({
+    "5m": { minutes: 5, bucketMinutes: 1, bucketCount: 5 },
+    "15m": { minutes: 15, bucketMinutes: 1, bucketCount: 15 },
+    "60m": { minutes: 60, bucketMinutes: 5, bucketCount: 12 },
+    "90m": { minutes: 90, bucketMinutes: 5, bucketCount: 18 },
+    "24h": { minutes: 24 * 60, bucketMinutes: 60, bucketCount: 24 },
+    "7d": { minutes: 7 * 24 * 60, bucketMinutes: 6 * 60, bucketCount: 28 },
+    "30d": { minutes: 30 * 24 * 60, bucketMinutes: 24 * 60, bucketCount: 30 }
+});
+export const STATUS_STATE_THRESHOLDS = Object.freeze({
+    insufficient_data: "sampleCount < 5",
+    down: "availability < 50%",
+    unstable: "50% <= availability < 90%",
+    available: "availability >= 90%"
+});
 export const REPORT_FIELDS = Object.freeze([
     "ok",
     "errorType",
@@ -53,7 +77,7 @@ const REQUIRED_REPORT_FIELDS = Object.freeze([
     "targetMatched",
     "targetHost"
 ]);
-const STATUS_WINDOWS = Object.freeze(["5m", "15m", "60m", "90m", "24h", "7d", "30d"]);
+export const STATUS_WINDOWS = Object.freeze(Object.keys(STATUS_WINDOW_SPECS));
 export const DEFAULT_REMOTE_CONFIG = Object.freeze({
     reportingEnabled: true,
     apiBaseUrl: DEFAULT_API_BASE_URL,
