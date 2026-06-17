@@ -2,11 +2,11 @@
 
 [English](README.en.md)
 
-一个 Claude Code 插件，用来看 Any Router 公益站当前状态。
+一个 Claude Code 插件，用来监测 Any Router 当前状态。
 
-它不主动探测——单账号反复探测容易触发上游风控、限流甚至封号，而且只代表那一个账号。这里换成：大家正常用 Claude Code，每轮结束后匿名上报这轮成功还是失败，汇总成社区状态。
+单账号反复探测容易触发上游风控、限流甚至封号，而且只代表那一个账号。这里本插件不主动探测，而是每轮结束后匿名上报这轮成功还是失败，汇总成社区状态。
 
-装上即可做出贡献，平时完全无感——插件只读环境变量判断你连的是不是 Any Router，不碰你发往上游的请求，对 Any Router 不留额外特征。想在 Claude Code 里看状态，按下面配置一次状态栏；也可以直接打开状态页。
+装上即可做出贡献，平时完全无感——插件不碰你发往上游的请求，对 Any Router 不留任何额外特征。想在 Claude Code 里看状态，按下面配置一次状态栏；也可以直接打开状态页。
 
 状态页：https://router-vitals.pages.dev/
 
@@ -28,7 +28,7 @@ claude plugin marketplace add Victor-Quqi/router-vitals
 claude plugin install anyrouter-status-monitor@router-vitals
 ```
 
-装完插件 hooks 就开始工作了。不想参与设环境变量 `ANYROUTER_STATUS_DISABLED=1` 即可。
+装完插件 hooks 就开始工作了。不想参与贡献，设环境变量 `ANYROUTER_STATUS_DISABLED=1` 即可。
 
 ### 在状态栏显示状态（推荐）
 
@@ -46,11 +46,11 @@ claude plugin list --json
 node "<installPath>/scripts/setup-statusline.mjs"
 ```
 
-Linux/macOS 换成对应的绝对路径。配置一次后，后续插件升级不用再改 statusLine 路径。
+Linux/macOS 换成对应的绝对路径。
 
 已有其他 statusLine 时，配置命令默认不替换；确认要替换时加 `--force`。
 
-配好后状态栏大致长这样：`Any Router 近 60m 状态: 可用 · 贡献开启 · 今日贡献 12 条`；当天上报满额会显示 `今日已满`。
+配好后状态栏大致长这样：`Any Router 近 60m 状态: 可用 · 贡献开启 · 今日贡献 12 条`。
 
 有新版时会追加更新提示。命令行手动更新：
 
@@ -74,7 +74,7 @@ claude plugin update anyrouter-status-monitor@router-vitals
 }
 ```
 
-改完重启 Claude Code。`/plugins` -> `Marketplaces` -> `router-vitals` 里的 `Enable auto-update` 正常应为开启；不确定时看一下这个位置。`FORCE_AUTOUPDATE_PLUGINS` 是 Claude Code 当前实现里的插件自动更新覆盖开关。不要同时设置 `DISABLE_INSTALLATION_CHECKS=1`，它可能导致插件自动更新失败，表现为新版已经进 cache，但已安装版本仍不切换。如果出现 `Auto-update failed: no write permission to npm prefix`，说明 Claude Code 更新器没有 npm 全局目录写权限，这条自动更新链路已经失败；用上面的手动更新命令，或先按 `/doctor` 修复 Claude Code 的安装/权限。
+改完重启 Claude Code。`/plugins` -> `Marketplaces` -> `router-vitals` 里的 `Enable auto-update` 正常应为开启；不确定时看一下这个位置。`FORCE_AUTOUPDATE_PLUGINS` 是 Claude Code 当前实现里的插件自动更新覆盖开关。不要同时设置 `DISABLE_INSTALLATION_CHECKS=1`，它可能导致插件自动更新失败。
 
 ## 想了解更多
 
