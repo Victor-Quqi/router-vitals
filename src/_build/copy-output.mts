@@ -3,7 +3,7 @@ import { join } from "node:path";
 
 const repoRoot = process.cwd();
 const outRoot = join(repoRoot, ".tsbuild", "out");
-const excludedTopLevel = new Set(["_build"]);
+const excludedTopLevel = new Set(["_build", "tests"]);
 
 await copyChildren(outRoot, repoRoot, 0);
 await packagePluginPolicyCore();
