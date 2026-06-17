@@ -77,7 +77,24 @@ function formatContributionCount(count: number): string {
 }
 
 function formatUpdateHint(latestPluginVersion: string): string | null {
-  return comparePluginVersions(latestPluginVersion, PLUGIN_VERSION) > 0 ? `插件有新版 ${latestPluginVersion} · 运行 /plugin` : null;
+  if (comparePluginVersions(latestPluginVersion, PLUGIN_VERSION) <= 0) return null;
+
+  const globalAutoUpdaterDisabled = isTruthyEnv(process.env.DISABLE_AUTOUPDATER);
+  const pluginAutoUpdaterForced = isTruthyEnv(process.env.FORCE_AUTOUPDATE_PLUGINS);
+
+  if (globalAutoUpdaterDisabled && !pluginAutoUpdaterForced) {
+    return `插件有新版 ${latestPluginVersion} · DISABLE_AUTOUPDATER 已阻止插件自动更新 · 在设置 env 加 FORCE_AUTOUPDATE_PLUGINS=1 或手动更新`;
+  }
+
+  if (pluginAutoUpdaterForced) {
+    return `插件有新版 ${latestPluginVersion} · FORCE_AUTOUPDATE_PLUGINS 已开启 · Marketplace auto-update 应为开启`;
+  }
+
+  return `插件有新版 ${latestPluginVersion} · 开启 Marketplace auto-update 或手动更新`;
+}
+
+function isTruthyEnv(value: string | undefined): boolean {
+  return /^(1|true|yes|on)$/i.test(value ?? "");
 }
 
 function comparePluginVersions(left: string, right: string): number {

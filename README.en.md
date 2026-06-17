@@ -52,7 +52,7 @@ If another statusLine is already configured, the setup command does not replace 
 
 Once configured, the status line looks roughly like: `Any Router 近 60m 状态: 可用 · 贡献开启 · 今日贡献 12 条`. When the daily cap is reached it shows `今日已满`.
 
-When a newer plugin version is available, it appends `插件有新版 x.y.z · 运行 /plugin`. You can also update manually from the CLI:
+When a newer plugin version is available, the status line appends an update hint. You can update manually from the CLI:
 
 ```bash
 claude plugin marketplace update router-vitals
@@ -63,7 +63,18 @@ If a Claude Code session is already running, run `/reload-plugins` inside that s
 
 **Keep the plugin up to date.** Older versions may use outdated reporting rules, target endpoints, or status logic, which can skip your local contributions or make the status line less accurate.
 
-If you do not want to update manually and trust this repository, you can also open `/plugin`, go to `Marketplaces`, choose `router-vitals`, and enable auto-update.
+Auto-update is optional. If you allow Claude Code auto-updates, open `/plugins` -> `Marketplaces` -> `router-vitals`, then choose `Enable auto-update`.
+
+If you intentionally set `DISABLE_AUTOUPDATER=1` to stop Claude Code itself from updating, but still want plugin auto-updates, open Claude Code Settings as JSON, find `env`, and add:
+
+```json
+"env": {
+  "DISABLE_AUTOUPDATER": "1",
+  "FORCE_AUTOUPDATE_PLUGINS": "1"
+}
+```
+
+Restart Claude Code after saving. `Enable auto-update` under `/plugins` -> `Marketplaces` -> `router-vitals` should normally be enabled; check that location if needed. `FORCE_AUTOUPDATE_PLUGINS` is a Claude Code implementation detail for plugin auto-update override; if your environment disables it, the status line still shows update notices and the manual commands above remain the reliable path.
 
 ## Learn more
 

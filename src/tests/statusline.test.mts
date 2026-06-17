@@ -111,6 +111,77 @@ test("statusLine caches remote status between invocations", async () => {
   }
 });
 
+test("statusLine explains when DISABLE_AUTOUPDATER blocks plugin auto-update", async () => {
+  const stateDir = await mkdtemp(join(tmpdir(), "router-vitals-statusline-"));
+  const server = createServer((req, res) => {
+    if (req.method === "GET" && req.url === "/config.json") {
+      respondJson(res, {
+        latestPluginVersion: "9.9.9"
+      });
+      return;
+    }
+
+    res.writeHead(404);
+    res.end();
+  });
+
+  await listen(server);
+
+  try {
+    const output = await runStatusLine({
+      ...process.env,
+      ANYROUTER_STATUS_STATE_DIR: stateDir,
+      ANYROUTER_STATUS_CONFIG_URL: `http://127.0.0.1:${serverPort(server)}/config.json`,
+      ANTHROPIC_BASE_URL: "https://api.anthropic.com",
+      DISABLE_AUTOUPDATER: "1",
+      FORCE_AUTOUPDATE_PLUGINS: "0"
+    });
+
+    assert.match(output, /插件有新版 9\.9\.9/);
+    assert.match(output, /DISABLE_AUTOUPDATER 已阻止插件自动更新/);
+    assert.match(output, /设置 env/);
+    assert.match(output, /FORCE_AUTOUPDATE_PLUGINS=1/);
+  } finally {
+    server.close();
+    await rm(stateDir, { recursive: true, force: true });
+  }
+});
+
+test("statusLine points to marketplace auto-update when plugin auto-update is forced", async () => {
+  const stateDir = await mkdtemp(join(tmpdir(), "router-vitals-statusline-"));
+  const server = createServer((req, res) => {
+    if (req.method === "GET" && req.url === "/config.json") {
+      respondJson(res, {
+        latestPluginVersion: "9.9.9"
+      });
+      return;
+    }
+
+    res.writeHead(404);
+    res.end();
+  });
+
+  await listen(server);
+
+  try {
+    const output = await runStatusLine({
+      ...process.env,
+      ANYROUTER_STATUS_STATE_DIR: stateDir,
+      ANYROUTER_STATUS_CONFIG_URL: `http://127.0.0.1:${serverPort(server)}/config.json`,
+      ANTHROPIC_BASE_URL: "https://api.anthropic.com",
+      DISABLE_AUTOUPDATER: "1",
+      FORCE_AUTOUPDATE_PLUGINS: "1"
+    });
+
+    assert.match(output, /插件有新版 9\.9\.9/);
+    assert.match(output, /FORCE_AUTOUPDATE_PLUGINS 已开启/);
+    assert.match(output, /Marketplace auto-update/);
+  } finally {
+    server.close();
+    await rm(stateDir, { recursive: true, force: true });
+  }
+});
+
 async function runStatusLine(env: NodeJS.ProcessEnv): Promise<string> {
   return new Promise<string>((resolveRun, rejectRun) => {
     const child = spawn(process.execPath, [statuslinePath], {
