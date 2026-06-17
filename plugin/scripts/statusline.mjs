@@ -69,7 +69,7 @@ function formatContributionCount(count) {
 function formatUpdateHint(latestPluginVersion) {
     if (comparePluginVersions(latestPluginVersion, PLUGIN_VERSION) <= 0)
         return null;
-    return `插件有新版 ${latestPluginVersion} · 手动更新`;
+    return `插件有新版 ${latestPluginVersion} · 运行 /plugin 更新`;
 }
 function comparePluginVersions(left, right) {
     const leftParts = parsePluginVersion(left);
