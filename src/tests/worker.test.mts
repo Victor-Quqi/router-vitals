@@ -84,6 +84,23 @@ test("worker drops all reports over the anonymous daily hard limit before report
   assert.equal(db.reportBatches.length, 0);
 });
 
+test("worker daily report limit uses the Shanghai calendar day", async () => {
+  const nowMs = Date.UTC(2025, 11, 31, 16, 30, 0);
+  const originalNow = Date.now;
+  const calls: RecordedQuery[] = [];
+
+  Date.now = () => nowMs;
+  try {
+    const response = await handleReport(reportRequest("anon_shanghaiDayabcdefghijklmn"), { DB: recordingDb(calls) });
+    assert.equal(response.status, 200);
+  } finally {
+    Date.now = originalNow;
+  }
+
+  assert.match(calls[0]!.query, /daily_report_counts/);
+  assert.equal(calls[0]!.values[0], "2026-01-01");
+});
+
 test("worker batches report aggregate writes", async () => {
   const successDb = dailyLimitedDb(1);
   const success = await handleReport(reportRequest("anon_batchSuccessabcdefghijklmn"), { DB: successDb });

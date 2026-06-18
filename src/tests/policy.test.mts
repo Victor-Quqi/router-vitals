@@ -7,6 +7,7 @@ import {
   classifyModel,
   createErrorHint,
   extractErrorStatusCode,
+  getTodayKey,
   matchTargetBaseUrl,
   normalizeTargetHost,
   sanitizeErrorHint,
@@ -54,6 +55,28 @@ test("latency buckets are stable", () => {
   assert.equal(bucketLatency(10000), "10_30s");
   assert.equal(bucketLatency(30000), "30_60s");
   assert.equal(bucketLatency(60000), "gt_60s");
+});
+
+test("today key uses the runtime local date getters", () => {
+  class LocalDateStub extends Date {
+    override getFullYear(): number {
+      return 2026;
+    }
+
+    override getMonth(): number {
+      return 0;
+    }
+
+    override getDate(): number {
+      return 1;
+    }
+
+    override toISOString(): string {
+      return "2025-12-31T16:30:00.000Z";
+    }
+  }
+
+  assert.equal(getTodayKey(new LocalDateStub(0)), "2026-01-01");
 });
 
 test("report payload rejects actual URLs and station fields", () => {

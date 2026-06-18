@@ -4,6 +4,7 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { getStatePath, loadState } from "../plugin/scripts/lib/state.mjs";
+import { getTodayKey } from "../shared/policy.mjs";
 
 const ENV_KEYS = [
   "ANYROUTER_STATUS_STATE_DIR",
@@ -68,7 +69,7 @@ test("loadState can read legacy Claude plugin data state", async () => {
 test("loadState prunes stale local counters and turn state", async () => {
   const stateDir = await mkdtemp(join(tmpdir(), "router-vitals-state-"));
   const statePath = join(stateDir, "anyrouter-status-monitor", "state.json");
-  const today = new Date().toISOString().slice(0, 10);
+  const today = getTodayKey();
   const freshMs = Date.now();
   const staleMs = freshMs - 8 * 24 * 60 * 60 * 1000;
 

@@ -149,8 +149,7 @@ function normalizeContributions(value, now) {
     return result;
 }
 function getRetentionCutoffKey(now) {
-    const cutoffMs = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - CONTRIBUTION_RETENTION_DAYS + 1);
-    return new Date(cutoffMs).toISOString().slice(0, 10);
+    return getTodayKey(new Date(now.getFullYear(), now.getMonth(), now.getDate() - CONTRIBUTION_RETENTION_DAYS + 1));
 }
 function isRecord(value) {
     return Boolean(value && typeof value === "object" && !Array.isArray(value));

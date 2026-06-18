@@ -17,6 +17,7 @@ const ERROR_COLUMNS = Object.freeze({
     unknown: "err_unknown"
 });
 const MAX_RETENTION_DAYS = 90;
+const SHANGHAI_UTC_OFFSET_MS = 8 * 60 * 60 * 1000;
 export function createSqlReportStore(db) {
     return {
         reserveDailyReportSlot(anonymousId, nowMs) {
@@ -218,8 +219,7 @@ function parseBoundedRetention(value, fallback, min, max) {
     return Math.min(max, Math.max(min, parsed));
 }
 async function reserveDailyReportSlot(db, anonymousId, nowMs) {
-    const now = new Date(nowMs);
-    const day = now.toISOString().slice(0, 10);
+    const day = getShanghaiDayKey(nowMs);
     const result = await db.prepare(`
     INSERT INTO daily_report_counts (day, anonymous_id, count, updated_at)
     VALUES (?, ?, 1, ?)
@@ -234,4 +234,7 @@ async function reserveDailyReportSlot(db, anonymousId, nowMs) {
     if (count > SERVER_DAILY_REPORT_SOFT_LIMIT)
         return "sample";
     return "accept";
+}
+function getShanghaiDayKey(nowMs) {
+    return new Date(nowMs + SHANGHAI_UTC_OFFSET_MS).toISOString().slice(0, 10);
 }

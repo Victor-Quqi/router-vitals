@@ -6,7 +6,7 @@ import { createServer, type Server, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
-import { LOCAL_DAILY_REPORT_LIMIT } from "../plugin/scripts/lib/policy.mjs";
+import { LOCAL_DAILY_REPORT_LIMIT, getTodayKey } from "../plugin/scripts/lib/policy.mjs";
 const hookPath = resolve("plugin/scripts/hook.mjs");
 
 test("plugin hook uploads only for matched AnyRouter sessions", async () => {
@@ -173,7 +173,7 @@ test("plugin hook skips uploads after the local daily contribution limit", async
   await listen(server);
   const stateDir = await mkdtemp(join(tmpdir(), "router-vitals-"));
   const statePath = join(stateDir, "anyrouter-status-monitor", "state.json");
-  const today = new Date().toISOString().slice(0, 10);
+  const today = getTodayKey();
 
   await mkdir(dirname(statePath), { recursive: true });
   await writeFile(statePath, JSON.stringify({

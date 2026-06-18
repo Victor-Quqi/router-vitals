@@ -7,13 +7,14 @@ import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { LOCAL_DAILY_REPORT_LIMIT } from "../plugin/scripts/lib/policy.mjs";
+import { getTodayKey } from "../shared/policy.mjs";
 
 const statuslinePath = resolve("plugin/scripts/statusline.mjs");
 
 test("statusLine prints today's local contribution count", async () => {
   const stateDir = await mkdtemp(join(tmpdir(), "router-vitals-statusline-"));
   const statePath = join(stateDir, "anyrouter-status-monitor", "state.json");
-  const today = new Date().toISOString().slice(0, 10);
+  const today = getTodayKey();
 
   await mkdir(dirname(statePath), { recursive: true });
   await writeFile(statePath, JSON.stringify({
@@ -37,7 +38,7 @@ test("statusLine prints today's local contribution count", async () => {
 test("statusLine shows a full daily contribution hint", async () => {
   const stateDir = await mkdtemp(join(tmpdir(), "router-vitals-statusline-"));
   const statePath = join(stateDir, "anyrouter-status-monitor", "state.json");
-  const today = new Date().toISOString().slice(0, 10);
+  const today = getTodayKey();
 
   await mkdir(dirname(statePath), { recursive: true });
   await writeFile(statePath, JSON.stringify({

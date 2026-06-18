@@ -1,4 +1,4 @@
-export const PLUGIN_VERSION = "0.1.18";
+export const PLUGIN_VERSION = "0.1.19";
 export const TARGET_HOSTS = Object.freeze([
     "anyrouter.top",
     "a-ocnfniawgw.cn-shanghai.fcapp.run"
@@ -120,7 +120,10 @@ export function matchTargetBaseUrl(baseUrl, targetHosts = TARGET_HOSTS) {
     return { matched: normalizedTargets.includes(host), host };
 }
 export function getTodayKey(now = new Date()) {
-    return now.toISOString().slice(0, 10);
+    const year = now.getFullYear();
+    const month = String(now.getMonth() + 1).padStart(2, "0");
+    const day = String(now.getDate()).padStart(2, "0");
+    return `${year}-${month}-${day}`;
 }
 export function createTimeBucket(nowMs = Date.now()) {
     return Math.floor(nowMs / 60000);

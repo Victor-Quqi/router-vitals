@@ -177,12 +177,9 @@ function normalizeContributions(value: unknown, now: Date): Record<string, numbe
 }
 
 function getRetentionCutoffKey(now: Date): string {
-  const cutoffMs = Date.UTC(
-    now.getUTCFullYear(),
-    now.getUTCMonth(),
-    now.getUTCDate() - CONTRIBUTION_RETENTION_DAYS + 1
+  return getTodayKey(
+    new Date(now.getFullYear(), now.getMonth(), now.getDate() - CONTRIBUTION_RETENTION_DAYS + 1)
   );
-  return new Date(cutoffMs).toISOString().slice(0, 10);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
