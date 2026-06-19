@@ -1,4 +1,4 @@
-export const PLUGIN_VERSION = "0.1.19";
+export const PLUGIN_VERSION = "0.1.20";
 export const TARGET_HOSTS = Object.freeze([
     "anyrouter.top",
     "a-ocnfniawgw.cn-shanghai.fcapp.run"
@@ -20,13 +20,21 @@ export const ERROR_TYPES = Object.freeze([
 ]);
 export const MODEL_CLASSES = Object.freeze(["haiku", "sonnet", "opus", "unknown"]);
 export const STATUS_MODEL_ORDER = Object.freeze(["opus", "sonnet", "haiku", "unknown"]);
-export const LATENCY_BUCKETS = Object.freeze([
+export const ASSISTANT_START_BUCKETS = Object.freeze([
     "lt_3s",
     "3_10s",
     "10_30s",
     "30_60s",
     "gt_60s",
     "unknown"
+]);
+export const STATUS_ASSISTANT_START_COLUMNS = Object.freeze([
+    ["lt_3s", "assistant_start_lt_3s"],
+    ["3_10s", "assistant_start_3_10s"],
+    ["10_30s", "assistant_start_10_30s"],
+    ["30_60s", "assistant_start_30_60s"],
+    ["gt_60s", "assistant_start_gt_60s"],
+    ["unknown", "assistant_start_unknown"]
 ]);
 export const STATUS_ERROR_COLUMNS = Object.freeze([
     ["server_error", "err_server_error"],
@@ -57,7 +65,7 @@ export const REPORT_FIELDS = Object.freeze([
     "errorStatusCode",
     "errorHint",
     "modelClass",
-    "latencyBucket",
+    "assistantStartBucket",
     "timeBucket",
     "pluginVersion",
     "anonymousId",
@@ -69,7 +77,7 @@ const REQUIRED_REPORT_FIELDS = Object.freeze([
     "ok",
     "errorType",
     "modelClass",
-    "latencyBucket",
+    "assistantStartBucket",
     "timeBucket",
     "pluginVersion",
     "anonymousId",
@@ -128,7 +136,7 @@ export function getTodayKey(now = new Date()) {
 export function createTimeBucket(nowMs = Date.now()) {
     return Math.floor(nowMs / 60000);
 }
-export function bucketLatency(durationMs) {
+export function bucketAssistantStart(durationMs) {
     if (typeof durationMs !== "number" || !Number.isFinite(durationMs) || durationMs < 0)
         return "unknown";
     if (durationMs < 3000)
@@ -343,8 +351,9 @@ export function validateReportPayload(payload) {
         errors.push("successful reports must use errorHint=null");
     if (!MODEL_CLASSES.includes(report.modelClass))
         errors.push("invalid modelClass");
-    if (!LATENCY_BUCKETS.includes(report.latencyBucket))
-        errors.push("invalid latencyBucket");
+    if (!ASSISTANT_START_BUCKETS.includes(report.assistantStartBucket)) {
+        errors.push("invalid assistantStartBucket");
+    }
     if (!Number.isInteger(report.timeBucket) || Number(report.timeBucket) < 25000000)
         errors.push("invalid timeBucket");
     if (typeof report.pluginVersion !== "string" || !/^\d+\.\d+\.\d+/.test(report.pluginVersion))

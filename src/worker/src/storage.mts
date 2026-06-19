@@ -1,8 +1,9 @@
 import {
   SERVER_DAILY_REPORT_HARD_LIMIT,
   SERVER_DAILY_REPORT_SOFT_LIMIT,
+  STATUS_ASSISTANT_START_COLUMNS,
   type ErrorType,
-  type LatencyBucket,
+  type AssistantStartBucket,
   type ReportPayload,
   type TargetHost
 } from "../../shared/policy.mjs";
@@ -47,14 +48,7 @@ export interface ReportStore {
   purgeExpiredData(nowMs: number, options?: RetentionOptions): Promise<void>;
 }
 
-const LATENCY_COLUMNS: Record<LatencyBucket, string> = Object.freeze({
-  lt_3s: "latency_lt_3s",
-  "3_10s": "latency_3_10s",
-  "10_30s": "latency_10_30s",
-  "30_60s": "latency_30_60s",
-  gt_60s: "latency_gt_60s",
-  unknown: "latency_unknown"
-});
+const ASSISTANT_START_COLUMNS = Object.freeze(Object.fromEntries(STATUS_ASSISTANT_START_COLUMNS)) as Record<AssistantStartBucket, string>;
 
 const ERROR_COLUMNS: Record<ErrorType, string> = Object.freeze({
   none: "err_none",
@@ -115,20 +109,20 @@ function createTargetAggregateStatement(
   minute: number,
   targetHost: TargetHost
 ): SqlPreparedStatement {
-  const latencyColumn = LATENCY_COLUMNS[payload.latencyBucket] || LATENCY_COLUMNS.unknown;
+  const assistantStartColumn = ASSISTANT_START_COLUMNS[payload.assistantStartBucket] || ASSISTANT_START_COLUMNS.unknown;
   const errorColumn = ERROR_COLUMNS[payload.errorType] || ERROR_COLUMNS.unknown;
   const successDelta = payload.ok ? 1 : 0;
   const failureDelta = payload.ok ? 0 : 1;
 
   return db.prepare(`
     INSERT INTO target_minute_aggregates (
-      target_host, minute, total_samples, success_samples, failure_samples, ${latencyColumn}, ${errorColumn}, updated_at
+      target_host, minute, total_samples, success_samples, failure_samples, ${assistantStartColumn}, ${errorColumn}, updated_at
     ) VALUES (?, ?, 1, ?, ?, 1, 1, ?)
     ON CONFLICT(target_host, minute) DO UPDATE SET
       total_samples = total_samples + 1,
       success_samples = success_samples + ?,
       failure_samples = failure_samples + ?,
-      ${latencyColumn} = ${latencyColumn} + 1,
+      ${assistantStartColumn} = ${assistantStartColumn} + 1,
       ${errorColumn} = ${errorColumn} + 1,
       updated_at = ?
   `).bind(targetHost, minute, successDelta, failureDelta, nowMs, successDelta, failureDelta, nowMs);
@@ -141,17 +135,19 @@ function createTargetModelAggregateStatement(
   minute: number,
   targetHost: TargetHost
 ): SqlPreparedStatement {
+  const assistantStartColumn = ASSISTANT_START_COLUMNS[payload.assistantStartBucket] || ASSISTANT_START_COLUMNS.unknown;
   const successDelta = payload.ok ? 1 : 0;
   const failureDelta = payload.ok ? 0 : 1;
 
   return db.prepare(`
     INSERT INTO target_model_minute_aggregates (
-      target_host, minute, model_class, total_samples, success_samples, failure_samples, updated_at
-    ) VALUES (?, ?, ?, 1, ?, ?, ?)
+      target_host, minute, model_class, total_samples, success_samples, failure_samples, ${assistantStartColumn}, updated_at
+    ) VALUES (?, ?, ?, 1, ?, ?, 1, ?)
     ON CONFLICT(target_host, minute, model_class) DO UPDATE SET
       total_samples = total_samples + 1,
       success_samples = success_samples + ?,
       failure_samples = failure_samples + ?,
+      ${assistantStartColumn} = ${assistantStartColumn} + 1,
       updated_at = ?
   `).bind(
     targetHost,
@@ -208,12 +204,12 @@ async function queryAggregates(db: SqlDatabase, sinceMinute: number, targetHost:
           SUM(total_samples) AS total_samples,
           SUM(success_samples) AS success_samples,
           SUM(failure_samples) AS failure_samples,
-          SUM(latency_lt_3s) AS latency_lt_3s,
-          SUM(latency_3_10s) AS latency_3_10s,
-          SUM(latency_10_30s) AS latency_10_30s,
-          SUM(latency_30_60s) AS latency_30_60s,
-          SUM(latency_gt_60s) AS latency_gt_60s,
-          SUM(latency_unknown) AS latency_unknown,
+          SUM(assistant_start_lt_3s) AS assistant_start_lt_3s,
+          SUM(assistant_start_3_10s) AS assistant_start_3_10s,
+          SUM(assistant_start_10_30s) AS assistant_start_10_30s,
+          SUM(assistant_start_30_60s) AS assistant_start_30_60s,
+          SUM(assistant_start_gt_60s) AS assistant_start_gt_60s,
+          SUM(assistant_start_unknown) AS assistant_start_unknown,
           SUM(err_none) AS err_none,
           SUM(err_server_error) AS err_server_error,
           SUM(err_rate_limited) AS err_rate_limited,
@@ -245,7 +241,13 @@ async function queryModelAggregates(db: SqlDatabase, sinceMinute: number, target
           model_class,
           SUM(total_samples) AS total_samples,
           SUM(success_samples) AS success_samples,
-          SUM(failure_samples) AS failure_samples
+          SUM(failure_samples) AS failure_samples,
+          SUM(assistant_start_lt_3s) AS assistant_start_lt_3s,
+          SUM(assistant_start_3_10s) AS assistant_start_3_10s,
+          SUM(assistant_start_10_30s) AS assistant_start_10_30s,
+          SUM(assistant_start_30_60s) AS assistant_start_30_60s,
+          SUM(assistant_start_gt_60s) AS assistant_start_gt_60s,
+          SUM(assistant_start_unknown) AS assistant_start_unknown
         FROM target_model_minute_aggregates
         WHERE minute >= ?
         GROUP BY minute, model_class
@@ -257,7 +259,18 @@ async function queryModelAggregates(db: SqlDatabase, sinceMinute: number, target
 
   return db
     .prepare(`
-      SELECT minute, model_class, total_samples, success_samples, failure_samples
+      SELECT
+        minute,
+        model_class,
+        total_samples,
+        success_samples,
+        failure_samples,
+        assistant_start_lt_3s,
+        assistant_start_3_10s,
+        assistant_start_10_30s,
+        assistant_start_30_60s,
+        assistant_start_gt_60s,
+        assistant_start_unknown
       FROM target_model_minute_aggregates
       WHERE target_host = ? AND minute >= ?
       ORDER BY minute ASC, model_class ASC

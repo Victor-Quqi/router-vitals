@@ -1,4 +1,4 @@
-import { STATUS_ERROR_COLUMNS, STATUS_MODEL_ORDER, STATUS_STATE_THRESHOLDS, STATUS_WINDOW_SPECS } from "../../shared/policy.mjs";
+import { ASSISTANT_START_BUCKETS, STATUS_ASSISTANT_START_COLUMNS, STATUS_ERROR_COLUMNS, STATUS_MODEL_ORDER, STATUS_STATE_THRESHOLDS, STATUS_WINDOW_SPECS } from "../../shared/policy.mjs";
 export function parseStatusWindow(value) {
     return isStatusWindow(value) ? STATUS_WINDOW_SPECS[value].minutes : null;
 }
@@ -23,6 +23,7 @@ export function buildStatusFromRows(rows, windowValue, modelRows = [], nowMinute
         successCount: totals.success_samples,
         failureCount: totals.failure_samples,
         availability,
+        assistantStart: buildAssistantStartSummary(totals.assistantStart),
         errors,
         timeline: spec ? buildTimelineMeta(spec, nowMinute) : null,
         models,
@@ -30,6 +31,7 @@ export function buildStatusFromRows(rows, windowValue, modelRows = [], nowMinute
         meta: {
             unit: "turn",
             availabilityFormula: "successCount / sampleCount",
+            assistantStartDefinition: "Time from Claude Code UserPromptSubmit to the first assistant transcript record.",
             sampleCountDefinition: "Completed Claude Code user turns observed by the plugin in this window.",
             trendBucketRule: "empty=no samples; success=only successful turns; mixed=successful and failed turns; failure=only failed turns.",
             stateThresholds: { ...STATUS_STATE_THRESHOLDS }
@@ -48,8 +50,10 @@ function buildTimelineMeta(spec, nowMinute) {
 function buildModelTimelines(rows, spec, nowMinute, errorRows = []) {
     const startMinute = nowMinute - spec.minutes + 1;
     const models = new Map();
-    for (const modelClass of STATUS_MODEL_ORDER)
+    const assistantStartByBucket = new Map();
+    for (const modelClass of STATUS_MODEL_ORDER) {
         getModelTimeline(models, modelClass, spec, startMinute, nowMinute);
+    }
     for (const row of rows) {
         const minute = Number(row.minute);
         if (!Number.isFinite(minute))
@@ -71,7 +75,12 @@ function buildModelTimelines(rows, spec, nowMinute, errorRows = []) {
         model.sampleCount += total;
         model.successCount += success;
         model.failureCount += failure;
+        const assistantStart = getAssistantStartCounts(assistantStartByBucket, modelClass, bucketIndex);
+        for (const [key, column] of STATUS_ASSISTANT_START_COLUMNS) {
+            assistantStart[key] += Number(row[column] || 0);
+        }
     }
+    attachModelAssistantStarts(models, assistantStartByBucket);
     attachBucketErrors(models, errorRows);
     return [...models.values()]
         .map(finalizeModelTimeline)
@@ -99,12 +108,32 @@ function getModelTimeline(models, modelClass, spec, startMinute, nowMinute) {
                 success: 0,
                 failure: 0,
                 state: "empty",
+                assistantStart: null,
                 errors: []
             };
         })
     };
     models.set(modelClass, model);
     return model;
+}
+function getAssistantStartCounts(values, modelClass, bucketIndex) {
+    const key = `${modelClass}:${bucketIndex}`;
+    const current = values.get(key);
+    if (current)
+        return current;
+    const counts = createAssistantStartCounts();
+    values.set(key, counts);
+    return counts;
+}
+function attachModelAssistantStarts(models, values) {
+    for (const [key, counts] of values) {
+        const [modelClassValue, bucketIndexValue] = key.split(":");
+        const bucket = models.get(normalizeModelClass(modelClassValue))?.buckets[Number(bucketIndexValue)];
+        if (!bucket)
+            continue;
+        const summary = buildAssistantStartSummary(counts);
+        bucket.assistantStart = summary.total > 0 ? summary : null;
+    }
 }
 function attachBucketErrors(models, rows) {
     const grouped = new Map();
@@ -184,16 +213,48 @@ function sumRows(rows) {
         total_samples: 0,
         success_samples: 0,
         failure_samples: 0,
+        assistantStart: createAssistantStartCounts(),
         errors: Object.fromEntries(STATUS_ERROR_COLUMNS.map(([key]) => [key, 0]))
     };
     for (const row of rows) {
         totals.total_samples += Number(row.total_samples || 0);
         totals.success_samples += Number(row.success_samples || 0);
         totals.failure_samples += Number(row.failure_samples || 0);
+        for (const [key, column] of STATUS_ASSISTANT_START_COLUMNS) {
+            totals.assistantStart[key] += Number(row[column] || 0);
+        }
         for (const [key, column] of STATUS_ERROR_COLUMNS)
             totals.errors[key] += Number(row[column] || 0);
     }
     return totals;
+}
+function createAssistantStartCounts() {
+    return Object.fromEntries(ASSISTANT_START_BUCKETS.map((key) => [key, 0]));
+}
+function buildAssistantStartSummary(counts) {
+    const buckets = Object.fromEntries(ASSISTANT_START_BUCKETS.map((key) => [key, counts[key] || 0]));
+    const unknown = buckets.unknown || 0;
+    const knownBuckets = ASSISTANT_START_BUCKETS.filter((key) => key !== "unknown");
+    const known = knownBuckets.reduce((sum, key) => sum + buckets[key], 0);
+    let medianBucket = null;
+    if (known > 0) {
+        const midpoint = Math.ceil(known / 2);
+        let cumulative = 0;
+        for (const key of knownBuckets) {
+            cumulative += buckets[key];
+            if (cumulative >= midpoint) {
+                medianBucket = key;
+                break;
+            }
+        }
+    }
+    return {
+        total: known + unknown,
+        known,
+        unknown,
+        medianBucket,
+        buckets
+    };
 }
 function buildErrorBreakdown(counts, failureCount, detailRows = []) {
     const details = buildErrorDetails(detailRows);

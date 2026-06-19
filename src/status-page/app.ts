@@ -6,6 +6,7 @@ type BucketState = "empty" | "success" | "mixed" | "failure";
 type RefreshOptions = { bypassCache?: boolean };
 type TargetHostFilter = "all" | "main" | "optimized";
 type ThemeMode = "system" | "light" | "dark";
+type AssistantStartBucket = "lt_3s" | "3_10s" | "10_30s" | "30_60s" | "gt_60s" | "unknown";
 
 interface TimelineMeta {
   bucketMinutes: number;
@@ -22,6 +23,7 @@ interface TrendBucket {
   success?: number;
   failure?: number;
   state?: BucketState;
+  assistantStart?: AssistantStartSummary | null;
   errors?: ErrorStatus[];
 }
 
@@ -52,6 +54,14 @@ interface ErrorStatus {
   hints?: ErrorHintCount[];
 }
 
+interface AssistantStartSummary {
+  total?: number;
+  known?: number;
+  unknown?: number;
+  medianBucket?: AssistantStartBucket | null;
+  buckets?: Partial<Record<AssistantStartBucket, number>>;
+}
+
 interface StatusData {
   window?: string;
   generatedAt?: string;
@@ -61,6 +71,7 @@ interface StatusData {
   successCount?: number;
   failureCount?: number;
   availability?: number | null;
+  assistantStart?: AssistantStartSummary;
   timeline?: TimelineMeta | null;
   models?: ModelStatus[];
   errors?: ErrorStatus[];
@@ -114,6 +125,15 @@ const modelLabels: Record<ModelClass, string> = {
   sonnet: "Sonnet",
   haiku: "Haiku",
   unknown: "Unknown"
+};
+
+const assistantStartLabels: Record<AssistantStartBucket, string> = {
+  lt_3s: "<3s",
+  "3_10s": "3-10s",
+  "10_30s": "10-30s",
+  "30_60s": "30-60s",
+  gt_60s: ">60s",
+  unknown: "--"
 };
 
 let activeWindow = "60m";
@@ -296,6 +316,8 @@ function render(data: StatusData): void {
   setText("sampleCount", String(data.sampleCount ?? "--"));
   setText("failureCountMetric", String(data.failureCount ?? "--"));
   setText("availabilityMath", formatAvailabilityMath(data));
+  setText("assistantStart", formatAssistantStart(data.assistantStart));
+  setText("assistantStartDetail", formatAssistantStartDetail(data.assistantStart));
 
   const stateNode = getElement("state");
   stateNode.className = `state ${state}`;
@@ -498,9 +520,10 @@ function renderUnavailable(): void {
   setText("state", "状态暂缺");
   setText("stateDetail", "API 暂时没有返回可用数据");
   setText("updatedAt", "更新于 --");
-  for (const id of ["availability", "sampleCount", "failureCountMetric"]) setText(id, "--");
+  for (const id of ["availability", "sampleCount", "failureCountMetric", "assistantStart"]) setText(id, "--");
   setText("failureCount", formatWindowLabel(activeWindow));
   setText("availabilityMath", "--");
+  setText("assistantStartDetail", "--");
   getElement("state").className = "state insufficient_data";
   renderModelTable([], null);
   renderErrors([]);
@@ -532,6 +555,19 @@ function formatAvailabilityMath(data: StatusData): string {
   if (typeof data.successCount !== "number" || typeof data.sampleCount !== "number") return "--";
   if (data.sampleCount === 0) return "0 / 0";
   return `${data.successCount} / ${data.sampleCount}`;
+}
+
+function formatAssistantStart(value?: AssistantStartSummary): string {
+  const bucket = value?.medianBucket;
+  return bucket ? assistantStartLabels[bucket] : "--";
+}
+
+function formatAssistantStartDetail(value?: AssistantStartSummary): string {
+  const known = Number(value?.known ?? 0);
+  const total = Number(value?.total ?? 0);
+  if (known <= 0) return "暂无已知记录";
+  if (known === total) return `${known} 个样本`;
+  return `${known}/${total} 个有效样本`;
 }
 
 function formatUpdatedAt(value?: string): string {
@@ -575,6 +611,7 @@ function formatBucketTooltip(bucket: TrendBucket): string {
 
   lines.push(`成功 ${success} · 失败 ${failure} · 总轮次 ${total}`);
   lines.push(`成功率 ${formatPercent(total > 0 ? success / total : null)}`);
+  lines.push(`首次响应 P50 ${formatAssistantStart(bucket.assistantStart || undefined)}`);
 
   if (failure > 0) {
     const primaryError = bucket.errors?.[0];

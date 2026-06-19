@@ -8,8 +8,15 @@ if (!/^\d+$/.test(port)) throw new Error("STATUS_PREVIEW_PORT must be a numeric 
 const pnpm = "pnpm";
 const wranglerDlxArgs = ["dlx", "--allow-build=esbuild,sharp,workerd", "wrangler@4"] as const;
 const wranglerEnv = buildWranglerEnv();
+const seedPreviewData = process.env.STATUS_PREVIEW_SEED !== "0";
 
-await runWrangler(["d1", "migrations", "apply", "router-vitals", "--local", "--config", wranglerConfig]);
+if (seedPreviewData) {
+  await runWrangler(["d1", "execute", "router-vitals", "--local", "--config", wranglerConfig, "--file", "worker/preview/reset.sql"]);
+  await runWrangler(["d1", "execute", "router-vitals", "--local", "--config", wranglerConfig, "--file", "worker/migrations/0001_initial.sql"]);
+  await runWrangler(["d1", "execute", "router-vitals", "--local", "--config", wranglerConfig, "--file", "worker/preview/seed.sql"]);
+} else {
+  await runWrangler(["d1", "migrations", "apply", "router-vitals", "--local", "--config", wranglerConfig]);
+}
 
 const dev = spawnPnpm([
   ...wranglerDlxArgs,

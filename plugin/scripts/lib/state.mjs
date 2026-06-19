@@ -1,7 +1,7 @@
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
-import { LOCAL_DAILY_REPORT_LIMIT, MODEL_CLASSES, createAnonymousId, getTodayKey } from "./policy.mjs";
+import { LOCAL_DAILY_REPORT_LIMIT, MODEL_CLASSES, createAnonymousId, getTodayKey, validateReportPayload } from "./policy.mjs";
 const STATE_VERSION = 1;
 const STATE_DIR_NAME = "anyrouter-status-monitor";
 const STATE_FILE_NAME = "state.json";
@@ -88,7 +88,7 @@ function normalizeState(value, now = new Date()) {
         pending: normalizeTurnMap(record.pending, nowMs),
         sessions: normalizeTurnMap(record.sessions, nowMs),
         contributions: normalizeContributions(record.contributions, now),
-        lastPayload: isRecord(record.lastPayload) ? record.lastPayload : null,
+        lastPayload: normalizeLastPayload(record.lastPayload),
         lastReportAt: typeof record.lastReportAt === "string" ? record.lastReportAt : null
     };
 }
@@ -99,6 +99,11 @@ function normalizeAnonymous(value) {
     if (typeof record.day !== "string" || typeof record.id !== "string")
         return null;
     return { day: record.day, id: record.id };
+}
+function normalizeLastPayload(value) {
+    if (!isRecord(value))
+        return null;
+    return validateReportPayload(value).ok ? value : null;
 }
 function normalizeTurnMap(value, nowMs) {
     if (!value || typeof value !== "object" || Array.isArray(value))
@@ -122,6 +127,9 @@ function normalizeTurnState(value) {
     const result = {};
     if (typeof value.startedAtMs === "number" && Number.isFinite(value.startedAtMs))
         result.startedAtMs = value.startedAtMs;
+    if (typeof value.transcriptStartOffset === "number" && Number.isFinite(value.transcriptStartOffset)) {
+        result.transcriptStartOffset = value.transcriptStartOffset;
+    }
     if (typeof value.updatedAtMs === "number" && Number.isFinite(value.updatedAtMs))
         result.updatedAtMs = value.updatedAtMs;
     if (typeof value.targetMatched === "boolean")

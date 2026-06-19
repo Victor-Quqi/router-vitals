@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   PLUGIN_VERSION,
-  bucketLatency,
+  bucketAssistantStart,
   classifyError,
   classifyModel,
   createErrorHint,
@@ -49,12 +49,13 @@ test("target host normalization only accepts fixed AnyRouter hosts", () => {
   assert.equal(normalizeTargetHost("api.anthropic.com"), null);
 });
 
-test("latency buckets are stable", () => {
-  assert.equal(bucketLatency(100), "lt_3s");
-  assert.equal(bucketLatency(3000), "3_10s");
-  assert.equal(bucketLatency(10000), "10_30s");
-  assert.equal(bucketLatency(30000), "30_60s");
-  assert.equal(bucketLatency(60000), "gt_60s");
+test("assistant start buckets are stable", () => {
+  assert.equal(bucketAssistantStart(100), "lt_3s");
+  assert.equal(bucketAssistantStart(3000), "3_10s");
+  assert.equal(bucketAssistantStart(10000), "10_30s");
+  assert.equal(bucketAssistantStart(30000), "30_60s");
+  assert.equal(bucketAssistantStart(60000), "gt_60s");
+  assert.equal(bucketAssistantStart(null), "unknown");
 });
 
 test("today key uses the runtime local date getters", () => {
@@ -84,6 +85,7 @@ test("report payload rejects actual URLs and station fields", () => {
     ok: true,
     errorType: "none",
     modelClass: "sonnet",
+    assistantStartBucket: "3_10s",
     latencyBucket: "3_10s",
     timeBucket: 30000000,
     pluginVersion: "0.1.0",
@@ -97,6 +99,7 @@ test("report payload rejects actual URLs and station fields", () => {
 
   const validation = validateReportPayload(payload);
   assert.equal(validation.ok, false);
+  assert.match(validation.errors.join("\n"), /unknown field: latencyBucket/);
   assert.match(validation.errors.join("\n"), /unknown field: baseUrl/);
   assert.match(validation.errors.join("\n"), /unknown field: stationId/);
 });
@@ -106,7 +109,7 @@ test("report payload requires target host", () => {
     ok: true,
     errorType: "none",
     modelClass: "sonnet",
-    latencyBucket: "3_10s",
+    assistantStartBucket: "3_10s",
     timeBucket: 30000000,
     pluginVersion: "0.1.0",
     anonymousId: "anon_abcdefghijklmnop",
@@ -124,7 +127,7 @@ test("report payload rejects full URL as target host", () => {
     ok: true,
     errorType: "none",
     modelClass: "sonnet",
-    latencyBucket: "3_10s",
+    assistantStartBucket: "3_10s",
     timeBucket: 30000000,
     pluginVersion: "0.1.0",
     anonymousId: "anon_abcdefghijklmnop",
@@ -167,7 +170,7 @@ test("report payload accepts optional sanitized error details", () => {
     errorStatusCode: 429,
     errorHint: "API Error 429: Rate limit reached",
     modelClass: "sonnet",
-    latencyBucket: "3_10s",
+    assistantStartBucket: "3_10s",
     timeBucket: 30000000,
     pluginVersion: PLUGIN_VERSION,
     anonymousId: "anon_abcdefghijklmnop",

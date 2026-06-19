@@ -1,9 +1,11 @@
 #!/usr/bin/env node
-import { open } from "node:fs/promises";
+import { createReadStream } from "node:fs";
+import { stat } from "node:fs/promises";
+import { createInterface } from "node:readline";
 import { loadRemoteConfig } from "./lib/config.mjs";
 import {
   PLUGIN_VERSION,
-  bucketLatency,
+  bucketAssistantStart,
   classifyError,
   classifyModel,
   createErrorHint,
@@ -30,8 +32,12 @@ import {
 } from "./lib/state.mjs";
 
 const eventName = process.argv[2] || "";
-const TRANSCRIPT_TAIL_BYTES = 256 * 1024;
 type HookInput = Record<string, any>;
+
+interface TranscriptInspection {
+  firstAssistantAtMs: number | null;
+  modelClass: ModelClass;
+}
 
 main().catch(() => {
   process.exit(0);
@@ -55,7 +61,7 @@ async function main() {
   }
 
   if (eventName === "UserPromptSubmit") {
-    recordPromptStart(state, sessionKey, input);
+    await recordPromptStart(state, sessionKey, input);
     await saveState(state);
     return;
   }
@@ -87,12 +93,14 @@ function recordSessionStart(state: PluginState, sessionKey: string, input: HookI
   };
 }
 
-function recordPromptStart(state: PluginState, sessionKey: string, input: HookInput): void {
+async function recordPromptStart(state: PluginState, sessionKey: string, input: HookInput): Promise<void> {
   const match = matchTargetBaseUrl(process.env.ANTHROPIC_BASE_URL);
   const modelClass = classifyModel(input, { includeEnv: false });
+  const transcriptStartOffset = await getTranscriptSize(input);
   state.pending[sessionKey] = {
     startedAtMs: Date.now(),
     targetMatched: match.matched === true,
+    ...(transcriptStartOffset !== null ? { transcriptStartOffset } : {}),
     ...(modelClass !== "unknown" ? { modelClass } : {})
   };
 }
@@ -125,14 +133,19 @@ async function reportCompletion({
   if (!shouldSample(sampleRate)) return;
 
   const anonymousId = await getDailyAnonymousId(state);
-  const modelClass = await resolveModelClass(input, pending);
+  const turnStartedAtMs = getTurnStartedAtMs([pending]);
+  const transcript = await inspectTranscript(input, turnStartedAtMs, pending.transcriptStartOffset);
+  const modelClass = resolveModelClass(input, transcript, pending);
+  const assistantStartDelayMs = turnStartedAtMs !== null && transcript.firstAssistantAtMs !== null
+    ? transcript.firstAssistantAtMs - turnStartedAtMs
+    : null;
   const payload: ReportPayload = {
     ok,
     errorType: ok ? "none" : classifyError(input),
     errorStatusCode: ok ? null : extractErrorStatusCode(input),
     errorHint: ok ? null : createErrorHint(input),
     modelClass,
-    latencyBucket: bucketLatency(Date.now() - Number(pending.startedAtMs)),
+    assistantStartBucket: bucketAssistantStart(assistantStartDelayMs),
     timeBucket: createTimeBucket(),
     pluginVersion: PLUGIN_VERSION,
     anonymousId,
@@ -172,12 +185,11 @@ async function postReport(apiBaseUrl: string, payload: ReportPayload): Promise<b
   }
 }
 
-async function resolveModelClass(input: HookInput, ...fallbacks: Array<TurnState | undefined>): Promise<ModelClass> {
+function resolveModelClass(input: HookInput, transcript: TranscriptInspection, ...fallbacks: Array<TurnState | undefined>): ModelClass {
   const direct = classifyModel(input, { includeEnv: false });
   if (direct !== "unknown") return direct;
 
-  const transcript = await classifyTranscriptModel(input, getTurnStartedAtMs(fallbacks));
-  if (transcript !== "unknown") return transcript;
+  if (transcript.modelClass !== "unknown") return transcript.modelClass;
 
   for (const fallback of fallbacks) {
     if (fallback?.modelClass && fallback.modelClass !== "unknown") return fallback.modelClass;
@@ -186,31 +198,48 @@ async function resolveModelClass(input: HookInput, ...fallbacks: Array<TurnState
   return "unknown";
 }
 
-async function classifyTranscriptModel(input: HookInput, turnStartedAtMs: number | null): Promise<ModelClass> {
+async function inspectTranscript(
+  input: HookInput,
+  turnStartedAtMs: number | null,
+  transcriptStartOffset: number | undefined
+): Promise<TranscriptInspection> {
   const transcriptPath = getTranscriptPath(input);
-  if (!transcriptPath) return "unknown";
+  const result: TranscriptInspection = {
+    firstAssistantAtMs: null,
+    modelClass: "unknown"
+  };
+  if (!transcriptPath) return result;
 
-  let handle: Awaited<ReturnType<typeof open>> | null = null;
   try {
-    handle = await open(transcriptPath, "r");
-    const stat = await handle.stat();
-    if (!stat.isFile() || stat.size <= 0) return "unknown";
+    const start = Number.isFinite(transcriptStartOffset) && Number(transcriptStartOffset) > 0
+      ? Number(transcriptStartOffset)
+      : 0;
+    const stream = createReadStream(transcriptPath, { encoding: "utf8", start });
+    const lines = createInterface({ input: stream, crlfDelay: Infinity });
 
-    const length = Math.min(stat.size, TRANSCRIPT_TAIL_BYTES);
-    const buffer = Buffer.alloc(length);
-    await handle.read(buffer, 0, length, stat.size - length);
-    let raw = buffer.toString("utf8");
+    for await (const line of lines) {
+      const raw = line.trim();
+      if (!raw) continue;
 
-    if (stat.size > length) {
-      const firstLineEnd = raw.indexOf("\n");
-      raw = firstLineEnd >= 0 ? raw.slice(firstLineEnd + 1) : "";
+      try {
+        const record = JSON.parse(raw);
+        const timestampMs = getRecordTimestampMs(record);
+        if (turnStartedAtMs !== null && timestampMs !== null && timestampMs < turnStartedAtMs) continue;
+
+        if (result.firstAssistantAtMs === null && isAssistantRecord(record) && timestampMs !== null) {
+          result.firstAssistantAtMs = timestampMs;
+        }
+
+        const modelClass = classifyTranscriptRecord(record);
+        if (modelClass !== "unknown") result.modelClass = modelClass;
+      } catch {
+        continue;
+      }
     }
 
-    return classifyTranscriptText(raw, turnStartedAtMs);
+    return result;
   } catch {
-    return "unknown";
-  } finally {
-    await handle?.close().catch(() => undefined);
+    return result;
   }
 }
 
@@ -220,32 +249,22 @@ function getTranscriptPath(input: HookInput): string | null {
   return value;
 }
 
-function classifyTranscriptText(raw: string, turnStartedAtMs: number | null): ModelClass {
-  const lines = raw.split(/\r?\n/);
-  for (let index = lines.length - 1; index >= 0; index -= 1) {
-    const line = lines[index]?.trim();
-    if (!line) continue;
-
-    try {
-      const record = JSON.parse(line);
-      const timestampMs = getRecordTimestampMs(record);
-      if (turnStartedAtMs !== null && timestampMs !== null && timestampMs < turnStartedAtMs) continue;
-
-      const modelClass = classifyTranscriptRecord(record);
-      if (modelClass !== "unknown") return modelClass;
-    } catch {
-      continue;
-    }
-  }
-
-  return "unknown";
-}
-
 function getTurnStartedAtMs(turns: Array<TurnState | undefined>): number | null {
   for (const turn of turns) {
     if (typeof turn?.startedAtMs === "number" && Number.isFinite(turn.startedAtMs)) return turn.startedAtMs;
   }
   return null;
+}
+
+async function getTranscriptSize(input: HookInput): Promise<number | null> {
+  const transcriptPath = getTranscriptPath(input);
+  if (!transcriptPath) return null;
+  try {
+    const info = await stat(transcriptPath);
+    return info.isFile() ? info.size : null;
+  } catch {
+    return null;
+  }
 }
 
 function getRecordTimestampMs(value: unknown): number | null {
@@ -284,6 +303,13 @@ function classifyTranscriptRecord(value: unknown): ModelClass {
   }
 
   return "unknown";
+}
+
+function isAssistantRecord(value: unknown): boolean {
+  if (!isRecord(value)) return false;
+  if (value.type === "assistant" || value.role === "assistant") return true;
+  const message = isRecord(value.message) ? value.message : null;
+  return message?.type === "assistant" || message?.role === "assistant";
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

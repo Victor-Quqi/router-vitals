@@ -87,6 +87,18 @@ test("loadState prunes stale local counters and turn state", async () => {
     sessions: {
       fresh: { updatedAtMs: freshMs, modelClass: "sonnet" },
       stale: { updatedAtMs: staleMs, modelClass: "opus" }
+    },
+    lastPayload: {
+      ok: true,
+      errorType: "none",
+      modelClass: "sonnet",
+      latencyBucket: "lt_3s",
+      timeBucket: 30000000,
+      pluginVersion: "0.1.0",
+      anonymousId: "anon_abcdefghijklmnop",
+      sampleRate: 1,
+      targetMatched: true,
+      targetHost: "anyrouter.top"
     }
   }), "utf8");
 
@@ -104,6 +116,7 @@ test("loadState prunes stale local counters and turn state", async () => {
       assert.equal("stale" in state.pending, false);
       assert.equal("fresh" in state.sessions, true);
       assert.equal("stale" in state.sessions, false);
+      assert.equal(state.lastPayload, null);
     });
   } finally {
     await rm(stateDir, { recursive: true, force: true });

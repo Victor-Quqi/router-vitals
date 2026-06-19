@@ -1,8 +1,11 @@
 import {
+  ASSISTANT_START_BUCKETS,
+  STATUS_ASSISTANT_START_COLUMNS,
   STATUS_ERROR_COLUMNS,
   STATUS_MODEL_ORDER,
   STATUS_STATE_THRESHOLDS,
   STATUS_WINDOW_SPECS,
+  type AssistantStartBucket,
   type ErrorType,
   type ModelClass,
   type StatusWindow
@@ -31,6 +34,7 @@ export interface ModelAggregateRow {
   total_samples?: unknown;
   success_samples?: unknown;
   failure_samples?: unknown;
+  [key: string]: unknown;
 }
 
 export interface ErrorDetailRow {
@@ -60,6 +64,7 @@ export interface TimelineBucket {
   success: number;
   failure: number;
   state: BucketState;
+  assistantStart: AssistantStartSummary | null;
   errors: ErrorBreakdown[];
 }
 
@@ -81,6 +86,14 @@ export interface ErrorBreakdown {
   hints: Array<{ text: string; count: number }>;
 }
 
+export interface AssistantStartSummary {
+  total: number;
+  known: number;
+  unknown: number;
+  medianBucket: AssistantStartBucket | null;
+  buckets: Record<AssistantStartBucket, number>;
+}
+
 export interface StatusResponse {
   window: string;
   generatedAt: string;
@@ -90,6 +103,7 @@ export interface StatusResponse {
   successCount: number;
   failureCount: number;
   availability: number | null;
+  assistantStart: AssistantStartSummary;
   errors: ErrorBreakdown[];
   timeline: TimelineMeta | null;
   models: ModelTimeline[];
@@ -97,6 +111,7 @@ export interface StatusResponse {
   meta: {
     unit: "turn";
     availabilityFormula: string;
+    assistantStartDefinition: string;
     sampleCountDefinition: string;
     trendBucketRule: string;
     stateThresholds: Record<ServiceState, string>;
@@ -107,6 +122,7 @@ interface Totals {
   total_samples: number;
   success_samples: number;
   failure_samples: number;
+  assistantStart: Record<AssistantStartBucket, number>;
   errors: Record<ErrorType, number>;
 }
 
@@ -153,6 +169,7 @@ export function buildStatusFromRows(
     successCount: totals.success_samples,
     failureCount: totals.failure_samples,
     availability,
+    assistantStart: buildAssistantStartSummary(totals.assistantStart),
     errors,
     timeline: spec ? buildTimelineMeta(spec, nowMinute) : null,
     models,
@@ -160,6 +177,7 @@ export function buildStatusFromRows(
     meta: {
       unit: "turn",
       availabilityFormula: "successCount / sampleCount",
+      assistantStartDefinition: "Time from Claude Code UserPromptSubmit to the first assistant transcript record.",
       sampleCountDefinition: "Completed Claude Code user turns observed by the plugin in this window.",
       trendBucketRule: "empty=no samples; success=only successful turns; mixed=successful and failed turns; failure=only failed turns.",
       stateThresholds: { ...STATUS_STATE_THRESHOLDS }
@@ -185,7 +203,10 @@ function buildModelTimelines(
 ): ModelTimeline[] {
   const startMinute = nowMinute - spec.minutes + 1;
   const models = new Map<ModelClass, ModelTimeline>();
-  for (const modelClass of STATUS_MODEL_ORDER) getModelTimeline(models, modelClass, spec, startMinute, nowMinute);
+  const assistantStartByBucket = new Map<string, Record<AssistantStartBucket, number>>();
+  for (const modelClass of STATUS_MODEL_ORDER) {
+    getModelTimeline(models, modelClass, spec, startMinute, nowMinute);
+  }
 
   for (const row of rows) {
     const minute = Number(row.minute);
@@ -207,8 +228,14 @@ function buildModelTimelines(
     model.sampleCount += total;
     model.successCount += success;
     model.failureCount += failure;
+
+    const assistantStart = getAssistantStartCounts(assistantStartByBucket, modelClass, bucketIndex);
+    for (const [key, column] of STATUS_ASSISTANT_START_COLUMNS) {
+      assistantStart[key] += Number(row[column] || 0);
+    }
   }
 
+  attachModelAssistantStarts(models, assistantStartByBucket);
   attachBucketErrors(models, errorRows);
 
   return [...models.values()]
@@ -244,6 +271,7 @@ function getModelTimeline(
         success: 0,
         failure: 0,
         state: "empty" as const,
+        assistantStart: null,
         errors: []
       };
     })
@@ -251,6 +279,32 @@ function getModelTimeline(
 
   models.set(modelClass, model);
   return model;
+}
+
+function getAssistantStartCounts(
+  values: Map<string, Record<AssistantStartBucket, number>>,
+  modelClass: ModelClass,
+  bucketIndex: number
+): Record<AssistantStartBucket, number> {
+  const key = `${modelClass}:${bucketIndex}`;
+  const current = values.get(key);
+  if (current) return current;
+  const counts = createAssistantStartCounts();
+  values.set(key, counts);
+  return counts;
+}
+
+function attachModelAssistantStarts(
+  models: Map<ModelClass, ModelTimeline>,
+  values: Map<string, Record<AssistantStartBucket, number>>
+): void {
+  for (const [key, counts] of values) {
+    const [modelClassValue, bucketIndexValue] = key.split(":");
+    const bucket = models.get(normalizeModelClass(modelClassValue))?.buckets[Number(bucketIndexValue)];
+    if (!bucket) continue;
+    const summary = buildAssistantStartSummary(counts);
+    bucket.assistantStart = summary.total > 0 ? summary : null;
+  }
 }
 
 function attachBucketErrors(models: Map<ModelClass, ModelTimeline>, rows: ModelErrorDetailRow[]): void {
@@ -340,6 +394,7 @@ function sumRows(rows: AggregateRow[]): Totals {
     total_samples: 0,
     success_samples: 0,
     failure_samples: 0,
+    assistantStart: createAssistantStartCounts(),
     errors: Object.fromEntries(STATUS_ERROR_COLUMNS.map(([key]) => [key, 0]))
   } as Totals;
 
@@ -347,10 +402,45 @@ function sumRows(rows: AggregateRow[]): Totals {
     totals.total_samples += Number(row.total_samples || 0);
     totals.success_samples += Number(row.success_samples || 0);
     totals.failure_samples += Number(row.failure_samples || 0);
+    for (const [key, column] of STATUS_ASSISTANT_START_COLUMNS) {
+      totals.assistantStart[key] += Number(row[column] || 0);
+    }
     for (const [key, column] of STATUS_ERROR_COLUMNS) totals.errors[key] += Number(row[column] || 0);
   }
 
   return totals;
+}
+
+function createAssistantStartCounts(): Record<AssistantStartBucket, number> {
+  return Object.fromEntries(ASSISTANT_START_BUCKETS.map((key) => [key, 0])) as Record<AssistantStartBucket, number>;
+}
+
+function buildAssistantStartSummary(counts: Record<AssistantStartBucket, number>): AssistantStartSummary {
+  const buckets = Object.fromEntries(ASSISTANT_START_BUCKETS.map((key) => [key, counts[key] || 0])) as Record<AssistantStartBucket, number>;
+  const unknown = buckets.unknown || 0;
+  const knownBuckets = ASSISTANT_START_BUCKETS.filter((key) => key !== "unknown");
+  const known = knownBuckets.reduce((sum, key) => sum + buckets[key], 0);
+  let medianBucket: AssistantStartBucket | null = null;
+
+  if (known > 0) {
+    const midpoint = Math.ceil(known / 2);
+    let cumulative = 0;
+    for (const key of knownBuckets) {
+      cumulative += buckets[key];
+      if (cumulative >= midpoint) {
+        medianBucket = key;
+        break;
+      }
+    }
+  }
+
+  return {
+    total: known + unknown,
+    known,
+    unknown,
+    medianBucket,
+    buckets
+  };
 }
 
 function buildErrorBreakdown(

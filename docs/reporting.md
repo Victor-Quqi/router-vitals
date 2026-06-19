@@ -23,11 +23,11 @@ Any Router 入口：
 
 ## 上报哪些内容
 
-会提交：成功/失败、错误分类、HTTP 状态码、脱敏截断后的错误摘要、模型类别、耗时区间、分钟级时间桶、插件版本、匿名 ID、采样率、目标命中标记、端点类别。
+会提交：成功/失败、错误分类、HTTP 状态码、脱敏截断后的错误摘要、模型类别、响应开始区间、分钟级时间桶、插件版本、匿名 ID、采样率、目标命中标记、端点类别。
 
 不会提交：真实 URL、prompt、response、token、cookie、key、账号、`session_id`、文件路径、完整日志、精确时间戳。
 
-为避免 Claude Code 会话内切换模型后串到旧模型，插件会在本机读取 hook 输入里的 transcript 文件尾部，只提取最近 assistant 记录中的模型元数据用于归类；不会提交 transcript 路径或内容。
+为避免 Claude Code 会话内切换模型后串到旧模型，插件会在本机读取 hook 输入里的 transcript 文件，只提取本轮 assistant 记录中的模型元数据用于归类，并用首条 assistant 记录时间计算响应开始区间；不会提交 transcript 路径或内容。这个区间不是底层 API TTFT，会包含 Claude Code 自动重试等用户实际等待。
 
 ## 关掉上报
 

@@ -55,11 +55,11 @@ test("plugin hook uploads only for matched AnyRouter sessions", async () => {
       ANTHROPIC_BASE_URL: "https://anyrouter.top"
     });
     const sessionATranscript = join(stateDir, "session-a.jsonl");
-    await writeTranscriptModel(sessionATranscript, "claude-sonnet-4");
     await runHook("UserPromptSubmit", { session_id: "session-a" }, {
       ...commonEnv,
       ANTHROPIC_BASE_URL: "https://anyrouter.top"
     });
+    await writeTranscriptModel(sessionATranscript, "claude-sonnet-4");
     await runHook("Stop", { session_id: "session-a", transcript_path: sessionATranscript }, {
       ...commonEnv,
       ANTHROPIC_BASE_URL: "https://anyrouter.top/v1/messages"
@@ -70,9 +70,11 @@ test("plugin hook uploads only for matched AnyRouter sessions", async () => {
     assert.equal(payload.ok, true);
     assert.equal(payload.targetMatched, true);
     assert.equal(payload.modelClass, "sonnet");
+    assert.equal(payload.assistantStartBucket, "lt_3s");
     assert.equal(payload.errorStatusCode, null);
     assert.equal(payload.errorHint, null);
     assert.equal(payload.targetHost, "anyrouter.top");
+    assert.equal("latencyBucket" in payload, false);
     assert.equal("baseUrl" in payload, false);
     assert.equal("session_id" in payload, false);
 
@@ -81,11 +83,11 @@ test("plugin hook uploads only for matched AnyRouter sessions", async () => {
       ANTHROPIC_BASE_URL: "https://anyrouter.top"
     });
     const sessionCTranscript = join(stateDir, "session-c.jsonl");
-    await writeTranscriptModel(sessionCTranscript, "claude-3-5-haiku-latest");
     await runHook("UserPromptSubmit", { session_id: "session-c" }, {
       ...commonEnv,
       ANTHROPIC_BASE_URL: "https://anyrouter.top"
     });
+    await writeTranscriptModel(sessionCTranscript, "claude-3-5-haiku-latest");
     await runHook("Stop", { session_id: "session-c", transcript_path: sessionCTranscript }, {
       ...commonEnv,
       ANTHROPIC_BASE_URL: "https://anyrouter.top/v1/messages"
@@ -95,11 +97,11 @@ test("plugin hook uploads only for matched AnyRouter sessions", async () => {
     assert.equal(received[1]!.modelClass, "haiku");
 
     const sessionDTranscript = join(stateDir, "session-d.jsonl");
-    await writeTranscriptModel(sessionDTranscript, "claude-3-5-haiku-latest");
     await runHook("UserPromptSubmit", { session_id: "session-d" }, {
       ...commonEnv,
       ANTHROPIC_BASE_URL: "https://anyrouter.top"
     });
+    await writeTranscriptModel(sessionDTranscript, "claude-3-5-haiku-latest");
     await runHook("Stop", { session_id: "session-d", transcript_path: sessionDTranscript }, {
       ...commonEnv,
       ANTHROPIC_BASE_URL: "https://anyrouter.top/v1/messages"
@@ -202,7 +204,7 @@ test("plugin hook skips uploads after the local daily contribution limit", async
 async function writeTranscriptModel(path: string, model: string, timestamp?: string): Promise<void> {
   await writeFile(path, `${JSON.stringify({
     type: "assistant",
-    ...(timestamp ? { timestamp } : {}),
+    timestamp: timestamp || new Date().toISOString(),
     message: {
       role: "assistant",
       model

@@ -23,11 +23,11 @@ These cases are skipped: empty or invalid `ANTHROPIC_BASE_URL`, non-target hosts
 
 ## What is reported
 
-Submitted: success/failure, error class, HTTP status code, sanitized and truncated error hint, model class, latency bucket, minute-level time bucket, plugin version, anonymous ID, sample rate, target match marker, and target host class.
+Submitted: success/failure, error class, HTTP status code, sanitized and truncated error hint, model class, assistant-start bucket, minute-level time bucket, plugin version, anonymous ID, sample rate, target match marker, and target host class.
 
 Not submitted: actual URL, prompt, response, tokens, cookies, keys, account identifiers, `session_id`, file paths, full logs, and precise timestamps.
 
-To avoid carrying a stale model after switching models inside a Claude Code session, the plugin reads the tail of the local transcript file from the hook input and only extracts model metadata from recent assistant records for classification; it never submits transcript paths or content.
+To avoid carrying a stale model after switching models inside a Claude Code session, the plugin reads the local transcript file from the hook input, extracts model metadata from this turn's assistant records, and computes the assistant-start bucket from the first assistant record timestamp; it never submits transcript paths or content. This bucket is not low-level API TTFT and includes user-visible waiting such as Claude Code automatic retries.
 
 ## Turning reporting off
 

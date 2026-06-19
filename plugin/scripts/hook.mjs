@@ -1,10 +1,11 @@
 #!/usr/bin/env node
-import { open } from "node:fs/promises";
+import { createReadStream } from "node:fs";
+import { stat } from "node:fs/promises";
+import { createInterface } from "node:readline";
 import { loadRemoteConfig } from "./lib/config.mjs";
-import { PLUGIN_VERSION, bucketLatency, classifyError, classifyModel, createErrorHint, createTimeBucket, extractErrorStatusCode, hashLocalSessionId, matchTargetBaseUrl, normalizeTargetHost, pickSampleRate, shouldSample, validateReportPayload } from "./lib/policy.mjs";
+import { PLUGIN_VERSION, bucketAssistantStart, classifyError, classifyModel, createErrorHint, createTimeBucket, extractErrorStatusCode, hashLocalSessionId, matchTargetBaseUrl, normalizeTargetHost, pickSampleRate, shouldSample, validateReportPayload } from "./lib/policy.mjs";
 import { getDailyAnonymousId, hasReachedDailyReportLimit, incrementContribution, loadState, saveState } from "./lib/state.mjs";
 const eventName = process.argv[2] || "";
-const TRANSCRIPT_TAIL_BYTES = 256 * 1024;
 main().catch(() => {
     process.exit(0);
 });
@@ -23,7 +24,7 @@ async function main() {
         return;
     }
     if (eventName === "UserPromptSubmit") {
-        recordPromptStart(state, sessionKey, input);
+        await recordPromptStart(state, sessionKey, input);
         await saveState(state);
         return;
     }
@@ -54,12 +55,14 @@ function recordSessionStart(state, sessionKey, input) {
         updatedAtMs: Date.now()
     };
 }
-function recordPromptStart(state, sessionKey, input) {
+async function recordPromptStart(state, sessionKey, input) {
     const match = matchTargetBaseUrl(process.env.ANTHROPIC_BASE_URL);
     const modelClass = classifyModel(input, { includeEnv: false });
+    const transcriptStartOffset = await getTranscriptSize(input);
     state.pending[sessionKey] = {
         startedAtMs: Date.now(),
         targetMatched: match.matched === true,
+        ...(transcriptStartOffset !== null ? { transcriptStartOffset } : {}),
         ...(modelClass !== "unknown" ? { modelClass } : {})
     };
 }
@@ -81,14 +84,19 @@ async function reportCompletion({ eventName, input, state, config, sessionKey })
     if (!shouldSample(sampleRate))
         return;
     const anonymousId = await getDailyAnonymousId(state);
-    const modelClass = await resolveModelClass(input, pending);
+    const turnStartedAtMs = getTurnStartedAtMs([pending]);
+    const transcript = await inspectTranscript(input, turnStartedAtMs, pending.transcriptStartOffset);
+    const modelClass = resolveModelClass(input, transcript, pending);
+    const assistantStartDelayMs = turnStartedAtMs !== null && transcript.firstAssistantAtMs !== null
+        ? transcript.firstAssistantAtMs - turnStartedAtMs
+        : null;
     const payload = {
         ok,
         errorType: ok ? "none" : classifyError(input),
         errorStatusCode: ok ? null : extractErrorStatusCode(input),
         errorHint: ok ? null : createErrorHint(input),
         modelClass,
-        latencyBucket: bucketLatency(Date.now() - Number(pending.startedAtMs)),
+        assistantStartBucket: bucketAssistantStart(assistantStartDelayMs),
         timeBucket: createTimeBucket(),
         pluginVersion: PLUGIN_VERSION,
         anonymousId,
@@ -126,44 +134,56 @@ async function postReport(apiBaseUrl, payload) {
         return false;
     }
 }
-async function resolveModelClass(input, ...fallbacks) {
+function resolveModelClass(input, transcript, ...fallbacks) {
     const direct = classifyModel(input, { includeEnv: false });
     if (direct !== "unknown")
         return direct;
-    const transcript = await classifyTranscriptModel(input, getTurnStartedAtMs(fallbacks));
-    if (transcript !== "unknown")
-        return transcript;
+    if (transcript.modelClass !== "unknown")
+        return transcript.modelClass;
     for (const fallback of fallbacks) {
         if (fallback?.modelClass && fallback.modelClass !== "unknown")
             return fallback.modelClass;
     }
     return "unknown";
 }
-async function classifyTranscriptModel(input, turnStartedAtMs) {
+async function inspectTranscript(input, turnStartedAtMs, transcriptStartOffset) {
     const transcriptPath = getTranscriptPath(input);
+    const result = {
+        firstAssistantAtMs: null,
+        modelClass: "unknown"
+    };
     if (!transcriptPath)
-        return "unknown";
-    let handle = null;
+        return result;
     try {
-        handle = await open(transcriptPath, "r");
-        const stat = await handle.stat();
-        if (!stat.isFile() || stat.size <= 0)
-            return "unknown";
-        const length = Math.min(stat.size, TRANSCRIPT_TAIL_BYTES);
-        const buffer = Buffer.alloc(length);
-        await handle.read(buffer, 0, length, stat.size - length);
-        let raw = buffer.toString("utf8");
-        if (stat.size > length) {
-            const firstLineEnd = raw.indexOf("\n");
-            raw = firstLineEnd >= 0 ? raw.slice(firstLineEnd + 1) : "";
+        const start = Number.isFinite(transcriptStartOffset) && Number(transcriptStartOffset) > 0
+            ? Number(transcriptStartOffset)
+            : 0;
+        const stream = createReadStream(transcriptPath, { encoding: "utf8", start });
+        const lines = createInterface({ input: stream, crlfDelay: Infinity });
+        for await (const line of lines) {
+            const raw = line.trim();
+            if (!raw)
+                continue;
+            try {
+                const record = JSON.parse(raw);
+                const timestampMs = getRecordTimestampMs(record);
+                if (turnStartedAtMs !== null && timestampMs !== null && timestampMs < turnStartedAtMs)
+                    continue;
+                if (result.firstAssistantAtMs === null && isAssistantRecord(record) && timestampMs !== null) {
+                    result.firstAssistantAtMs = timestampMs;
+                }
+                const modelClass = classifyTranscriptRecord(record);
+                if (modelClass !== "unknown")
+                    result.modelClass = modelClass;
+            }
+            catch {
+                continue;
+            }
         }
-        return classifyTranscriptText(raw, turnStartedAtMs);
+        return result;
     }
     catch {
-        return "unknown";
-    }
-    finally {
-        await handle?.close().catch(() => undefined);
+        return result;
     }
 }
 function getTranscriptPath(input) {
@@ -172,33 +192,24 @@ function getTranscriptPath(input) {
         return null;
     return value;
 }
-function classifyTranscriptText(raw, turnStartedAtMs) {
-    const lines = raw.split(/\r?\n/);
-    for (let index = lines.length - 1; index >= 0; index -= 1) {
-        const line = lines[index]?.trim();
-        if (!line)
-            continue;
-        try {
-            const record = JSON.parse(line);
-            const timestampMs = getRecordTimestampMs(record);
-            if (turnStartedAtMs !== null && timestampMs !== null && timestampMs < turnStartedAtMs)
-                continue;
-            const modelClass = classifyTranscriptRecord(record);
-            if (modelClass !== "unknown")
-                return modelClass;
-        }
-        catch {
-            continue;
-        }
-    }
-    return "unknown";
-}
 function getTurnStartedAtMs(turns) {
     for (const turn of turns) {
         if (typeof turn?.startedAtMs === "number" && Number.isFinite(turn.startedAtMs))
             return turn.startedAtMs;
     }
     return null;
+}
+async function getTranscriptSize(input) {
+    const transcriptPath = getTranscriptPath(input);
+    if (!transcriptPath)
+        return null;
+    try {
+        const info = await stat(transcriptPath);
+        return info.isFile() ? info.size : null;
+    }
+    catch {
+        return null;
+    }
 }
 function getRecordTimestampMs(value) {
     if (!isRecord(value))
@@ -237,6 +248,14 @@ function classifyTranscriptRecord(value) {
             return modelClass;
     }
     return "unknown";
+}
+function isAssistantRecord(value) {
+    if (!isRecord(value))
+        return false;
+    if (value.type === "assistant" || value.role === "assistant")
+        return true;
+    const message = isRecord(value.message) ? value.message : null;
+    return message?.type === "assistant" || message?.role === "assistant";
 }
 function isRecord(value) {
     return Boolean(value && typeof value === "object" && !Array.isArray(value));

@@ -517,7 +517,7 @@ article span {
 
 .metrics {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(4, 1fr);
   border-top: 0;
   border-radius: 0 0 8px 8px;
   overflow: visible;

@@ -8,7 +8,15 @@ if (!/^\d+$/.test(port))
 const pnpm = "pnpm";
 const wranglerDlxArgs = ["dlx", "--allow-build=esbuild,sharp,workerd", "wrangler@4"];
 const wranglerEnv = buildWranglerEnv();
-await runWrangler(["d1", "migrations", "apply", "router-vitals", "--local", "--config", wranglerConfig]);
+const seedPreviewData = process.env.STATUS_PREVIEW_SEED !== "0";
+if (seedPreviewData) {
+    await runWrangler(["d1", "execute", "router-vitals", "--local", "--config", wranglerConfig, "--file", "worker/preview/reset.sql"]);
+    await runWrangler(["d1", "execute", "router-vitals", "--local", "--config", wranglerConfig, "--file", "worker/migrations/0001_initial.sql"]);
+    await runWrangler(["d1", "execute", "router-vitals", "--local", "--config", wranglerConfig, "--file", "worker/preview/seed.sql"]);
+}
+else {
+    await runWrangler(["d1", "migrations", "apply", "router-vitals", "--local", "--config", wranglerConfig]);
+}
 const dev = spawnPnpm([
     ...wranglerDlxArgs,
     "dev",

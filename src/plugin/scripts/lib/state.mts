@@ -1,7 +1,15 @@
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
-import { LOCAL_DAILY_REPORT_LIMIT, MODEL_CLASSES, createAnonymousId, getTodayKey, type ModelClass, type ReportPayload } from "./policy.mjs";
+import {
+  LOCAL_DAILY_REPORT_LIMIT,
+  MODEL_CLASSES,
+  createAnonymousId,
+  getTodayKey,
+  validateReportPayload,
+  type ModelClass,
+  type ReportPayload
+} from "./policy.mjs";
 
 const STATE_VERSION = 1;
 const STATE_DIR_NAME = "anyrouter-status-monitor";
@@ -17,6 +25,7 @@ export interface AnonymousState {
 
 export interface TurnState {
   startedAtMs?: number;
+  transcriptStartOffset?: number;
   targetMatched?: boolean;
   modelClass?: ModelClass;
   updatedAtMs?: number;
@@ -122,7 +131,7 @@ function normalizeState(value: unknown, now = new Date()): PluginState {
     pending: normalizeTurnMap(record.pending, nowMs),
     sessions: normalizeTurnMap(record.sessions, nowMs),
     contributions: normalizeContributions(record.contributions, now),
-    lastPayload: isRecord(record.lastPayload) ? record.lastPayload as unknown as ReportPayload : null,
+    lastPayload: normalizeLastPayload(record.lastPayload),
     lastReportAt: typeof record.lastReportAt === "string" ? record.lastReportAt : null
   };
 }
@@ -132,6 +141,11 @@ function normalizeAnonymous(value: unknown): AnonymousState | null {
   const record = value as Record<string, unknown>;
   if (typeof record.day !== "string" || typeof record.id !== "string") return null;
   return { day: record.day, id: record.id };
+}
+
+function normalizeLastPayload(value: unknown): ReportPayload | null {
+  if (!isRecord(value)) return null;
+  return validateReportPayload(value).ok ? value as unknown as ReportPayload : null;
 }
 
 function normalizeTurnMap(value: unknown, nowMs: number): Record<string, TurnState> {
@@ -152,6 +166,9 @@ function normalizeTurnState(value: unknown): TurnState | null {
   if (!isRecord(value)) return null;
   const result: TurnState = {};
   if (typeof value.startedAtMs === "number" && Number.isFinite(value.startedAtMs)) result.startedAtMs = value.startedAtMs;
+  if (typeof value.transcriptStartOffset === "number" && Number.isFinite(value.transcriptStartOffset)) {
+    result.transcriptStartOffset = value.transcriptStartOffset;
+  }
   if (typeof value.updatedAtMs === "number" && Number.isFinite(value.updatedAtMs)) result.updatedAtMs = value.updatedAtMs;
   if (typeof value.targetMatched === "boolean") result.targetMatched = value.targetMatched;
   if (typeof value.modelClass === "string" && MODEL_CLASSES.includes(value.modelClass as ModelClass)) {

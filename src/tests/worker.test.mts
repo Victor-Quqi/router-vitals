@@ -13,7 +13,7 @@ test("worker rejects unknown report fields before touching D1", async () => {
       ok: true,
       errorType: "none",
       modelClass: "sonnet",
-      latencyBucket: "lt_3s",
+      assistantStartBucket: "lt_3s",
       timeBucket: 30000000,
       pluginVersion: "0.1.0",
       anonymousId: "anon_abcdefghijklmnop",
@@ -38,7 +38,7 @@ test("worker rejects reports without target host before touching D1", async () =
       ok: true,
       errorType: "none",
       modelClass: "sonnet",
-      latencyBucket: "lt_3s",
+      assistantStartBucket: "lt_3s",
       timeBucket: 30000000,
       pluginVersion: "0.1.0",
       anonymousId: "anon_abcdefghijklmnop",
@@ -216,13 +216,15 @@ test("status aggregation returns insufficient data under sample floor", () => {
       total_samples: 4,
       success_samples: 4,
       failure_samples: 0,
-      latency_lt_3s: 4
+      assistant_start_lt_3s: 4
     }
   ], "5m");
 
   assert.equal(status.state, "insufficient_data");
   assert.equal(status.meta.unit, "turn");
   assert.equal(status.meta.availabilityFormula, "successCount / sampleCount");
+  assert.equal(status.assistantStart.medianBucket, "lt_3s");
+  assert.equal(status.assistantStart.known, 4);
 });
 
 test("status aggregation detects unstable high error windows", () => {
@@ -231,12 +233,13 @@ test("status aggregation detects unstable high error windows", () => {
       total_samples: 20,
       success_samples: 17,
       failure_samples: 3,
-      latency_3_10s: 20,
+      assistant_start_3_10s: 20,
       err_server_error: 3
     }
   ], "15m");
 
   assert.equal(status.state, "unstable");
+  assert.equal(status.assistantStart.medianBucket, "3_10s");
   assert.equal(status.errors[0]!.type, "server_error");
 });
 
@@ -282,6 +285,7 @@ test("status aggregation builds model trend buckets", () => {
       total_samples: 3,
       success_samples: 2,
       failure_samples: 1,
+      assistant_start_3_10s: 3,
       err_server_error: 1
     }
   ], "90m", [
@@ -290,21 +294,24 @@ test("status aggregation builds model trend buckets", () => {
       model_class: "sonnet",
       total_samples: 2,
       success_samples: 2,
-      failure_samples: 0
+      failure_samples: 0,
+      assistant_start_lt_3s: 2
     },
     {
       minute: nowMinute - 1,
       model_class: "sonnet",
       total_samples: 3,
       success_samples: 2,
-      failure_samples: 1
+      failure_samples: 1,
+      assistant_start_3_10s: 3
     },
     {
       minute: nowMinute,
       model_class: "opus",
       total_samples: 1,
       success_samples: 0,
-      failure_samples: 1
+      failure_samples: 1,
+      assistant_start_10_30s: 1
     }
   ], nowMinute, [
     {
@@ -331,9 +338,12 @@ test("status aggregation builds model trend buckets", () => {
   assert.equal(status.models[0]!.modelClass, "opus");
   assert.equal(status.models[0]!.buckets.at(-1)!.state, "failure");
   assert.equal(status.models[0]!.buckets.at(-1)!.errors[0]!.type, "server_error");
+  assert.equal(status.models[0]!.buckets.at(-1)!.assistantStart?.medianBucket, "10_30s");
   assert.equal(status.models[1]!.modelClass, "sonnet");
+  assert.equal(status.models[1]!.buckets.at(-2)!.assistantStart?.medianBucket, "lt_3s");
   assert.equal(status.models[1]!.buckets.at(-2)!.state, "success");
   assert.equal(status.models[1]!.buckets.at(-1)!.state, "mixed");
+  assert.equal(status.models[1]!.buckets.at(-1)!.assistantStart?.medianBucket, "3_10s");
   assert.equal(status.modelErrors.sonnet[0]!.type, "server_error");
   assert.equal(status.models[2]!.modelClass, "haiku");
   assert.equal(status.models[2]!.buckets.at(-1)!.state, "empty");
@@ -418,7 +428,7 @@ function reportRequest(anonymousId: string, ok = true): Request {
       errorStatusCode: ok ? null : 503,
       errorHint: ok ? null : "Service overloaded",
       modelClass: "sonnet",
-      latencyBucket: "lt_3s",
+      assistantStartBucket: "lt_3s",
       timeBucket: 30000000,
       pluginVersion: "0.1.0",
       anonymousId,
