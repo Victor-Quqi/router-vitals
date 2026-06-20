@@ -103,8 +103,10 @@ test("statusLine caches remote status between invocations", async () => {
 
     assert.match(first, /Any Router 近 60m 状态: 可用/);
     assert.match(first, /插件有新版 9\.9\.9 · 运行 \/plugin 更新/);
+    assert.doesNotMatch(first, /贡献开启|今日贡献/);
     assert.match(second, /Any Router 近 60m 状态: 可用/);
     assert.match(second, /插件有新版 9\.9\.9 · 运行 \/plugin 更新/);
+    assert.doesNotMatch(second, /贡献开启|今日贡献/);
     assert.equal(statusRequests, 1);
   } finally {
     server.close();

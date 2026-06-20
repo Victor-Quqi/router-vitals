@@ -11,15 +11,19 @@ async function main() {
     const target = matchTargetBaseUrl(process.env.ANTHROPIC_BASE_URL, config.targetBaseUrlHosts);
     const count = getTodayContributions(state);
     const updateHint = formatUpdateHint(config.latestPluginVersion);
-    const suffix = updateHint ? ` · ${updateHint}` : "";
     if (!target.matched) {
-        console.log(`Any Router 近 60m 状态: 未匹配目标站 · 贡献暂停 · ${formatContributionCount(count)}${suffix}`);
+        const detail = updateHint || `贡献暂停 · ${formatContributionCount(count)}`;
+        console.log(`Any Router 近 60m 状态: 未匹配目标站 · ${detail}`);
         return;
     }
     const status = await getCachedStatus(config.apiBaseUrl);
     const statusText = formatStatus(status);
+    if (updateHint) {
+        console.log(`Any Router 近 60m 状态: ${statusText} · ${updateHint}`);
+        return;
+    }
     const contributionText = config.reportingEnabled === false ? "贡献暂停" : "贡献开启";
-    console.log(`Any Router 近 60m 状态: ${statusText} · ${contributionText} · ${formatContributionCount(count)}${suffix}`);
+    console.log(`Any Router 近 60m 状态: ${statusText} · ${contributionText} · ${formatContributionCount(count)}`);
 }
 async function getCachedStatus(apiBaseUrl) {
     const nowMs = Date.now();

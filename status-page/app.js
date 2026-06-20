@@ -44,6 +44,7 @@ const modelLabels = {
     haiku: "Haiku",
     unknown: "Unknown"
 };
+const emptyTrendModelClasses = ["opus", "sonnet", "haiku"];
 const assistantStartLabels = {
     lt_3s: "<3s",
     "3_10s": "3-10s",
@@ -240,7 +241,7 @@ function renderModelTable(models, timeline) {
     const root = getElement("modelTable");
     root.replaceChildren();
     root.style.setProperty("--bucket-count", String(timeline?.bucketCount || 1));
-    const rows = models.length > 0 ? models : buildEmptyModels(timeline);
+    const rows = models.length > 0 ? filterVisibleModels(models) : buildEmptyModels(timeline);
     const header = document.createElement("div");
     header.className = "modelRow modelHead";
     for (const text of ["模型", "可用率", "轮次", "失败", "趋势"]) {
@@ -287,7 +288,7 @@ function buildEmptyModels(timeline) {
         return [];
     const startMinute = Math.floor(new Date(timeline.startAt).getTime() / 60000);
     const endMinute = Math.floor(new Date(timeline.endAt).getTime() / 60000);
-    return Object.keys(modelLabels).map((modelClass) => ({
+    return emptyTrendModelClasses.map((modelClass) => ({
         modelClass,
         sampleCount: 0,
         failureCount: 0,
@@ -302,6 +303,17 @@ function buildEmptyModels(timeline) {
             state: "empty"
         }))
     }));
+}
+function filterVisibleModels(models) {
+    return models.filter((model) => normalizeModelClass(model.modelClass) !== "unknown" || hasModelData(model));
+}
+function hasModelData(model) {
+    if ((model.sampleCount ?? 0) > 0 || (model.failureCount ?? 0) > 0)
+        return true;
+    return (model.buckets || []).some((bucket) => (bucket.total ?? 0) > 0 ||
+        (bucket.success ?? 0) > 0 ||
+        (bucket.failure ?? 0) > 0 ||
+        (bucket.errors?.length ?? 0) > 0);
 }
 function minuteToIso(minute) {
     return new Date(minute * 60000).toISOString();

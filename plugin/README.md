@@ -28,7 +28,7 @@ node scripts/setup-statusline.mjs
 
 statusLine 大致显示：`Any Router 近 60m 状态: 可用 · 贡献开启 · 今日贡献 12 条`。
 
-有新版时会追加更新提示。命令行更新：
+有新版时会优先显示更新提示：`Any Router 近 60m 状态: 可用 · 插件有新版 <最新版本> · 运行 /plugin 更新`。命令行更新：
 
 ```bash
 claude plugin update anyrouter-status-monitor@router-vitals

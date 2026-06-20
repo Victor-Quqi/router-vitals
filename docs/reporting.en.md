@@ -64,4 +64,4 @@ Test statusLine output:
 node plugin/scripts/statusline.mjs
 ```
 
-statusLine is display-only; hooks keep running independently. Claude Code reruns statusLine when its status changes, and this plugin does no interval polling — that avoids hammering the status API during long tasks. `今日贡献` reads local state on each run and refreshes after a successful submit; `近 60m 状态` comes from the Worker API with a 60-second local cache.
+statusLine is display-only; hooks keep running independently. Claude Code reruns statusLine when its status changes, and this plugin does no interval polling — that avoids hammering the status API during long tasks. `今日贡献` reads local state on each run and refreshes after a successful submit; when an update is available, statusLine prioritizes the update hint. `近 60m 状态` comes from the Worker API with a 60-second local cache.

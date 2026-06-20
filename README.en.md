@@ -52,7 +52,7 @@ If another statusLine is already configured, the setup command does not replace 
 
 Once configured, the status line looks roughly like: `Any Router 近 60m 状态: 可用 · 贡献开启 · 今日贡献 12 条`.
 
-When a newer plugin version is available, the status line appends an update hint. You can update manually from the CLI:
+When a newer plugin version is available, the status line prioritizes the update hint: `Any Router 近 60m 状态: 可用 · 插件有新版 <latest version> · 运行 /plugin 更新`. You can update manually from the CLI:
 
 ```bash
 claude plugin update anyrouter-status-monitor@router-vitals

@@ -46,13 +46,31 @@ claude plugin list --json
 node "<installPath>/scripts/setup-statusline.mjs"
 ```
 
-Linux/macOS 换成对应的绝对路径。
+典型路径如下，`<用户名>`、`<版本>` 换成实际值；最终以 `claude plugin list --json` 输出的 `installPath` 为准。
+
+Windows PowerShell：
+
+```powershell
+node "C:\Users\<用户名>\.claude\plugins\cache\router-vitals\anyrouter-status-monitor\<版本>\scripts\setup-statusline.mjs"
+```
+
+macOS：
+
+```bash
+node "/Users/<用户名>/.claude/plugins/cache/router-vitals/anyrouter-status-monitor/<版本>/scripts/setup-statusline.mjs"
+```
+
+Linux：
+
+```bash
+node "/home/<用户名>/.claude/plugins/cache/router-vitals/anyrouter-status-monitor/<版本>/scripts/setup-statusline.mjs"
+```
 
 已有其他 statusLine 时，配置命令默认不替换；确认要替换时加 `--force`。
 
 配好后状态栏大致长这样：`Any Router 近 60m 状态: 可用 · 贡献开启 · 今日贡献 12 条`。
 
-有新版时会追加更新提示。命令行手动更新：
+有新版时会优先显示更新提示：`Any Router 近 60m 状态: 可用 · 插件有新版 <最新版本> · 运行 /plugin 更新`。命令行手动更新：
 
 ```bash
 claude plugin update anyrouter-status-monitor@router-vitals
