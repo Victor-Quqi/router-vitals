@@ -27,7 +27,7 @@ Any Router 入口：
 
 不会提交：真实 URL、prompt、response、token、cookie、key、账号、`session_id`、文件路径、完整日志、精确时间戳。
 
-为避免 Claude Code 会话内切换模型后串到旧模型，插件会在本机读取 hook 输入里的 transcript 文件，只提取本轮 assistant 记录中的模型元数据用于归类，并用首条 assistant 记录时间计算响应开始区间；不会提交 transcript 路径或内容。状态页的首次响应 P50 只统计最终成功的轮次。这个区间不是底层 API TTFT，会包含 Claude Code 自动重试等用户实际等待。
+为避免 Claude Code 会话内切换模型后串到旧模型，插件会在本机读取 hook 输入里的 transcript 文件，只提取模型归类和响应开始所需的元数据：本轮 assistant 记录中的模型字段、prompt 前 `/model` 本地命令成功输出里的模型名、首条 assistant 记录时间；不会提交 transcript 路径或内容。状态页的首次响应 P50 只统计最终成功的轮次。这个区间不是底层 API TTFT，会包含 Claude Code 自动重试等用户实际等待。
 
 ## 关掉上报
 
@@ -40,7 +40,7 @@ Any Router 入口：
 - `ANYROUTER_STATUS_API_BASE_URL`：上报 API base URL。
 - `ANYROUTER_STATUS_CONFIG_URL`：远程配置 JSON URL。
 - `ANYROUTER_STATUS_STATE_DIR`：本地状态目录。默认用系统用户 state 目录，让 hooks 和手动配置的 statusLine 读同一份状态。
-- `ANYROUTER_STATUS_DEBUG_HOOK=1`：写本地 hook 诊断日志 `debug-hook.jsonl`，用于排查模型归类证据链。
+- `ANYROUTER_STATUS_DEBUG_HOOK=1`：写本地 hook 诊断日志 `debug-hook.jsonl`，用于排查 session 事件、hook 输入摘要、pending/session 状态、上报决策、错误和 transcript 证据。
 
 诊断某个 Claude Code session：
 
@@ -48,7 +48,7 @@ Any Router 入口：
 pnpm diagnose:session <session-id>
 ```
 
-没有提前开启 `ANYROUTER_STATUS_DEBUG_HOOK=1` 的历史 session 只能读取 transcript 证据，无法还原当时的 hook stdin。
+没有提前开启 `ANYROUTER_STATUS_DEBUG_HOOK=1` 的历史 session 只能读取 transcript 证据，无法还原当时的 hook stdin。诊断日志是本地 opt-in 文件，主要记录字段名、本地 transcript 路径、错误摘要、模型候选字段、状态转移和上报结果，不记录完整 prompt/response。
 
 ## 本地验证
 
