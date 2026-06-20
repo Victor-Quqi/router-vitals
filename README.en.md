@@ -48,7 +48,7 @@ node "<installPath>/scripts/setup-statusline.mjs"
 
 On Linux/macOS use the matching absolute path.
 
-If another statusLine is already configured, the setup command does not replace it by default. Add `--force` when you explicitly want to replace it.
+If another statusLine is already configured, the setup command asks before replacing it. Add `--force` when you want to replace it without prompting.
 
 Once configured, the status line looks roughly like: `Any Router 近 60m 状态: 可用 · 贡献开启 · 今日贡献 12 条`.
 

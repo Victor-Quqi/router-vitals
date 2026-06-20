@@ -74,10 +74,13 @@ test("setup does not overwrite an unrelated statusLine unless forced", async () 
       }
     }, null, 2), "utf8");
 
-    await runNode([setupPath], { ANYROUTER_STATUS_CLAUDE_HOME: claudeHome });
+    const skippedOutput = await runNode([setupPath], { ANYROUTER_STATUS_CLAUDE_HOME: claudeHome });
 
     const unchanged = JSON.parse(await readFile(settingsPath, "utf8"));
     assert.equal(unchanged.statusLine.command, "node custom-statusline.mjs");
+    assert.match(skippedOutput, /Claude Code 当前只支持一个 statusLine 命令/);
+    assert.match(skippedOutput, /wrapper/);
+    assert.match(skippedOutput, /--force/);
 
     await runNode([setupPath, "--force"], { ANYROUTER_STATUS_CLAUDE_HOME: claudeHome });
 

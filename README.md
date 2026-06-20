@@ -66,7 +66,7 @@ Linux：
 node "/home/<用户名>/.claude/plugins/cache/router-vitals/anyrouter-status-monitor/<版本>/scripts/setup-statusline.mjs"
 ```
 
-已有其他 statusLine 时，配置命令默认不替换；确认要替换时加 `--force`。
+已有其他 statusLine 时会询问是否直接替换；要无提示替换可加 `--force`。
 
 配好后状态栏大致长这样：`Any Router 近 60m 状态: 可用 · 贡献开启 · 今日贡献 12 条`。
 

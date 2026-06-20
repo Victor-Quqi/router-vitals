@@ -65,3 +65,5 @@ node plugin/scripts/statusline.mjs
 ```
 
 statusLine 只是展示层，hooks 照常独立运行。Claude Code 会在状态变化时重跑 statusLine，这里不做定时轮询，避免长任务期间一直请求状态 API。`今日贡献` 每次运行读本地 state，提交成功后下次刷新；有新版时 statusLine 优先显示更新提示。`近 60m 状态` 来自 Worker API，本地缓存 60 秒。
+
+Claude Code 当前只接受一个 `statusLine` 命令。`setup-statusline.mjs` 检测到已有非本插件 statusLine 时，交互终端会询问是否直接替换；非交互环境默认不覆盖。若要同时显示多个状态源，请自行编写 wrapper，或使用第三方 statusLine 聚合工具。

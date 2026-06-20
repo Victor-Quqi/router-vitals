@@ -2,6 +2,7 @@
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
+import { createInterface } from "node:readline/promises";
 import { fileURLToPath } from "node:url";
 
 const PLUGIN_ID = "anyrouter-status-monitor@router-vitals";
@@ -38,8 +39,8 @@ async function main(): Promise<void> {
   const settings = await loadSettings(settingsPath);
   if (hasUnrelatedStatusLine(settings.statusLine) && !options.force) {
     console.log(`已写入稳定入口: ${launcherPath}`);
-    console.log("检测到已有 statusLine，未覆盖。确认要替换时重新运行并加上 --force。");
-    return;
+    const confirmed = await confirmOverwriteStatusLine(settings.statusLine, statusLine.command);
+    if (!confirmed) return;
   }
 
   settings.statusLine = statusLine;
@@ -51,6 +52,32 @@ async function main(): Promise<void> {
 
 function parseOptions(args: string[]): SetupOptions {
   return { force: args.includes("--force") };
+}
+
+async function confirmOverwriteStatusLine(existing: unknown, nextCommand: string): Promise<boolean> {
+  console.log(`检测到已有 statusLine: ${formatStatusLineCommand(existing)}`);
+  console.log("Claude Code 当前只支持一个 statusLine 命令。若要同时显示多个状态源，请自行编写 wrapper，或使用第三方 statusLine 聚合工具。");
+  console.log(`Any Router statusLine 命令: ${nextCommand}`);
+
+  if (!process.stdin.isTTY || !process.stdout.isTTY) {
+    console.log("当前不是交互终端，未覆盖。确认要直接替换时重新运行并加上 --force。");
+    return false;
+  }
+
+  const readline = createInterface({ input: process.stdin, output: process.stdout });
+  try {
+    const answer = await readline.question("是否直接替换现有 statusLine？[y/N] ");
+    const confirmed = /^(y|yes)$/i.test(answer.trim());
+    if (!confirmed) console.log("未覆盖现有 statusLine。");
+    return confirmed;
+  } finally {
+    readline.close();
+  }
+}
+
+function formatStatusLineCommand(value: unknown): string {
+  if (!isRecord(value) || typeof value.command !== "string" || value.command.trim() === "") return "<unknown>";
+  return value.command;
 }
 
 function getClaudeHome(): string {
