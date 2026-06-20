@@ -12,6 +12,7 @@
     "sync:version": "pnpm run build && node scripts/version.mjs sync",
     "typecheck": "tsc -p tsconfig.json",
     "test": "pnpm run build && pnpm run check:version && node --test .tsbuild/out/tests/*.test.mjs",
+    "diagnose:session": "node scripts/diagnose-session.mjs",
     "status:preview": "pnpm run build && node scripts/preview-status.mjs"
   },
   "engines": {

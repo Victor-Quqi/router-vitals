@@ -48,11 +48,15 @@ export interface StatusCache {
 }
 
 export function getStatePath(): string {
-  return join(getStateRoot(), STATE_DIR_NAME, STATE_FILE_NAME);
+  return join(getPluginStateDir(), STATE_FILE_NAME);
 }
 
 export function getStatusCachePath(): string {
-  return join(getStateRoot(), STATE_DIR_NAME, STATUS_CACHE_FILE_NAME);
+  return join(getPluginStateDir(), STATUS_CACHE_FILE_NAME);
+}
+
+export function getPluginStateDir(): string {
+  return join(getStateRoot(), STATE_DIR_NAME);
 }
 
 export async function loadState(): Promise<PluginState> {

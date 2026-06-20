@@ -40,6 +40,15 @@ Any Router 入口：
 - `ANYROUTER_STATUS_API_BASE_URL`：上报 API base URL。
 - `ANYROUTER_STATUS_CONFIG_URL`：远程配置 JSON URL。
 - `ANYROUTER_STATUS_STATE_DIR`：本地状态目录。默认用系统用户 state 目录，让 hooks 和手动配置的 statusLine 读同一份状态。
+- `ANYROUTER_STATUS_DEBUG_HOOK=1`：写本地 hook 诊断日志 `debug-hook.jsonl`，用于排查模型归类证据链。
+
+诊断某个 Claude Code session：
+
+```bash
+pnpm diagnose:session <session-id>
+```
+
+没有提前开启 `ANYROUTER_STATUS_DEBUG_HOOK=1` 的历史 session 只能读取 transcript 证据，无法还原当时的 hook stdin。
 
 ## 本地验证
 

@@ -9,10 +9,13 @@ const STATUS_CACHE_FILE_NAME = "status-cache.json";
 const CONTRIBUTION_RETENTION_DAYS = 120;
 const TURN_STATE_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
 export function getStatePath() {
-    return join(getStateRoot(), STATE_DIR_NAME, STATE_FILE_NAME);
+    return join(getPluginStateDir(), STATE_FILE_NAME);
 }
 export function getStatusCachePath() {
-    return join(getStateRoot(), STATE_DIR_NAME, STATUS_CACHE_FILE_NAME);
+    return join(getPluginStateDir(), STATUS_CACHE_FILE_NAME);
+}
+export function getPluginStateDir() {
+    return join(getStateRoot(), STATE_DIR_NAME);
 }
 export async function loadState() {
     const path = getStatePath();

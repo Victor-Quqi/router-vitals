@@ -40,6 +40,15 @@ Not needed normally — only when self-hosting or debugging:
 - `ANYROUTER_STATUS_API_BASE_URL`: report API base URL.
 - `ANYROUTER_STATUS_CONFIG_URL`: remote config JSON URL.
 - `ANYROUTER_STATUS_STATE_DIR`: local state directory. By default the plugin uses the user state directory so hooks and a manually configured statusLine read the same state.
+- `ANYROUTER_STATUS_DEBUG_HOOK=1`: writes the local hook diagnostic log `debug-hook.jsonl` for model-classification evidence tracing.
+
+Diagnose one Claude Code session:
+
+```bash
+pnpm diagnose:session <session-id>
+```
+
+Historical sessions without `ANYROUTER_STATUS_DEBUG_HOOK=1` can only be diagnosed from transcript evidence; their hook stdin cannot be reconstructed.
 
 ## Local checks
 

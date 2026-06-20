@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { createServer, type Server, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
@@ -256,6 +256,88 @@ test("plugin hook uploads only for matched AnyRouter sessions", async () => {
   }
 });
 
+test("plugin hook debug log records model resolution evidence", async () => {
+  const server = createServer((req, res) => {
+    if (req.method === "GET" && req.url === "/config.json") {
+      const base = `http://127.0.0.1:${serverPort(server)}`;
+      respondJson(res, {
+        reportingEnabled: true,
+        apiBaseUrl: base,
+        targetBaseUrlHosts: ["anyrouter.top", "a-ocnfniawgw.cn-shanghai.fcapp.run"],
+        sampleRateSuccess: 1,
+        sampleRateFailure: 1,
+        minPluginVersion: "0.1.0",
+        statusWindows: ["5m", "15m", "60m"]
+      });
+      return;
+    }
+
+    if (req.method === "POST" && req.url === "/v1/report") {
+      respondJson(res, { ok: true });
+      return;
+    }
+
+    res.writeHead(404);
+    res.end();
+  });
+
+  await listen(server);
+  const stateDir = await mkdtemp(join(tmpdir(), "router-vitals-debug-"));
+
+  try {
+    const commonEnv = {
+      ...process.env,
+      ANYROUTER_STATUS_DEBUG_HOOK: "1",
+      ANYROUTER_STATUS_STATE_DIR: stateDir,
+      ANYROUTER_STATUS_CONFIG_URL: `http://127.0.0.1:${serverPort(server)}/config.json`,
+      ANTHROPIC_BASE_URL: "https://anyrouter.top",
+      CLAUDE_MODEL: "claude-opus-4-8"
+    };
+    const transcript = join(stateDir, "session-debug.jsonl");
+    const records = [
+      createModelSwitchCommandRecord(),
+      createUserModelSetOutputRecord("Set model to \u001b[1mSonnet 4.6 (1M context)\u001b[22m and saved as your default for new sessions")
+    ];
+
+    await runHook("SessionStart", { session_id: "session-debug" }, commonEnv);
+    await writeTranscriptRecords(transcript, records);
+    await runHook("UserPromptSubmit", { session_id: "session-debug", transcript_path: transcript }, commonEnv);
+    records.push(createSyntheticAssistantErrorRecord(429));
+    await writeTranscriptRecords(transcript, records);
+    await runHook("StopFailure", {
+      session_id: "session-debug",
+      transcript_path: transcript,
+      status_code: 429,
+      message: "API Error 429: rate limit reached"
+    }, commonEnv);
+
+    const debugPath = join(stateDir, "anyrouter-status-monitor", "debug-hook.jsonl");
+    const debugRecords = (await readFile(debugPath, "utf8"))
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line));
+
+    const promptDebug = debugRecords.find((record) => record.eventName === "UserPromptSubmit" && record.stage === "prompt_start");
+    assert.equal(promptDebug.data.promptModelClass, "opus");
+    assert.equal(promptDebug.data.promptSource, "session");
+    assert.equal(promptDebug.data.promptTranscript.modelSetOutputs[0].modelClass, "unknown");
+    assert.equal(promptDebug.data.promptTranscript.modelSetOutputs[0].hasAnsi, true);
+
+    const stopReceived = debugRecords.find((record) => record.eventName === "StopFailure" && record.stage === "received");
+    assert.equal(stopReceived.data.input.directInputModelClass, "unknown");
+    assert.equal(stopReceived.data.input.errorStatusCode, 429);
+
+    const completionDebug = debugRecords.find((record) => record.eventName === "StopFailure" && record.stage === "completion");
+    assert.equal(completionDebug.data.modelResolution.modelClass, "opus");
+    assert.equal(completionDebug.data.modelResolution.source, "fallback");
+    assert.equal(completionDebug.data.transcript.modelObservations[0].candidates[0].value, "<synthetic>");
+    assert.equal(completionDebug.data.transcript.modelObservations[0].modelClass, "unknown");
+  } finally {
+    server.close();
+    await rm(stateDir, { recursive: true, force: true });
+  }
+});
+
 test("plugin hook skips uploads after the local daily contribution limit", async () => {
   const received: Array<Record<string, any>> = [];
   const server = createServer((req, res) => {
@@ -348,6 +430,31 @@ function createModelSetOutputRecord(text: string): Record<string, unknown> {
     subtype: "local_command",
     timestamp: new Date().toISOString(),
     content: `<local-command-stdout>${text}</local-command-stdout>`
+  };
+}
+
+function createUserModelSetOutputRecord(text: string): Record<string, unknown> {
+  return {
+    type: "user",
+    timestamp: new Date().toISOString(),
+    message: {
+      role: "user",
+      content: `<local-command-stdout>${text}</local-command-stdout>`
+    }
+  };
+}
+
+function createSyntheticAssistantErrorRecord(statusCode: number): Record<string, unknown> {
+  return {
+    type: "assistant",
+    timestamp: new Date().toISOString(),
+    message: {
+      role: "assistant",
+      model: "<synthetic>",
+      content: [{ type: "text", text: `API Error: Request rejected (${statusCode})` }]
+    },
+    isApiErrorMessage: true,
+    apiErrorStatus: statusCode
   };
 }
 
