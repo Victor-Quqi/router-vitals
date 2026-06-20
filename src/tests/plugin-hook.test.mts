@@ -175,12 +175,12 @@ test("plugin hook uploads only for matched AnyRouter sessions", async () => {
     });
 
     assert.equal(received.length, 6);
-    assert.equal(received[5]!.modelClass, "unknown");
+    assert.equal(received[5]!.modelClass, "opus");
 
     const sessionHTranscript = join(stateDir, "session-h.jsonl");
     await writeTranscriptRecords(sessionHTranscript, [
       createModelSwitchCommandRecord(),
-      createAssistantModelRecord("claude-sonnet-4-6")
+      createModelSetOutputRecord("Set model to Sonnet 4.6 (1M context) and saved as your default for new sessions with max effort")
     ]);
     await runHook("SessionStart", { session_id: "session-h" }, {
       ...commonEnv,
@@ -206,6 +206,35 @@ test("plugin hook uploads only for matched AnyRouter sessions", async () => {
     assert.equal(received.length, 7);
     assert.equal(received[6]!.modelClass, "sonnet");
 
+    const sessionITranscript = join(stateDir, "session-i.jsonl");
+    await writeTranscriptRecords(sessionITranscript, [
+      createModelSwitchCommandRecord(),
+      createModelSetOutputRecord("Set model to Opus 4.8 (1M context) and saved as your default for new sessions with high effort")
+    ]);
+    await runHook("SessionStart", { session_id: "session-i" }, {
+      ...commonEnv,
+      ANTHROPIC_BASE_URL: "https://anyrouter.top",
+      CLAUDE_MODEL: "claude-sonnet-4-6"
+    });
+    await runHook("UserPromptSubmit", { session_id: "session-i", transcript_path: sessionITranscript }, {
+      ...commonEnv,
+      ANTHROPIC_BASE_URL: "https://anyrouter.top",
+      CLAUDE_MODEL: "claude-sonnet-4-6"
+    });
+    await runHook("StopFailure", {
+      session_id: "session-i",
+      transcript_path: sessionITranscript,
+      status_code: 429,
+      message: "API Error 429: rate limit reached"
+    }, {
+      ...commonEnv,
+      ANTHROPIC_BASE_URL: "https://anyrouter.top/v1/messages",
+      CLAUDE_MODEL: "claude-sonnet-4-6"
+    });
+
+    assert.equal(received.length, 8);
+    assert.equal(received[7]!.modelClass, "opus");
+
     await runHook("UserPromptSubmit", { session_id: "session-b" }, {
       ...commonEnv,
       ANTHROPIC_BASE_URL: "https://api.anthropic.com"
@@ -215,7 +244,7 @@ test("plugin hook uploads only for matched AnyRouter sessions", async () => {
       ANTHROPIC_BASE_URL: "https://api.anthropic.com"
     });
 
-    assert.equal(received.length, 7);
+    assert.equal(received.length, 8);
 
     await runHook("SessionEnd", { session_id: "session-a" }, {
       ...commonEnv,
@@ -310,6 +339,15 @@ function createModelSwitchCommandRecord(): Record<string, unknown> {
       role: "user",
       content: "<command-name>/model</command-name>\n<command-message>model</command-message>\n<command-args></command-args>"
     }
+  };
+}
+
+function createModelSetOutputRecord(text: string): Record<string, unknown> {
+  return {
+    type: "system",
+    subtype: "local_command",
+    timestamp: new Date().toISOString(),
+    content: `<local-command-stdout>${text}</local-command-stdout>`
   };
 }
 

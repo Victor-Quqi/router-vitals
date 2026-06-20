@@ -166,8 +166,6 @@ async function resolvePromptStartModelClass(input, session, transcriptStartOffse
     const transcript = await inspectPromptStartTranscript(input, transcriptStartOffset);
     if (!transcript.inspected)
         return "unknown";
-    if (transcript.hasUnconfirmedModelSwitch)
-        return "unknown";
     if (transcript.modelClass !== "unknown")
         return transcript.modelClass;
     return session?.modelClass && session.modelClass !== "unknown" ? session.modelClass : "unknown";
@@ -176,8 +174,7 @@ async function inspectPromptStartTranscript(input, transcriptStartOffset) {
     const transcriptPath = getTranscriptPath(input);
     const result = {
         inspected: false,
-        modelClass: "unknown",
-        hasUnconfirmedModelSwitch: false
+        modelClass: "unknown"
     };
     if (!transcriptPath || transcriptStartOffset === null)
         return result;
@@ -203,14 +200,9 @@ async function inspectPromptStartTranscript(input, transcriptStartOffset) {
                 continue;
             try {
                 const record = JSON.parse(raw);
-                if (isModelSwitchCommand(record)) {
-                    result.hasUnconfirmedModelSwitch = true;
-                    continue;
-                }
-                const modelClass = classifyTranscriptRecord(record);
+                const modelClass = classifyModelSetOutput(record) || classifyTranscriptRecord(record);
                 if (modelClass !== "unknown") {
                     result.modelClass = modelClass;
-                    result.hasUnconfirmedModelSwitch = false;
                 }
             }
             catch {
@@ -221,8 +213,7 @@ async function inspectPromptStartTranscript(input, transcriptStartOffset) {
     catch {
         return {
             inspected: false,
-            modelClass: "unknown",
-            hasUnconfirmedModelSwitch: false
+            modelClass: "unknown"
         };
     }
     return result;
@@ -330,15 +321,29 @@ function classifyTranscriptRecord(value) {
     }
     return "unknown";
 }
-function isModelSwitchCommand(value) {
-    if (!isRecord(value) || value.type !== "user")
-        return false;
+function classifyModelSetOutput(value) {
+    if (!isRecord(value))
+        return null;
     const message = isRecord(value.message) ? value.message : null;
-    const content = message?.content;
-    if (typeof content !== "string")
-        return false;
-    const raw = content.toLowerCase();
-    return raw.includes("<command-name>/model</command-name>") || raw.includes("<command-name>model</command-name>");
+    const text = getStringContent(value.content) ?? getStringContent(message?.content);
+    if (!text)
+        return null;
+    const lower = text.toLowerCase();
+    const isLocalCommand = value.subtype === "local_command"
+        || message?.subtype === "local_command"
+        || lower.includes("<local-command-stdout>");
+    if (!isLocalCommand)
+        return null;
+    const match = text.match(/(?:^|[>\r\n])\s*set\s+model\s+to\s+(opus|sonnet|haiku)\b/i);
+    if (!match)
+        return null;
+    const model = match[1].toLowerCase();
+    if (model === "opus" || model === "sonnet" || model === "haiku")
+        return model;
+    return null;
+}
+function getStringContent(value) {
+    return typeof value === "string" && value.trim() !== "" ? value : null;
 }
 function isAssistantRecord(value) {
     if (!isRecord(value))

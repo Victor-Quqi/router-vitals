@@ -1,7 +1,7 @@
 {
   "name": "router-vitals",
   "description": "Anonymous community status monitoring plugins for Any Router.",
-  "version": "0.1.21",
+  "version": "0.1.22",
   "owner": {
     "name": "Victor-Quqi"
   },
@@ -11,7 +11,7 @@
       "source": "./plugin",
       "displayName": "Any Router Status Monitor",
       "description": "Anonymous Claude Code usage status reporter for Any Router.",
-      "version": "0.1.21",
+      "version": "0.1.22",
       "author": {
         "name": "router-vitals"
       },
