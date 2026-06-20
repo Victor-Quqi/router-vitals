@@ -235,6 +235,35 @@ test("plugin hook uploads only for matched AnyRouter sessions", async () => {
     assert.equal(received.length, 8);
     assert.equal(received[7]!.modelClass, "opus");
 
+    const sessionJTranscript = join(stateDir, "session-j.jsonl");
+    await writeTranscriptRecords(sessionJTranscript, [
+      createModelSwitchCommandRecord(),
+      createUserModelSetOutputRecord("Set model to \u001b[1mMystery 1.0\u001b[22m and saved as your default for new sessions")
+    ]);
+    await runHook("SessionStart", { session_id: "session-j" }, {
+      ...commonEnv,
+      ANTHROPIC_BASE_URL: "https://anyrouter.top",
+      CLAUDE_MODEL: "claude-opus-4-8"
+    });
+    await runHook("UserPromptSubmit", { session_id: "session-j", transcript_path: sessionJTranscript }, {
+      ...commonEnv,
+      ANTHROPIC_BASE_URL: "https://anyrouter.top",
+      CLAUDE_MODEL: "claude-opus-4-8"
+    });
+    await runHook("StopFailure", {
+      session_id: "session-j",
+      transcript_path: sessionJTranscript,
+      status_code: 429,
+      message: "API Error 429: rate limit reached"
+    }, {
+      ...commonEnv,
+      ANTHROPIC_BASE_URL: "https://anyrouter.top/v1/messages",
+      CLAUDE_MODEL: "claude-opus-4-8"
+    });
+
+    assert.equal(received.length, 9);
+    assert.equal(received[8]!.modelClass, "unknown");
+
     await runHook("UserPromptSubmit", { session_id: "session-b" }, {
       ...commonEnv,
       ANTHROPIC_BASE_URL: "https://api.anthropic.com"
@@ -244,7 +273,7 @@ test("plugin hook uploads only for matched AnyRouter sessions", async () => {
       ANTHROPIC_BASE_URL: "https://api.anthropic.com"
     });
 
-    assert.equal(received.length, 8);
+    assert.equal(received.length, 9);
 
     await runHook("SessionEnd", { session_id: "session-a" }, {
       ...commonEnv,
@@ -318,9 +347,9 @@ test("plugin hook debug log records model resolution evidence", async () => {
       .map((line) => JSON.parse(line));
 
     const promptDebug = debugRecords.find((record) => record.eventName === "UserPromptSubmit" && record.stage === "prompt_start");
-    assert.equal(promptDebug.data.promptModelClass, "opus");
-    assert.equal(promptDebug.data.promptSource, "session");
-    assert.equal(promptDebug.data.promptTranscript.modelSetOutputs[0].modelClass, "unknown");
+    assert.equal(promptDebug.data.promptModelClass, "sonnet");
+    assert.equal(promptDebug.data.promptSource, "prompt_transcript");
+    assert.equal(promptDebug.data.promptTranscript.modelSetOutputs[0].modelClass, "sonnet");
     assert.equal(promptDebug.data.promptTranscript.modelSetOutputs[0].hasAnsi, true);
 
     const stopReceived = debugRecords.find((record) => record.eventName === "StopFailure" && record.stage === "received");
@@ -328,8 +357,9 @@ test("plugin hook debug log records model resolution evidence", async () => {
     assert.equal(stopReceived.data.input.errorStatusCode, 429);
 
     const completionDebug = debugRecords.find((record) => record.eventName === "StopFailure" && record.stage === "completion");
-    assert.equal(completionDebug.data.modelResolution.modelClass, "opus");
+    assert.equal(completionDebug.data.modelResolution.modelClass, "sonnet");
     assert.equal(completionDebug.data.modelResolution.source, "fallback");
+    assert.equal(completionDebug.data.payload.modelClass, "sonnet");
     assert.equal(completionDebug.data.transcript.modelObservations[0].candidates[0].value, "<synthetic>");
     assert.equal(completionDebug.data.transcript.modelObservations[0].modelClass, "unknown");
   } finally {

@@ -235,7 +235,8 @@ async function resolvePromptStartModelClass(input, session, transcriptStartOffse
     const emptyTranscript = {
         inspected: false,
         modelClass: "unknown",
-        modelSetOutputs: []
+        modelSetOutputs: [],
+        hasUnparsedModelSetOutput: false
     };
     if (direct !== "unknown") {
         return {
@@ -262,6 +263,14 @@ async function resolvePromptStartModelClass(input, session, transcriptStartOffse
             transcript
         };
     }
+    if (transcript.hasUnparsedModelSetOutput) {
+        return {
+            modelClass: "unknown",
+            source: "unparsed_model_set_output",
+            directInputModelClass: direct,
+            transcript
+        };
+    }
     const sessionModelClass = session?.modelClass && session.modelClass !== "unknown" ? session.modelClass : "unknown";
     if (sessionModelClass !== "unknown") {
         return {
@@ -283,7 +292,8 @@ async function inspectPromptStartTranscript(input, transcriptStartOffset) {
     const result = {
         inspected: false,
         modelClass: "unknown",
-        modelSetOutputs: []
+        modelSetOutputs: [],
+        hasUnparsedModelSetOutput: false
     };
     if (!transcriptPath || transcriptStartOffset === null)
         return result;
@@ -310,12 +320,19 @@ async function inspectPromptStartTranscript(input, transcriptStartOffset) {
             try {
                 const record = JSON.parse(raw);
                 const modelSetOutput = inspectModelSetOutput(record);
-                if (modelSetOutput)
+                if (modelSetOutput) {
                     result.modelSetOutputs.push(modelSetOutput);
+                    if (modelSetOutput.modelClass === "unknown") {
+                        result.modelClass = "unknown";
+                        result.hasUnparsedModelSetOutput = true;
+                        continue;
+                    }
+                }
                 const modelClass = (modelSetOutput?.modelClass !== "unknown" ? modelSetOutput?.modelClass : null)
                     || classifyTranscriptRecord(record);
                 if (modelClass !== "unknown") {
                     result.modelClass = modelClass;
+                    result.hasUnparsedModelSetOutput = false;
                 }
             }
             catch {
@@ -327,7 +344,8 @@ async function inspectPromptStartTranscript(input, transcriptStartOffset) {
         return {
             inspected: false,
             modelClass: "unknown",
-            modelSetOutputs: []
+            modelSetOutputs: [],
+            hasUnparsedModelSetOutput: false
         };
     }
     return result;
@@ -462,9 +480,10 @@ function inspectModelSetOutput(value) {
         || lower.includes("<local-command-stdout>");
     if (!isLocalCommand)
         return null;
-    const match = text.match(/(?:^|[>\r\n])\s*set\s+model\s+to\s+(opus|sonnet|haiku)\b/i);
+    const normalized = stripAnsiControlSequences(text);
+    const match = normalized.match(/(?:^|[>\r\n])\s*set\s+model\s+to\s+(opus|sonnet|haiku)\b/i);
     if (!match) {
-        if (!/(?:^|[>\r\n])\s*set\s+model\s+to\b/i.test(text))
+        if (!/(?:^|[>\r\n])\s*set\s+model\s+to\b/i.test(normalized))
             return null;
         return {
             timestampMs: getRecordTimestampMs(value),
@@ -577,6 +596,9 @@ function getRecordType(value) {
 }
 function hasAnsiControlSequence(value) {
     return /\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])/.test(value);
+}
+function stripAnsiControlSequences(value) {
+    return value.replace(/\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])/g, "");
 }
 function previewText(value) {
     return value

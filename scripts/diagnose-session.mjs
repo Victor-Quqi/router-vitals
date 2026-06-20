@@ -26,11 +26,11 @@ console.log(`debugLog: ${debugLogPath}${sessionDebugRecords.length === 0 ? " (no
 console.log(`transcript: ${transcriptPath || "(not found)"}`);
 console.log("");
 
-printDebugSummary(sessionDebugRecords);
-printTranscriptSummary(transcriptSessionRecords);
+printHookEvents(sessionDebugRecords);
+printTranscriptTimeline(transcriptSessionRecords);
 
-function printDebugSummary(records) {
-  console.log("hook debug:");
+function printHookEvents(records) {
+  console.log("hook events:");
   if (records.length === 0) {
     console.log("  missing: ANYROUTER_STATUS_DEBUG_HOOK was not enabled, so hook stdin evidence is unavailable");
     console.log("");
@@ -41,39 +41,69 @@ function printDebugSummary(records) {
     console.log(`  ${record.at} ${record.eventName} ${record.stage}`);
     if (record.stage === "received") {
       const input = record.data?.input || {};
-      console.log(`    input direct model: ${input.directInputModelClass || "unknown"}`);
-      console.log(`    input error: ${input.errorType || "unknown"} status=${input.errorStatusCode ?? "null"}`);
-      printCandidates("input model candidates", input.modelCandidates || []);
+      console.log(`    input keys: ${formatList(input.keys || [])}`);
+      console.log(`    transcript: ${input.transcriptPath ? "present" : "missing"}`);
+      console.log(`    error: ${input.errorType || "unknown"} status=${input.errorStatusCode ?? "null"} hint=${input.errorHint ? `"${input.errorHint}"` : "null"}`);
+      printModelEvidence("input model evidence", {
+        modelClass: input.directInputModelClass || "unknown",
+        candidates: input.modelCandidates || []
+      });
       continue;
     }
 
     if (record.stage === "prompt_start") {
-      console.log(`    prompt model: ${record.data?.promptModelClass || "unknown"} source=${record.data?.promptSource || "unknown"}`);
-      console.log(`    session before: ${formatTurn(record.data?.sessionBefore)}`);
+      console.log(`    target matched: ${record.data?.targetMatched === true}`);
+      console.log(`    transcript start offset: ${record.data?.transcriptStartOffset ?? "null"}`);
+      console.log(`    pending after: ${formatTurn(record.data?.pendingAfter)}`);
+      console.log(`    session before: ${formatTurn(record.data?.sessionBefore)} after=${formatTurn(record.data?.sessionAfter)}`);
+      printModelEvidence("model resolution", {
+        modelClass: record.data?.promptModelClass || "unknown",
+        source: record.data?.promptSource || "unknown",
+        direct: record.data?.directInputModelClass || "unknown"
+      });
       for (const output of record.data?.promptTranscript?.modelSetOutputs || []) {
-        console.log(`    model set output: parsed=${output.modelClass} ansi=${output.hasAnsi} text="${output.textPreview}"`);
+        console.log(`    local command output: parsedModel=${output.modelClass} ansi=${output.hasAnsi} text="${output.textPreview}"`);
       }
       continue;
     }
 
     if (record.stage === "completion") {
       const resolution = record.data?.modelResolution || {};
-      console.log(`    final model: ${resolution.modelClass || "unknown"} source=${resolution.source || "unknown"}`);
-      console.log(`    direct=${resolution.directInputModelClass || "unknown"} transcript=${resolution.transcriptModelClass || "unknown"} fallbacks=${JSON.stringify(resolution.fallbackModelClasses || [])}`);
+      console.log(`    skipped: ${record.data?.skipped || "no"}`);
+      console.log(`    pending: ${formatTurn(record.data?.pending)}`);
+      if (record.data?.payload) {
+        const payload = record.data.payload;
+        console.log(`    payload: ok=${payload.ok} model=${payload.modelClass} error=${payload.errorType} status=${payload.errorStatusCode ?? "null"} target=${payload.targetHost || "unknown"} posted=${record.data?.posted ?? "unknown"}`);
+      }
+      printModelEvidence("model resolution", {
+        modelClass: resolution.modelClass || "unknown",
+        source: resolution.source || "unknown",
+        direct: resolution.directInputModelClass || "unknown",
+        transcript: resolution.transcriptModelClass || "unknown",
+        fallbacks: resolution.fallbackModelClasses || []
+      });
       for (const observation of record.data?.transcript?.modelObservations || []) {
-        console.log(`    transcript model observation: type=${observation.recordType || "unknown"} class=${observation.modelClass}`);
+        console.log(`    transcript observation: type=${observation.recordType || "unknown"} model=${observation.modelClass}`);
         printCandidates("candidates", observation.candidates || [], "      ");
       }
       continue;
     }
 
-    if (record.data?.modelClass) console.log(`    model: ${record.data.modelClass}`);
+    if (record.stage === "session_start") {
+      console.log(`    session after: ${formatTurn(record.data?.sessionAfter)}`);
+      printModelEvidence("model resolution", { modelClass: record.data?.modelClass || "unknown", source: "session_start" });
+      continue;
+    }
+
+    if (record.stage === "session_end") {
+      console.log(`    session after: ${formatTurn(record.data?.sessionAfter)}`);
+    }
   }
   console.log("");
 }
 
-function printTranscriptSummary(records) {
-  console.log("transcript evidence:");
+function printTranscriptTimeline(records) {
+  console.log("transcript timeline:");
   if (records.length === 0) {
     console.log("  missing or empty");
     return;
@@ -81,22 +111,93 @@ function printTranscriptSummary(records) {
 
   let count = 0;
   for (const record of records) {
-    const output = inspectModelSetOutput(record);
-    if (output) {
-      count += 1;
-      console.log(`  ${record.timestamp || "(no timestamp)"} model stdout current=${output.currentParserModel} stripped=${output.ansiStrippedModel} ansi=${output.hasAnsi}`);
-      console.log(`    text="${output.textPreview}"`);
-    }
+    const summary = summarizeTranscriptRecord(record);
+    if (!summary) continue;
+    count += 1;
+    console.log(`  ${summary.timestamp} ${summary.kind}`);
+    for (const detail of summary.details) console.log(`    ${detail}`);
 
-    const candidates = collectModelCandidates(record, "record");
-    if (candidates.length > 0) {
-      count += 1;
-      console.log(`  ${record.timestamp || "(no timestamp)"} model fields type=${formatRecordType(record)}`);
-      printCandidates("candidates", candidates, "    ");
+    if (summary.candidates.length > 0) {
+      printCandidates("model fields", summary.candidates, "    ");
     }
   }
 
-  if (count === 0) console.log("  no model command output or model fields found");
+  if (count === 0) console.log("  no diagnostic transcript records found");
+}
+
+function summarizeTranscriptRecord(record) {
+  const timestamp = record.timestamp || "(no timestamp)";
+  const candidates = collectModelCandidates(record, "record");
+  const output = inspectModelSetOutput(record);
+  const details = [];
+
+  if (output) {
+    details.push(`stdout: rawModel=${output.rawModel} strippedModel=${output.ansiStrippedModel} ansi=${output.hasAnsi}`);
+    details.push(`text="${output.textPreview}"`);
+    return {
+      timestamp,
+      kind: "local_command_stdout",
+      details,
+      candidates
+    };
+  }
+
+  if (record?.type === "system" && record?.subtype === "api_error") {
+    details.push(`status=${record.error?.status ?? "unknown"} formatted="${previewText(String(record.error?.formatted || record.error?.message || ""))}"`);
+    details.push(`retry=${record.retryAttempt ?? "unknown"}/${record.maxRetries ?? "unknown"}`);
+    return {
+      timestamp,
+      kind: "api_error",
+      details,
+      candidates
+    };
+  }
+
+  if (record?.type === "assistant" && (record.isApiErrorMessage || record.apiErrorStatus)) {
+    details.push(`synthetic=${record.message?.model === "<synthetic>"} status=${record.apiErrorStatus ?? "unknown"}`);
+    return {
+      timestamp,
+      kind: "assistant_error",
+      details,
+      candidates
+    };
+  }
+
+  if (record?.type === "system" && record?.subtype === "turn_duration") {
+    details.push(`durationMs=${record.durationMs ?? "unknown"} messageCount=${record.messageCount ?? "unknown"}`);
+    return {
+      timestamp,
+      kind: "turn_duration",
+      details,
+      candidates
+    };
+  }
+
+  if (candidates.length > 0) {
+    details.push(`recordType=${formatRecordType(record)}`);
+    return {
+      timestamp,
+      kind: "model_fields",
+      details,
+      candidates
+    };
+  }
+
+  return null;
+}
+
+function printModelEvidence(label, evidence, indent = "    ") {
+  const parts = [`class=${evidence.modelClass || "unknown"}`];
+  if (evidence.source) parts.push(`source=${evidence.source}`);
+  if (evidence.direct) parts.push(`direct=${evidence.direct}`);
+  if (evidence.transcript) parts.push(`transcript=${evidence.transcript}`);
+  if (evidence.fallbacks) parts.push(`fallbacks=${JSON.stringify(evidence.fallbacks)}`);
+  console.log(`${indent}${label}: ${parts.join(" ")}`);
+  if (evidence.candidates) printCandidates("candidates", evidence.candidates, `${indent}  `);
+}
+
+function formatList(values) {
+  return Array.isArray(values) && values.length > 0 ? values.join(",") : "none";
 }
 
 function inspectModelSetOutput(record) {
@@ -110,7 +211,7 @@ function inspectModelSetOutput(record) {
   if (!/(?:^|[>\r\n])\s*set\s+model\s+to\b/i.test(content)) return null;
 
   return {
-    currentParserModel: parseModelSetOutput(content),
+    rawModel: parseModelSetOutput(content),
     ansiStrippedModel: parseModelSetOutput(stripAnsiControlSequences(content)),
     hasAnsi: hasAnsiControlSequence(content),
     textPreview: previewText(content)

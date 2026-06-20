@@ -46,6 +46,7 @@ interface PromptTranscriptInspection {
   inspected: boolean;
   modelClass: ModelClass;
   modelSetOutputs: ModelSetOutputObservation[];
+  hasUnparsedModelSetOutput: boolean;
 }
 
 interface ModelCandidateObservation {
@@ -81,7 +82,7 @@ interface PromptStartDebug {
   transcriptStartOffset: number | null;
   sessionBefore: ReturnType<typeof summarizeTurnState>;
   promptModelClass: ModelClass;
-  promptSource: "direct_input" | "prompt_transcript" | "session" | "unknown";
+  promptSource: "direct_input" | "prompt_transcript" | "unparsed_model_set_output" | "session" | "unknown";
   directInputModelClass: ModelClass;
   promptTranscript: PromptTranscriptInspection;
   pendingAfter: ReturnType<typeof summarizeTurnState>;
@@ -354,7 +355,8 @@ async function resolvePromptStartModelClass(
   const emptyTranscript: PromptTranscriptInspection = {
     inspected: false,
     modelClass: "unknown",
-    modelSetOutputs: []
+    modelSetOutputs: [],
+    hasUnparsedModelSetOutput: false
   };
   if (direct !== "unknown") {
     return {
@@ -384,6 +386,15 @@ async function resolvePromptStartModelClass(
     };
   }
 
+  if (transcript.hasUnparsedModelSetOutput) {
+    return {
+      modelClass: "unknown",
+      source: "unparsed_model_set_output",
+      directInputModelClass: direct,
+      transcript
+    };
+  }
+
   const sessionModelClass = session?.modelClass && session.modelClass !== "unknown" ? session.modelClass : "unknown";
   if (sessionModelClass !== "unknown") {
     return {
@@ -407,7 +418,8 @@ async function inspectPromptStartTranscript(input: HookInput, transcriptStartOff
   const result: PromptTranscriptInspection = {
     inspected: false,
     modelClass: "unknown",
-    modelSetOutputs: []
+    modelSetOutputs: [],
+    hasUnparsedModelSetOutput: false
   };
   if (!transcriptPath || transcriptStartOffset === null) return result;
 
@@ -436,12 +448,20 @@ async function inspectPromptStartTranscript(input: HookInput, transcriptStartOff
       try {
         const record = JSON.parse(raw);
         const modelSetOutput = inspectModelSetOutput(record);
-        if (modelSetOutput) result.modelSetOutputs.push(modelSetOutput);
+        if (modelSetOutput) {
+          result.modelSetOutputs.push(modelSetOutput);
+          if (modelSetOutput.modelClass === "unknown") {
+            result.modelClass = "unknown";
+            result.hasUnparsedModelSetOutput = true;
+            continue;
+          }
+        }
 
         const modelClass = (modelSetOutput?.modelClass !== "unknown" ? modelSetOutput?.modelClass : null)
           || classifyTranscriptRecord(record);
         if (modelClass !== "unknown") {
           result.modelClass = modelClass;
+          result.hasUnparsedModelSetOutput = false;
         }
       } catch {
         continue;
@@ -451,7 +471,8 @@ async function inspectPromptStartTranscript(input: HookInput, transcriptStartOff
     return {
       inspected: false,
       modelClass: "unknown",
-      modelSetOutputs: []
+      modelSetOutputs: [],
+      hasUnparsedModelSetOutput: false
     };
   }
 
@@ -592,9 +613,10 @@ function inspectModelSetOutput(value: unknown): ModelSetOutputObservation | null
     || lower.includes("<local-command-stdout>");
   if (!isLocalCommand) return null;
 
-  const match = text.match(/(?:^|[>\r\n])\s*set\s+model\s+to\s+(opus|sonnet|haiku)\b/i);
+  const normalized = stripAnsiControlSequences(text);
+  const match = normalized.match(/(?:^|[>\r\n])\s*set\s+model\s+to\s+(opus|sonnet|haiku)\b/i);
   if (!match) {
-    if (!/(?:^|[>\r\n])\s*set\s+model\s+to\b/i.test(text)) return null;
+    if (!/(?:^|[>\r\n])\s*set\s+model\s+to\b/i.test(normalized)) return null;
     return {
       timestampMs: getRecordTimestampMs(value),
       modelClass: "unknown",
@@ -724,6 +746,10 @@ function getRecordType(value: unknown): string | null {
 
 function hasAnsiControlSequence(value: string): boolean {
   return /\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])/.test(value);
+}
+
+function stripAnsiControlSequences(value: string): string {
+  return value.replace(/\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])/g, "");
 }
 
 function previewText(value: string): string {
