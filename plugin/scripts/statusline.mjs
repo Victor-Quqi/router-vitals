@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { loadRemoteConfig } from "./lib/config.mjs";
-import { LOCAL_DAILY_REPORT_LIMIT, PLUGIN_VERSION, matchTargetBaseUrl } from "./lib/policy.mjs";
+import { LOCAL_DAILY_REPORT_LIMIT, isPluginVersionNewer, matchTargetBaseUrl } from "./lib/policy.mjs";
 import { getTodayContributions, loadState, loadStatusCache, saveStatusCache } from "./lib/state.mjs";
 const STATUS_CACHE_TTL_MS = 60 * 1000;
 main().catch(() => {
@@ -71,25 +71,7 @@ function formatContributionCount(count) {
     return `今日贡献 ${count} 条`;
 }
 function formatUpdateHint(latestPluginVersion) {
-    if (comparePluginVersions(latestPluginVersion, PLUGIN_VERSION) <= 0)
+    if (!isPluginVersionNewer(latestPluginVersion))
         return null;
     return `插件有新版 ${latestPluginVersion} · 运行 /plugin 更新`;
-}
-function comparePluginVersions(left, right) {
-    const leftParts = parsePluginVersion(left);
-    const rightParts = parsePluginVersion(right);
-    if (!leftParts || !rightParts)
-        return 0;
-    for (let index = 0; index < leftParts.length; index += 1) {
-        const diff = leftParts[index] - rightParts[index];
-        if (diff !== 0)
-            return diff;
-    }
-    return 0;
-}
-function parsePluginVersion(value) {
-    const match = value.match(/^(\d+)\.(\d+)\.(\d+)/);
-    if (!match)
-        return null;
-    return [Number(match[1]), Number(match[2]), Number(match[3])];
 }

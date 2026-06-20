@@ -368,6 +368,63 @@ test("plugin hook debug log records model resolution evidence", async () => {
   }
 });
 
+test("plugin hook emits low-frequency update reminders", async () => {
+  const server = createServer((req, res) => {
+    if (req.method === "GET" && req.url === "/config.json") {
+      const base = `http://127.0.0.1:${serverPort(server)}`;
+      respondJson(res, {
+        reportingEnabled: true,
+        apiBaseUrl: base,
+        targetBaseUrlHosts: ["anyrouter.top", "a-ocnfniawgw.cn-shanghai.fcapp.run"],
+        sampleRateSuccess: 1,
+        sampleRateFailure: 1,
+        minPluginVersion: "0.1.0",
+        latestPluginVersion: "9.9.9",
+        statusWindows: ["5m", "15m", "60m"]
+      });
+      return;
+    }
+
+    if (req.method === "POST" && req.url === "/v1/report") {
+      respondJson(res, { ok: true });
+      return;
+    }
+
+    res.writeHead(404);
+    res.end();
+  });
+
+  await listen(server);
+  const stateDir = await mkdtemp(join(tmpdir(), "router-vitals-update-"));
+
+  try {
+    const commonEnv = {
+      ...process.env,
+      ANYROUTER_STATUS_STATE_DIR: stateDir,
+      ANYROUTER_STATUS_CONFIG_URL: `http://127.0.0.1:${serverPort(server)}/config.json`,
+      ANTHROPIC_BASE_URL: "https://anyrouter.top"
+    };
+
+    await runHook("UserPromptSubmit", { session_id: "session-update-a" }, commonEnv);
+    const first = await runHook("Stop", { session_id: "session-update-a" }, commonEnv);
+    const firstOutput = JSON.parse(first);
+    assert.match(firstOutput.systemMessage, /插件有新版 9\.9\.9/);
+    assert.match(firstOutput.systemMessage, /\/plugin update anyrouter-status-monitor@router-vitals/);
+
+    await runHook("UserPromptSubmit", { session_id: "session-update-b" }, commonEnv);
+    const second = await runHook("Stop", { session_id: "session-update-b" }, commonEnv);
+    assert.equal(second.trim(), "");
+
+    const statePath = join(stateDir, "anyrouter-status-monitor", "state.json");
+    const state = JSON.parse(await readFile(statePath, "utf8"));
+    assert.deepEqual(Object.keys(state.updateReminder), ["latestPluginVersion", "remindedAtMs"]);
+    assert.equal(state.updateReminder.latestPluginVersion, "9.9.9");
+  } finally {
+    server.close();
+    await rm(stateDir, { recursive: true, force: true });
+  }
+});
+
 test("plugin hook skips uploads after the local daily contribution limit", async () => {
   const received: Array<Record<string, any>> = [];
   const server = createServer((req, res) => {
@@ -488,23 +545,27 @@ function createSyntheticAssistantErrorRecord(statusCode: number): Record<string,
   };
 }
 
-async function runHook(eventName: string, input: Record<string, unknown>, env: NodeJS.ProcessEnv): Promise<void> {
-  await new Promise<void>((resolveRun, rejectRun) => {
+async function runHook(eventName: string, input: Record<string, unknown>, env: NodeJS.ProcessEnv): Promise<string> {
+  return await new Promise<string>((resolveRun, rejectRun) => {
     const child = spawn(process.execPath, [hookPath, eventName], {
       env,
       stdio: ["pipe", "pipe", "pipe"]
     });
+    const chunks: Buffer[] = [];
+    const errors: Buffer[] = [];
     const timeout = setTimeout(() => {
       child.kill();
       rejectRun(new Error(`hook timed out: ${eventName}`));
     }, 10000);
 
     child.stdin.end(JSON.stringify(input));
+    child.stdout.on("data", (chunk) => chunks.push(chunk));
+    child.stderr.on("data", (chunk) => errors.push(chunk));
     child.on("error", rejectRun);
     child.on("exit", (code) => {
       clearTimeout(timeout);
-      if (code === 0) resolveRun();
-      else rejectRun(new Error(`hook exited with code ${code}: ${eventName}`));
+      if (code === 0) resolveRun(Buffer.concat(chunks).toString("utf8"));
+      else rejectRun(new Error(`hook exited with code ${code}: ${eventName}: ${Buffer.concat(errors).toString("utf8")}`));
     });
   });
 }

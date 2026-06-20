@@ -4,8 +4,10 @@ import { dirname, join } from "node:path";
 import {
   LOCAL_DAILY_REPORT_LIMIT,
   MODEL_CLASSES,
+  PLUGIN_VERSION,
   createAnonymousId,
   getTodayKey,
+  isPluginVersionNewer,
   validateReportPayload,
   type ModelClass,
   type ReportPayload
@@ -17,6 +19,7 @@ const STATE_FILE_NAME = "state.json";
 const STATUS_CACHE_FILE_NAME = "status-cache.json";
 const CONTRIBUTION_RETENTION_DAYS = 120;
 const TURN_STATE_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
+const UPDATE_REMINDER_INTERVAL_MS = 24 * 60 * 60 * 1000;
 
 export interface AnonymousState {
   day: string;
@@ -31,12 +34,18 @@ export interface TurnState {
   updatedAtMs?: number;
 }
 
+export interface UpdateReminderState {
+  latestPluginVersion: string;
+  remindedAtMs: number;
+}
+
 export interface PluginState {
   version: number;
   anonymous: AnonymousState | null;
   pending: Record<string, TurnState>;
   sessions: Record<string, TurnState>;
   contributions: Record<string, number>;
+  updateReminder: UpdateReminderState | null;
   lastPayload: ReportPayload | null;
   lastReportAt: string | null;
 }
@@ -66,7 +75,7 @@ export async function loadState(): Promise<PluginState> {
     const parsed = JSON.parse(raw);
     return normalizeState(parsed);
   } catch {
-    return loadLegacyPluginDataState(path);
+    return normalizeState({});
   }
 }
 
@@ -126,6 +135,20 @@ export function hasReachedDailyReportLimit(state: PluginState, now = new Date())
   return getTodayContributions(state, now) >= LOCAL_DAILY_REPORT_LIMIT;
 }
 
+export function shouldRemindPluginUpdate(state: PluginState, latestPluginVersion: string, nowMs = Date.now()): boolean {
+  if (!isPluginVersionNewer(latestPluginVersion, PLUGIN_VERSION)) return false;
+  const reminder = state.updateReminder;
+  if (!reminder || reminder.latestPluginVersion !== latestPluginVersion) return true;
+  return reminder.remindedAtMs + UPDATE_REMINDER_INTERVAL_MS <= nowMs;
+}
+
+export function recordPluginUpdateReminder(state: PluginState, latestPluginVersion: string, nowMs = Date.now()): void {
+  state.updateReminder = {
+    latestPluginVersion,
+    remindedAtMs: nowMs
+  };
+}
+
 function normalizeState(value: unknown, now = new Date()): PluginState {
   const record = isRecord(value) ? value : {};
   const nowMs = now.getTime();
@@ -135,6 +158,7 @@ function normalizeState(value: unknown, now = new Date()): PluginState {
     pending: normalizeTurnMap(record.pending, nowMs),
     sessions: normalizeTurnMap(record.sessions, nowMs),
     contributions: normalizeContributions(record.contributions, now),
+    updateReminder: normalizeUpdateReminder(record.updateReminder),
     lastPayload: normalizeLastPayload(record.lastPayload),
     lastReportAt: typeof record.lastReportAt === "string" ? record.lastReportAt : null
   };
@@ -150,6 +174,16 @@ function normalizeAnonymous(value: unknown): AnonymousState | null {
 function normalizeLastPayload(value: unknown): ReportPayload | null {
   if (!isRecord(value)) return null;
   return validateReportPayload(value).ok ? value as unknown as ReportPayload : null;
+}
+
+function normalizeUpdateReminder(value: unknown): UpdateReminderState | null {
+  if (!isRecord(value)) return null;
+  if (typeof value.latestPluginVersion !== "string") return null;
+  if (typeof value.remindedAtMs !== "number" || !Number.isFinite(value.remindedAtMs)) return null;
+  return {
+    latestPluginVersion: value.latestPluginVersion,
+    remindedAtMs: value.remindedAtMs
+  };
 }
 
 function normalizeTurnMap(value: unknown, nowMs: number): Record<string, TurnState> {
@@ -210,24 +244,10 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 function getStateRoot(): string {
   return (
     process.env.ANYROUTER_STATUS_STATE_DIR ||
+    process.env.CLAUDE_PLUGIN_DATA ||
     process.env.XDG_STATE_HOME ||
     process.env.LOCALAPPDATA ||
     process.env.APPDATA ||
     join(homedir(), ".local", "state")
   );
-}
-
-async function loadLegacyPluginDataState(primaryPath: string): Promise<PluginState> {
-  const legacyRoot = process.env.CLAUDE_PLUGIN_DATA;
-  if (process.env.ANYROUTER_STATUS_STATE_DIR || !legacyRoot) return normalizeState({});
-
-  const legacyPath = join(legacyRoot, STATE_DIR_NAME, STATE_FILE_NAME);
-  if (legacyPath === primaryPath) return normalizeState({});
-
-  try {
-    const raw = await readFile(legacyPath, "utf8");
-    return normalizeState(JSON.parse(raw));
-  } catch {
-    return normalizeState({});
-  }
 }

@@ -39,7 +39,7 @@ Any Router 入口：
 
 - `ANYROUTER_STATUS_API_BASE_URL`：上报 API base URL。
 - `ANYROUTER_STATUS_CONFIG_URL`：远程配置 JSON URL。
-- `ANYROUTER_STATUS_STATE_DIR`：本地状态目录。默认用系统用户 state 目录，让 hooks 和手动配置的 statusLine 读同一份状态。
+- `ANYROUTER_STATUS_STATE_DIR`：本地状态根目录覆盖。插件环境默认使用 Claude Code 插件数据目录。
 - `ANYROUTER_STATUS_DEBUG_HOOK=1`：写本地 hook 诊断日志 `debug-hook.jsonl`，用于排查 session 事件、hook 输入摘要、pending/session 状态、上报决策、错误和 transcript 证据。
 
 诊断某个 Claude Code session：
@@ -64,6 +64,6 @@ node plugin/scripts/preview.mjs
 node plugin/scripts/statusline.mjs
 ```
 
-statusLine 只是展示层，hooks 照常独立运行。Claude Code 会在状态变化时重跑 statusLine，这里不做定时轮询，避免长任务期间一直请求状态 API。`今日贡献` 每次运行读本地 state，提交成功后下次刷新；有新版时 statusLine 优先显示更新提示。`近 60m 状态` 来自 Worker API，本地缓存 60 秒。
+statusLine 只是展示层，hooks 照常独立运行。这里不做定时轮询；`近 60m 状态` 本地缓存 60 秒。有新版时 statusLine 优先显示更新提示；没配 statusLine 时，hooks 会低频发 Claude Code 系统消息。
 
 Claude Code 当前只接受一个 `statusLine` 命令。`setup-statusline.mjs` 检测到已有非本插件 statusLine 时，交互终端会询问是否直接替换；非交互环境默认不覆盖。若要同时显示多个状态源，请自行编写 wrapper，或使用第三方 statusLine 聚合工具。

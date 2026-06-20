@@ -27,7 +27,9 @@ import {
   hasReachedDailyReportLimit,
   incrementContribution,
   loadState,
+  recordPluginUpdateReminder,
   saveState,
+  shouldRemindPluginUpdate,
   type PluginState,
   type TurnState
 } from "./lib/state.mjs";
@@ -96,6 +98,10 @@ interface CompletionDebug {
   modelResolution?: ModelResolution;
   payload?: Record<string, unknown>;
   posted?: boolean;
+  updateReminder?: {
+    latestPluginVersion: string;
+    emitted: boolean;
+  };
 }
 
 main().catch(() => {
@@ -140,9 +146,17 @@ async function main() {
 
   if (eventName === "Stop" || eventName === "StopFailure") {
     const config = await loadRemoteConfig();
+    const updateReminderMessage = createPluginUpdateReminderMessage(state, config);
     const debug = await reportCompletion({ eventName, input, state, config, sessionKey });
+    if (updateReminderMessage) {
+      debug.updateReminder = {
+        latestPluginVersion: config.latestPluginVersion,
+        emitted: true
+      };
+    }
     await writeHookDebug(sessionKey, "completion", debug as unknown as Record<string, unknown>);
     await saveState(state);
+    if (updateReminderMessage) writeHookSystemMessage(updateReminderMessage);
   }
 }
 
@@ -273,6 +287,16 @@ async function reportCompletion({
     incrementContribution(state);
   }
   return debug;
+}
+
+function createPluginUpdateReminderMessage(state: PluginState, config: RemoteConfig): string | null {
+  if (!shouldRemindPluginUpdate(state, config.latestPluginVersion)) return null;
+  recordPluginUpdateReminder(state, config.latestPluginVersion);
+  return `Any Router Status Monitor 插件有新版 ${config.latestPluginVersion}。运行 /plugin update anyrouter-status-monitor@router-vitals，更新后执行 /reload-plugins。`;
+}
+
+function writeHookSystemMessage(systemMessage: string): void {
+  console.log(JSON.stringify({ systemMessage }));
 }
 
 async function postReport(apiBaseUrl: string, payload: ReportPayload): Promise<boolean> {

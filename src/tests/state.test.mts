@@ -14,7 +14,7 @@ const ENV_KEYS = [
   "CLAUDE_PLUGIN_DATA"
 ] as const;
 
-test("state path uses shared user state before Claude plugin data", async () => {
+test("state path uses Claude plugin data before shared user state", async () => {
   await withEnv({
     ANYROUTER_STATUS_STATE_DIR: undefined,
     XDG_STATE_HOME: "/tmp/router-vitals-state",
@@ -22,7 +22,7 @@ test("state path uses shared user state before Claude plugin data", async () => 
     APPDATA: undefined,
     CLAUDE_PLUGIN_DATA: "/tmp/router-vitals-plugin-data"
   }, async () => {
-    assert.equal(getStatePath(), join("/tmp/router-vitals-state", "anyrouter-status-monitor", "state.json"));
+    assert.equal(getStatePath(), join("/tmp/router-vitals-plugin-data", "anyrouter-status-monitor", "state.json"));
   });
 });
 
@@ -38,14 +38,14 @@ test("state path override wins over user and plugin data dirs", async () => {
   });
 });
 
-test("loadState can read legacy Claude plugin data state", async () => {
+test("loadState reads Claude plugin data state", async () => {
   const root = await mkdtemp(join(tmpdir(), "router-vitals-state-"));
   const userState = join(root, "user-state");
   const pluginData = join(root, "plugin-data");
-  const legacyPath = join(pluginData, "anyrouter-status-monitor", "state.json");
+  const pluginStatePath = join(pluginData, "anyrouter-status-monitor", "state.json");
 
-  await mkdir(dirname(legacyPath), { recursive: true });
-  await writeFile(legacyPath, JSON.stringify({
+  await mkdir(dirname(pluginStatePath), { recursive: true });
+  await writeFile(pluginStatePath, JSON.stringify({
     version: 1,
     contributions: { "2099-01-01": 3 }
   }), "utf8");
@@ -88,6 +88,10 @@ test("loadState prunes stale local counters and turn state", async () => {
       fresh: { updatedAtMs: freshMs, modelClass: "sonnet" },
       stale: { updatedAtMs: staleMs, modelClass: "opus" }
     },
+    updateReminder: {
+      latestPluginVersion: "9.9.9",
+      remindedAtMs: freshMs
+    },
     lastPayload: {
       ok: true,
       errorType: "none",
@@ -116,6 +120,10 @@ test("loadState prunes stale local counters and turn state", async () => {
       assert.equal("stale" in state.pending, false);
       assert.equal("fresh" in state.sessions, true);
       assert.equal("stale" in state.sessions, false);
+      assert.deepEqual(state.updateReminder, {
+        latestPluginVersion: "9.9.9",
+        remindedAtMs: freshMs
+      });
       assert.equal(state.lastPayload, null);
     });
   } finally {

@@ -1,13 +1,14 @@
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
-import { LOCAL_DAILY_REPORT_LIMIT, MODEL_CLASSES, createAnonymousId, getTodayKey, validateReportPayload } from "./policy.mjs";
+import { LOCAL_DAILY_REPORT_LIMIT, MODEL_CLASSES, PLUGIN_VERSION, createAnonymousId, getTodayKey, isPluginVersionNewer, validateReportPayload } from "./policy.mjs";
 const STATE_VERSION = 1;
 const STATE_DIR_NAME = "anyrouter-status-monitor";
 const STATE_FILE_NAME = "state.json";
 const STATUS_CACHE_FILE_NAME = "status-cache.json";
 const CONTRIBUTION_RETENTION_DAYS = 120;
 const TURN_STATE_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
+const UPDATE_REMINDER_INTERVAL_MS = 24 * 60 * 60 * 1000;
 export function getStatePath() {
     return join(getPluginStateDir(), STATE_FILE_NAME);
 }
@@ -25,7 +26,7 @@ export async function loadState() {
         return normalizeState(parsed);
     }
     catch {
-        return loadLegacyPluginDataState(path);
+        return normalizeState({});
     }
 }
 export async function loadStatusCache() {
@@ -82,6 +83,20 @@ export function getTodayContributions(state, now = new Date()) {
 export function hasReachedDailyReportLimit(state, now = new Date()) {
     return getTodayContributions(state, now) >= LOCAL_DAILY_REPORT_LIMIT;
 }
+export function shouldRemindPluginUpdate(state, latestPluginVersion, nowMs = Date.now()) {
+    if (!isPluginVersionNewer(latestPluginVersion, PLUGIN_VERSION))
+        return false;
+    const reminder = state.updateReminder;
+    if (!reminder || reminder.latestPluginVersion !== latestPluginVersion)
+        return true;
+    return reminder.remindedAtMs + UPDATE_REMINDER_INTERVAL_MS <= nowMs;
+}
+export function recordPluginUpdateReminder(state, latestPluginVersion, nowMs = Date.now()) {
+    state.updateReminder = {
+        latestPluginVersion,
+        remindedAtMs: nowMs
+    };
+}
 function normalizeState(value, now = new Date()) {
     const record = isRecord(value) ? value : {};
     const nowMs = now.getTime();
@@ -91,6 +106,7 @@ function normalizeState(value, now = new Date()) {
         pending: normalizeTurnMap(record.pending, nowMs),
         sessions: normalizeTurnMap(record.sessions, nowMs),
         contributions: normalizeContributions(record.contributions, now),
+        updateReminder: normalizeUpdateReminder(record.updateReminder),
         lastPayload: normalizeLastPayload(record.lastPayload),
         lastReportAt: typeof record.lastReportAt === "string" ? record.lastReportAt : null
     };
@@ -107,6 +123,18 @@ function normalizeLastPayload(value) {
     if (!isRecord(value))
         return null;
     return validateReportPayload(value).ok ? value : null;
+}
+function normalizeUpdateReminder(value) {
+    if (!isRecord(value))
+        return null;
+    if (typeof value.latestPluginVersion !== "string")
+        return null;
+    if (typeof value.remindedAtMs !== "number" || !Number.isFinite(value.remindedAtMs))
+        return null;
+    return {
+        latestPluginVersion: value.latestPluginVersion,
+        remindedAtMs: value.remindedAtMs
+    };
 }
 function normalizeTurnMap(value, nowMs) {
     if (!value || typeof value !== "object" || Array.isArray(value))
@@ -167,23 +195,9 @@ function isRecord(value) {
 }
 function getStateRoot() {
     return (process.env.ANYROUTER_STATUS_STATE_DIR ||
+        process.env.CLAUDE_PLUGIN_DATA ||
         process.env.XDG_STATE_HOME ||
         process.env.LOCALAPPDATA ||
         process.env.APPDATA ||
         join(homedir(), ".local", "state"));
-}
-async function loadLegacyPluginDataState(primaryPath) {
-    const legacyRoot = process.env.CLAUDE_PLUGIN_DATA;
-    if (process.env.ANYROUTER_STATUS_STATE_DIR || !legacyRoot)
-        return normalizeState({});
-    const legacyPath = join(legacyRoot, STATE_DIR_NAME, STATE_FILE_NAME);
-    if (legacyPath === primaryPath)
-        return normalizeState({});
-    try {
-        const raw = await readFile(legacyPath, "utf8");
-        return normalizeState(JSON.parse(raw));
-    }
-    catch {
-        return normalizeState({});
-    }
 }

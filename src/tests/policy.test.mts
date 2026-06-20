@@ -5,9 +5,11 @@ import {
   bucketAssistantStart,
   classifyError,
   classifyModel,
+  comparePluginVersions,
   createErrorHint,
   extractErrorStatusCode,
   getTodayKey,
+  isPluginVersionNewer,
   matchTargetBaseUrl,
   normalizeTargetHost,
   sanitizeErrorHint,
@@ -78,6 +80,15 @@ test("today key uses the runtime local date getters", () => {
   }
 
   assert.equal(getTodayKey(new LocalDateStub(0)), "2026-01-01");
+});
+
+test("plugin version comparison handles semantic version cores", () => {
+  assert.equal(comparePluginVersions("0.1.27", "0.1.26"), 1);
+  assert.equal(comparePluginVersions("0.1.26", "0.1.26"), 0);
+  assert.equal(comparePluginVersions("0.1.25", "0.1.26"), -1);
+  assert.equal(comparePluginVersions("not-a-version", "0.1.26"), 0);
+  assert.equal(isPluginVersionNewer("9.9.9"), true);
+  assert.equal(isPluginVersionNewer(PLUGIN_VERSION), false);
 });
 
 test("report payload rejects actual URLs and station fields", () => {

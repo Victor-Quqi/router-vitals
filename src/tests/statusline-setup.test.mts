@@ -61,6 +61,36 @@ test("stable launcher runs the latest installed plugin statusLine", async () => 
   }
 });
 
+test("stable launcher passes plugin data to statusLine", async () => {
+  const claudeHome = await mkdtemp(join(tmpdir(), "router-vitals-launcher-data-"));
+  const pluginRoot = join(claudeHome, "plugins", "cache", "router-vitals", "anyrouter-status-monitor", "0.1.0");
+  const expectedDataDir = join(claudeHome, "plugins", "data", pluginId);
+
+  try {
+    await writeFakeStatuslineSource(pluginRoot, "console.log(process.env.CLAUDE_PLUGIN_DATA || '');\n");
+    await writeInstalledPlugins(claudeHome, [
+      {
+        scope: "user",
+        installPath: pluginRoot,
+        version: "0.1.0",
+        installedAt: "2026-01-01T00:00:00.000Z",
+        lastUpdated: "2026-01-01T00:00:00.000Z"
+      }
+    ]);
+
+    await runNode([setupPath], { ANYROUTER_STATUS_CLAUDE_HOME: claudeHome });
+
+    const output = await runNode([join(claudeHome, "router-vitals-statusline.mjs")], {
+      ANYROUTER_STATUS_CLAUDE_HOME: claudeHome,
+      CLAUDE_PLUGIN_DATA: undefined
+    });
+
+    assert.equal(output.trim(), expectedDataDir);
+  } finally {
+    await rm(claudeHome, { recursive: true, force: true });
+  }
+});
+
 test("setup does not overwrite an unrelated statusLine unless forced", async () => {
   const claudeHome = await mkdtemp(join(tmpdir(), "router-vitals-existing-statusline-"));
   const settingsPath = join(claudeHome, "settings.json");
@@ -92,9 +122,13 @@ test("setup does not overwrite an unrelated statusLine unless forced", async () 
 });
 
 async function writeFakeStatusline(pluginRoot: string, output: string): Promise<void> {
+  await writeFakeStatuslineSource(pluginRoot, `console.log(${JSON.stringify(output)});\n`);
+}
+
+async function writeFakeStatuslineSource(pluginRoot: string, source: string): Promise<void> {
   const statuslinePath = join(pluginRoot, "scripts", "statusline.mjs");
   await mkdir(dirname(statuslinePath), { recursive: true });
-  await writeFile(statuslinePath, `#!/usr/bin/env node\nconsole.log(${JSON.stringify(output)});\n`, "utf8");
+  await writeFile(statuslinePath, `#!/usr/bin/env node\n${source}`, "utf8");
 }
 
 async function writeInstalledPlugins(claudeHome: string, installs: Array<Record<string, unknown>>): Promise<void> {
@@ -111,7 +145,7 @@ async function writeInstalledPlugins(claudeHome: string, installs: Array<Record<
 function runNode(args: string[], env: NodeJS.ProcessEnv): Promise<string> {
   return new Promise<string>((resolveRun, rejectRun) => {
     const child = spawn(process.execPath, args, {
-      env: { ...process.env, ...env },
+      env: mergeEnv(process.env, env),
       stdio: ["ignore", "pipe", "pipe"]
     });
     const chunks: Buffer[] = [];
@@ -130,4 +164,13 @@ function runNode(args: string[], env: NodeJS.ProcessEnv): Promise<string> {
       else rejectRun(new Error(`node exited with code ${code}: ${Buffer.concat(errors).toString("utf8")}`));
     });
   });
+}
+
+function mergeEnv(base: NodeJS.ProcessEnv, override: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  const env = { ...base };
+  for (const [key, value] of Object.entries(override)) {
+    if (value === undefined) delete env[key];
+    else env[key] = value;
+  }
+  return env;
 }

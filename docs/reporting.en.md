@@ -39,7 +39,7 @@ Not needed normally — only when self-hosting or debugging:
 
 - `ANYROUTER_STATUS_API_BASE_URL`: report API base URL.
 - `ANYROUTER_STATUS_CONFIG_URL`: remote config JSON URL.
-- `ANYROUTER_STATUS_STATE_DIR`: local state directory. By default the plugin uses the user state directory so hooks and a manually configured statusLine read the same state.
+- `ANYROUTER_STATUS_STATE_DIR`: local state root override. Plugin runs use Claude Code's plugin data directory by default.
 - `ANYROUTER_STATUS_DEBUG_HOOK=1`: writes the local hook diagnostic log `debug-hook.jsonl` for session events, hook input summaries, pending/session state, report decisions, errors, and transcript evidence.
 
 Diagnose one Claude Code session:
@@ -64,6 +64,6 @@ Test statusLine output:
 node plugin/scripts/statusline.mjs
 ```
 
-statusLine is display-only; hooks keep running independently. Claude Code reruns statusLine when its status changes, and this plugin does no interval polling — that avoids hammering the status API during long tasks. `今日贡献` reads local state on each run and refreshes after a successful submit; when an update is available, statusLine prioritizes the update hint. `近 60m 状态` comes from the Worker API with a 60-second local cache.
+statusLine is display-only; hooks keep running independently. There is no interval polling; `近 60m 状态` is cached locally for 60 seconds. Update hints prefer statusLine, and fall back to low-frequency Claude Code system messages when statusLine is not configured.
 
 Claude Code currently accepts one `statusLine` command. When `setup-statusline.mjs` detects an unrelated existing statusLine, an interactive terminal asks before replacing it; non-interactive runs keep the existing command. To show multiple status sources, use your own wrapper or a third-party statusLine aggregator.

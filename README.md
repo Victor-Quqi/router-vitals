@@ -46,7 +46,7 @@ claude plugin list --json
 node "<installPath>/scripts/setup-statusline.mjs"
 ```
 
-典型路径如下，`<用户名>`、`<版本>` 换成实际值；最终以 `claude plugin list --json` 输出的 `installPath` 为准。
+典型路径如下，`<用户名>`、`<版本>` 换成实际值；以 `claude plugin list --json` 输出的 `installPath` 为准。
 
 Windows PowerShell：
 
@@ -77,6 +77,8 @@ claude plugin update anyrouter-status-monitor@router-vitals
 ```
 
 如果当前 Claude Code 会话正在运行，更新后在会话里执行 `/reload-plugins`。
+
+没配 statusLine 时，插件也会低频提醒新版。
 
 **建议保持最新版本**。旧版本可能使用过期的上报规则、目标入口或状态判断逻辑，导致本机贡献被跳过，或状态栏显示不准。
 

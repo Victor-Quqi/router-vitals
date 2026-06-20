@@ -5,7 +5,7 @@ import { createInterface } from "node:readline";
 import { loadRemoteConfig } from "./lib/config.mjs";
 import { appendHookDebugRecord } from "./lib/debug.mjs";
 import { PLUGIN_VERSION, bucketAssistantStart, classifyError, classifyModel, createErrorHint, createTimeBucket, extractErrorStatusCode, hashLocalSessionId, matchTargetBaseUrl, normalizeTargetHost, pickSampleRate, shouldSample, validateReportPayload } from "./lib/policy.mjs";
-import { getDailyAnonymousId, hasReachedDailyReportLimit, incrementContribution, loadState, saveState } from "./lib/state.mjs";
+import { getDailyAnonymousId, hasReachedDailyReportLimit, incrementContribution, loadState, recordPluginUpdateReminder, saveState, shouldRemindPluginUpdate } from "./lib/state.mjs";
 const eventName = process.argv[2] || "";
 const TRANSCRIPT_MODEL_LOOKBACK_BYTES = 256 * 1024;
 main().catch(() => {
@@ -45,9 +45,18 @@ async function main() {
     }
     if (eventName === "Stop" || eventName === "StopFailure") {
         const config = await loadRemoteConfig();
+        const updateReminderMessage = createPluginUpdateReminderMessage(state, config);
         const debug = await reportCompletion({ eventName, input, state, config, sessionKey });
+        if (updateReminderMessage) {
+            debug.updateReminder = {
+                latestPluginVersion: config.latestPluginVersion,
+                emitted: true
+            };
+        }
         await writeHookDebug(sessionKey, "completion", debug);
         await saveState(state);
+        if (updateReminderMessage)
+            writeHookSystemMessage(updateReminderMessage);
     }
 }
 async function readHookInput() {
@@ -167,6 +176,15 @@ async function reportCompletion({ eventName, input, state, config, sessionKey })
         incrementContribution(state);
     }
     return debug;
+}
+function createPluginUpdateReminderMessage(state, config) {
+    if (!shouldRemindPluginUpdate(state, config.latestPluginVersion))
+        return null;
+    recordPluginUpdateReminder(state, config.latestPluginVersion);
+    return `Any Router Status Monitor 插件有新版 ${config.latestPluginVersion}。运行 /plugin update anyrouter-status-monitor@router-vitals，更新后执行 /reload-plugins。`;
+}
+function writeHookSystemMessage(systemMessage) {
+    console.log(JSON.stringify({ systemMessage }));
 }
 async function postReport(apiBaseUrl, payload) {
     try {

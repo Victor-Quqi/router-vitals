@@ -1,4 +1,4 @@
-export const PLUGIN_VERSION = "0.1.26";
+export const PLUGIN_VERSION = "0.1.27";
 export const TARGET_HOSTS = Object.freeze([
     "anyrouter.top",
     "a-ocnfniawgw.cn-shanghai.fcapp.run"
@@ -135,6 +135,27 @@ export function getTodayKey(now = new Date()) {
 }
 export function createTimeBucket(nowMs = Date.now()) {
     return Math.floor(nowMs / 60000);
+}
+export function isPluginVersionNewer(latestPluginVersion, currentPluginVersion = PLUGIN_VERSION) {
+    return comparePluginVersions(latestPluginVersion, currentPluginVersion) > 0;
+}
+export function comparePluginVersions(left, right) {
+    const leftParts = parsePluginVersion(left);
+    const rightParts = parsePluginVersion(right);
+    if (!leftParts || !rightParts)
+        return 0;
+    for (let index = 0; index < leftParts.length; index += 1) {
+        const diff = leftParts[index] - rightParts[index];
+        if (diff !== 0)
+            return diff;
+    }
+    return 0;
+}
+function parsePluginVersion(value) {
+    const match = value.match(/^(\d+)\.(\d+)\.(\d+)/);
+    if (!match)
+        return null;
+    return [Number(match[1]), Number(match[2]), Number(match[3])];
 }
 export function bucketAssistantStart(durationMs) {
     if (typeof durationMs !== "number" || !Number.isFinite(durationMs) || durationMs < 0)

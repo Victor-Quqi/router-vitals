@@ -139,7 +139,7 @@ main().catch(() => {
 
 async function main() {
   const statuslinePath = await resolveStatuslinePath();
-  await runStatusline(statuslinePath);
+  await runStatusline(statuslinePath, getPluginDataDir());
 }
 
 async function resolveStatuslinePath() {
@@ -192,10 +192,10 @@ function getInstallTime(value) {
   return 0;
 }
 
-function runStatusline(statuslinePath) {
+function runStatusline(statuslinePath, pluginDataDir) {
   return new Promise((resolveRun, rejectRun) => {
     const child = spawn(process.execPath, [statuslinePath], {
-      env: process.env,
+      env: { ...process.env, CLAUDE_PLUGIN_DATA: pluginDataDir },
       stdio: "inherit"
     });
     child.on("error", rejectRun);
@@ -218,6 +218,10 @@ async function fileExists(path) {
 
 function getClaudeHome() {
   return process.env.ANYROUTER_STATUS_CLAUDE_HOME || join(homedir(), ".claude");
+}
+
+function getPluginDataDir() {
+  return process.env.CLAUDE_PLUGIN_DATA || join(getClaudeHome(), "plugins", "data", PLUGIN_ID);
 }
 
 function dedupe(values) {

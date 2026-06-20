@@ -36,6 +36,8 @@ claude plugin update anyrouter-status-monitor@router-vitals
 
 如果当前 Claude Code 会话正在运行，更新后在会话里执行 `/reload-plugins`。
 
+未配置 statusLine 时，插件也会低频提醒新版。
+
 **建议保持最新版本**。旧版本可能使用过期的上报规则、目标入口或状态判断逻辑，导致本机贡献被跳过，或状态栏显示不准。
 
-hooks 和 statusLine 是两条独立路径；statusLine 报错时，Claude Code 会继续跑 hooks。这里不配置定时轮询，近 60m 状态在本地缓存 60 秒。
+hooks 和 statusLine 是两条独立路径；statusLine 报错时，Claude Code 会继续跑 hooks。

@@ -60,6 +60,8 @@ claude plugin update anyrouter-status-monitor@router-vitals
 
 If a Claude Code session is already running, run `/reload-plugins` inside that session after updating.
 
+Without statusLine, the plugin still shows low-frequency update reminders.
+
 **Keep the plugin up to date.** Older versions may use outdated reporting rules, target endpoints, or status logic, which can skip your local contributions or make the status line less accurate.
 
 ## Learn more
