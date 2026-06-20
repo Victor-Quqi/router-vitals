@@ -32,11 +32,18 @@ import {
 } from "./lib/state.mjs";
 
 const eventName = process.argv[2] || "";
+const TRANSCRIPT_MODEL_LOOKBACK_BYTES = 256 * 1024;
 type HookInput = Record<string, any>;
 
 interface TranscriptInspection {
   firstAssistantAtMs: number | null;
   modelClass: ModelClass;
+}
+
+interface PromptTranscriptInspection {
+  inspected: boolean;
+  modelClass: ModelClass;
+  hasUnconfirmedModelSwitch: boolean;
 }
 
 main().catch(() => {
@@ -86,7 +93,7 @@ async function readHookInput(): Promise<HookInput> {
 }
 
 function recordSessionStart(state: PluginState, sessionKey: string, input: HookInput): void {
-  const modelClass = classifyModel(input, { includeEnv: false });
+  const modelClass = classifyModel(input);
   state.sessions[sessionKey] = {
     modelClass,
     updatedAtMs: Date.now()
@@ -95,8 +102,14 @@ function recordSessionStart(state: PluginState, sessionKey: string, input: HookI
 
 async function recordPromptStart(state: PluginState, sessionKey: string, input: HookInput): Promise<void> {
   const match = matchTargetBaseUrl(process.env.ANTHROPIC_BASE_URL);
-  const modelClass = classifyModel(input, { includeEnv: false });
   const transcriptStartOffset = await getTranscriptSize(input);
+  const modelClass = await resolvePromptStartModelClass(input, state.sessions[sessionKey], transcriptStartOffset);
+  if (modelClass !== "unknown") {
+    state.sessions[sessionKey] = {
+      modelClass,
+      updatedAtMs: Date.now()
+    };
+  }
   state.pending[sessionKey] = {
     startedAtMs: Date.now(),
     targetMatched: match.matched === true,
@@ -136,6 +149,12 @@ async function reportCompletion({
   const turnStartedAtMs = getTurnStartedAtMs([pending]);
   const transcript = await inspectTranscript(input, turnStartedAtMs, pending.transcriptStartOffset);
   const modelClass = resolveModelClass(input, transcript, pending);
+  if (modelClass !== "unknown") {
+    state.sessions[sessionKey] = {
+      modelClass,
+      updatedAtMs: Date.now()
+    };
+  }
   const assistantStartDelayMs = turnStartedAtMs !== null && transcript.firstAssistantAtMs !== null
     ? transcript.firstAssistantAtMs - turnStartedAtMs
     : null;
@@ -196,6 +215,80 @@ function resolveModelClass(input: HookInput, transcript: TranscriptInspection, .
   }
 
   return "unknown";
+}
+
+async function resolvePromptStartModelClass(
+  input: HookInput,
+  session: TurnState | undefined,
+  transcriptStartOffset: number | null
+): Promise<ModelClass> {
+  const direct = classifyModel(input, { includeEnv: false });
+  if (direct !== "unknown") return direct;
+
+  const transcript = await inspectPromptStartTranscript(input, transcriptStartOffset);
+  if (!transcript.inspected) return "unknown";
+  if (transcript.hasUnconfirmedModelSwitch) return "unknown";
+  if (transcript.modelClass !== "unknown") return transcript.modelClass;
+
+  return session?.modelClass && session.modelClass !== "unknown" ? session.modelClass : "unknown";
+}
+
+async function inspectPromptStartTranscript(input: HookInput, transcriptStartOffset: number | null): Promise<PromptTranscriptInspection> {
+  const transcriptPath = getTranscriptPath(input);
+  const result: PromptTranscriptInspection = {
+    inspected: false,
+    modelClass: "unknown",
+    hasUnconfirmedModelSwitch: false
+  };
+  if (!transcriptPath || transcriptStartOffset === null) return result;
+
+  result.inspected = true;
+  if (transcriptStartOffset <= 0) return result;
+
+  try {
+    const start = Math.max(0, transcriptStartOffset - TRANSCRIPT_MODEL_LOOKBACK_BYTES);
+    const stream = createReadStream(transcriptPath, {
+      encoding: "utf8",
+      start,
+      end: transcriptStartOffset - 1
+    });
+    const lines = createInterface({ input: stream, crlfDelay: Infinity });
+    let skipFirstLine = start > 0;
+
+    for await (const line of lines) {
+      if (skipFirstLine) {
+        skipFirstLine = false;
+        continue;
+      }
+
+      const raw = line.trim();
+      if (!raw) continue;
+
+      try {
+        const record = JSON.parse(raw);
+        if (isModelSwitchCommand(record)) {
+          result.hasUnconfirmedModelSwitch = true;
+          continue;
+        }
+
+        const modelClass = classifyTranscriptRecord(record);
+        if (modelClass !== "unknown") {
+          result.modelClass = modelClass;
+          result.hasUnconfirmedModelSwitch = false;
+        }
+      } catch {
+        continue;
+      }
+    }
+  } catch {
+    return {
+      inspected: false,
+      modelClass: "unknown",
+      hasUnconfirmedModelSwitch: false
+    };
+  }
+
+  return result;
 }
 
 async function inspectTranscript(
@@ -303,6 +396,16 @@ function classifyTranscriptRecord(value: unknown): ModelClass {
   }
 
   return "unknown";
+}
+
+function isModelSwitchCommand(value: unknown): boolean {
+  if (!isRecord(value) || value.type !== "user") return false;
+  const message = isRecord(value.message) ? value.message : null;
+  const content = message?.content;
+  if (typeof content !== "string") return false;
+
+  const raw = content.toLowerCase();
+  return raw.includes("<command-name>/model</command-name>") || raw.includes("<command-name>model</command-name>");
 }
 
 function isAssistantRecord(value: unknown): boolean {

@@ -23,8 +23,8 @@ test("matches only AnyRouter target hosts", () => {
 });
 
 test("classifies current Claude model fields", () => {
-  assert.equal(classifyModel({ model: "claude-opus-4-1-20250805" }, { includeEnv: false }), "opus");
-  assert.equal(classifyModel({ model_id: "claude-3-5-haiku-latest" }, { includeEnv: false }), "haiku");
+  assert.equal(classifyModel({ model: "claude-opus-4-8" }, { includeEnv: false }), "opus");
+  assert.equal(classifyModel({ model_id: "claude-haiku-4-5-20251001" }, { includeEnv: false }), "haiku");
   assert.equal(classifyModel({ model: { displayName: "Claude Sonnet 4" } }, { includeEnv: false }), "sonnet");
   assert.equal(classifyModel({}, { includeEnv: false }), "unknown");
 });

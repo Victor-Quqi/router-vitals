@@ -50,7 +50,7 @@ test("plugin hook uploads only for matched AnyRouter sessions", async () => {
       ANYROUTER_STATUS_CONFIG_URL: `http://127.0.0.1:${serverPort(server)}/config.json`
     };
 
-    await runHook("SessionStart", { session_id: "session-a", model: "claude-sonnet-4" }, {
+    await runHook("SessionStart", { session_id: "session-a", model: "claude-sonnet-4-6" }, {
       ...commonEnv,
       ANTHROPIC_BASE_URL: "https://anyrouter.top"
     });
@@ -59,7 +59,7 @@ test("plugin hook uploads only for matched AnyRouter sessions", async () => {
       ...commonEnv,
       ANTHROPIC_BASE_URL: "https://anyrouter.top"
     });
-    await writeTranscriptModel(sessionATranscript, "claude-sonnet-4");
+    await writeTranscriptModel(sessionATranscript, "claude-sonnet-4-6");
     await runHook("Stop", { session_id: "session-a", transcript_path: sessionATranscript }, {
       ...commonEnv,
       ANTHROPIC_BASE_URL: "https://anyrouter.top/v1/messages"
@@ -78,7 +78,7 @@ test("plugin hook uploads only for matched AnyRouter sessions", async () => {
     assert.equal("baseUrl" in payload, false);
     assert.equal("session_id" in payload, false);
 
-    await runHook("SessionStart", { session_id: "session-c", model: "claude-opus-4-1-20250805" }, {
+    await runHook("SessionStart", { session_id: "session-c", model: "claude-opus-4-8" }, {
       ...commonEnv,
       ANTHROPIC_BASE_URL: "https://anyrouter.top"
     });
@@ -87,7 +87,7 @@ test("plugin hook uploads only for matched AnyRouter sessions", async () => {
       ...commonEnv,
       ANTHROPIC_BASE_URL: "https://anyrouter.top"
     });
-    await writeTranscriptModel(sessionCTranscript, "claude-3-5-haiku-latest");
+    await writeTranscriptModel(sessionCTranscript, "claude-haiku-4-5-20251001");
     await runHook("Stop", { session_id: "session-c", transcript_path: sessionCTranscript }, {
       ...commonEnv,
       ANTHROPIC_BASE_URL: "https://anyrouter.top/v1/messages"
@@ -101,7 +101,7 @@ test("plugin hook uploads only for matched AnyRouter sessions", async () => {
       ...commonEnv,
       ANTHROPIC_BASE_URL: "https://anyrouter.top"
     });
-    await writeTranscriptModel(sessionDTranscript, "claude-3-5-haiku-latest");
+    await writeTranscriptModel(sessionDTranscript, "claude-haiku-4-5-20251001");
     await runHook("Stop", { session_id: "session-d", transcript_path: sessionDTranscript }, {
       ...commonEnv,
       ANTHROPIC_BASE_URL: "https://anyrouter.top/v1/messages"
@@ -111,7 +111,7 @@ test("plugin hook uploads only for matched AnyRouter sessions", async () => {
     assert.equal(received[2]!.modelClass, "haiku");
 
     const sessionETranscript = join(stateDir, "session-e.jsonl");
-    await writeTranscriptModel(sessionETranscript, "claude-opus-4-1-20250805", "2000-01-01T00:00:00.000Z");
+    await writeTranscriptModel(sessionETranscript, "claude-opus-4-8", "2000-01-01T00:00:00.000Z");
     await runHook("UserPromptSubmit", { session_id: "session-e" }, {
       ...commonEnv,
       ANTHROPIC_BASE_URL: "https://anyrouter.top"
@@ -124,6 +124,88 @@ test("plugin hook uploads only for matched AnyRouter sessions", async () => {
     assert.equal(received.length, 4);
     assert.equal(received[3]!.modelClass, "unknown");
 
+    const sessionFTranscript = join(stateDir, "session-f.jsonl");
+    await writeFile(sessionFTranscript, "", "utf8");
+    await runHook("SessionStart", { session_id: "session-f" }, {
+      ...commonEnv,
+      ANTHROPIC_BASE_URL: "https://anyrouter.top",
+      CLAUDE_MODEL: "claude-opus-4-8"
+    });
+    await runHook("UserPromptSubmit", { session_id: "session-f", transcript_path: sessionFTranscript }, {
+      ...commonEnv,
+      ANTHROPIC_BASE_URL: "https://anyrouter.top"
+    });
+    await runHook("StopFailure", {
+      session_id: "session-f",
+      transcript_path: sessionFTranscript,
+      status_code: 429,
+      message: "API Error 429: rate limit reached"
+    }, {
+      ...commonEnv,
+      ANTHROPIC_BASE_URL: "https://anyrouter.top/v1/messages",
+      CLAUDE_MODEL: "claude-opus-4-8"
+    });
+
+    assert.equal(received.length, 5);
+    assert.equal(received[4]!.modelClass, "opus");
+    assert.equal(received[4]!.errorType, "rate_limited");
+    assert.equal(received[4]!.errorStatusCode, 429);
+
+    const sessionGTranscript = join(stateDir, "session-g.jsonl");
+    await writeTranscriptRecords(sessionGTranscript, [createModelSwitchCommandRecord()]);
+    await runHook("SessionStart", { session_id: "session-g" }, {
+      ...commonEnv,
+      ANTHROPIC_BASE_URL: "https://anyrouter.top",
+      CLAUDE_MODEL: "claude-opus-4-8"
+    });
+    await runHook("UserPromptSubmit", { session_id: "session-g", transcript_path: sessionGTranscript }, {
+      ...commonEnv,
+      ANTHROPIC_BASE_URL: "https://anyrouter.top",
+      CLAUDE_MODEL: "claude-opus-4-8"
+    });
+    await runHook("StopFailure", {
+      session_id: "session-g",
+      transcript_path: sessionGTranscript,
+      status_code: 429,
+      message: "API Error 429: rate limit reached"
+    }, {
+      ...commonEnv,
+      ANTHROPIC_BASE_URL: "https://anyrouter.top/v1/messages",
+      CLAUDE_MODEL: "claude-opus-4-8"
+    });
+
+    assert.equal(received.length, 6);
+    assert.equal(received[5]!.modelClass, "unknown");
+
+    const sessionHTranscript = join(stateDir, "session-h.jsonl");
+    await writeTranscriptRecords(sessionHTranscript, [
+      createModelSwitchCommandRecord(),
+      createAssistantModelRecord("claude-sonnet-4-6")
+    ]);
+    await runHook("SessionStart", { session_id: "session-h" }, {
+      ...commonEnv,
+      ANTHROPIC_BASE_URL: "https://anyrouter.top",
+      CLAUDE_MODEL: "claude-opus-4-8"
+    });
+    await runHook("UserPromptSubmit", { session_id: "session-h", transcript_path: sessionHTranscript }, {
+      ...commonEnv,
+      ANTHROPIC_BASE_URL: "https://anyrouter.top",
+      CLAUDE_MODEL: "claude-opus-4-8"
+    });
+    await runHook("StopFailure", {
+      session_id: "session-h",
+      transcript_path: sessionHTranscript,
+      status_code: 429,
+      message: "API Error 429: rate limit reached"
+    }, {
+      ...commonEnv,
+      ANTHROPIC_BASE_URL: "https://anyrouter.top/v1/messages",
+      CLAUDE_MODEL: "claude-opus-4-8"
+    });
+
+    assert.equal(received.length, 7);
+    assert.equal(received[6]!.modelClass, "sonnet");
+
     await runHook("UserPromptSubmit", { session_id: "session-b" }, {
       ...commonEnv,
       ANTHROPIC_BASE_URL: "https://api.anthropic.com"
@@ -133,7 +215,7 @@ test("plugin hook uploads only for matched AnyRouter sessions", async () => {
       ANTHROPIC_BASE_URL: "https://api.anthropic.com"
     });
 
-    assert.equal(received.length, 4);
+    assert.equal(received.length, 7);
 
     await runHook("SessionEnd", { session_id: "session-a" }, {
       ...commonEnv,
@@ -202,14 +284,33 @@ test("plugin hook skips uploads after the local daily contribution limit", async
 });
 
 async function writeTranscriptModel(path: string, model: string, timestamp?: string): Promise<void> {
-  await writeFile(path, `${JSON.stringify({
+  await writeTranscriptRecords(path, [createAssistantModelRecord(model, timestamp)]);
+}
+
+async function writeTranscriptRecords(path: string, records: Array<Record<string, unknown>>): Promise<void> {
+  await writeFile(path, records.map((record) => JSON.stringify(record)).join("\n") + "\n", "utf8");
+}
+
+function createAssistantModelRecord(model: string, timestamp?: string): Record<string, unknown> {
+  return {
     type: "assistant",
     timestamp: timestamp || new Date().toISOString(),
     message: {
       role: "assistant",
       model
     }
-  })}\n`, "utf8");
+  };
+}
+
+function createModelSwitchCommandRecord(): Record<string, unknown> {
+  return {
+    type: "user",
+    timestamp: new Date().toISOString(),
+    message: {
+      role: "user",
+      content: "<command-name>/model</command-name>\n<command-message>model</command-message>\n<command-args></command-args>"
+    }
+  };
 }
 
 async function runHook(eventName: string, input: Record<string, unknown>, env: NodeJS.ProcessEnv): Promise<void> {
