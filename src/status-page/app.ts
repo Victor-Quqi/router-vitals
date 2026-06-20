@@ -316,8 +316,8 @@ function render(data: StatusData): void {
   setText("sampleCount", String(data.sampleCount ?? "--"));
   setText("failureCountMetric", String(data.failureCount ?? "--"));
   setText("availabilityMath", formatAvailabilityMath(data));
-  setText("assistantStart", formatAssistantStart(data.assistantStart));
-  setText("assistantStartDetail", formatAssistantStartDetail(data.assistantStart));
+  setText("assistantStart", formatAssistantStart(data.assistantStart, data.successCount));
+  setText("assistantStartDetail", formatAssistantStartDetail(data.assistantStart, data.successCount));
 
   const stateNode = getElement("state");
   stateNode.className = `state ${state}`;
@@ -557,12 +557,14 @@ function formatAvailabilityMath(data: StatusData): string {
   return `${data.successCount} / ${data.sampleCount}`;
 }
 
-function formatAssistantStart(value?: AssistantStartSummary): string {
+function formatAssistantStart(value?: AssistantStartSummary, successCount?: number): string {
+  if (typeof successCount === "number" && successCount <= 0) return "--";
   const bucket = value?.medianBucket;
   return bucket ? assistantStartLabels[bucket] : "--";
 }
 
-function formatAssistantStartDetail(value?: AssistantStartSummary): string {
+function formatAssistantStartDetail(value?: AssistantStartSummary, successCount?: number): string {
+  if (typeof successCount === "number" && successCount <= 0) return "无成功样本";
   const known = Number(value?.known ?? 0);
   const total = Number(value?.total ?? 0);
   if (known <= 0) return "暂无已知记录";
@@ -611,7 +613,7 @@ function formatBucketTooltip(bucket: TrendBucket): string {
 
   lines.push(`成功 ${success} · 失败 ${failure} · 总轮次 ${total}`);
   lines.push(`成功率 ${formatPercent(total > 0 ? success / total : null)}`);
-  lines.push(`首次响应 P50 ${formatAssistantStart(bucket.assistantStart || undefined)}`);
+  lines.push(`首次响应 P50 ${success > 0 ? formatAssistantStart(bucket.assistantStart || undefined, success) : "无成功样本"}`);
 
   if (failure > 0) {
     const primaryError = bucket.errors?.[0];

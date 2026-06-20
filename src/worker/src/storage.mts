@@ -113,19 +113,20 @@ function createTargetAggregateStatement(
   const errorColumn = ERROR_COLUMNS[payload.errorType] || ERROR_COLUMNS.unknown;
   const successDelta = payload.ok ? 1 : 0;
   const failureDelta = payload.ok ? 0 : 1;
+  const assistantStartDelta = payload.ok ? 1 : 0;
 
   return db.prepare(`
     INSERT INTO target_minute_aggregates (
       target_host, minute, total_samples, success_samples, failure_samples, ${assistantStartColumn}, ${errorColumn}, updated_at
-    ) VALUES (?, ?, 1, ?, ?, 1, 1, ?)
+    ) VALUES (?, ?, 1, ?, ?, ?, 1, ?)
     ON CONFLICT(target_host, minute) DO UPDATE SET
       total_samples = total_samples + 1,
       success_samples = success_samples + ?,
       failure_samples = failure_samples + ?,
-      ${assistantStartColumn} = ${assistantStartColumn} + 1,
+      ${assistantStartColumn} = ${assistantStartColumn} + ?,
       ${errorColumn} = ${errorColumn} + 1,
       updated_at = ?
-  `).bind(targetHost, minute, successDelta, failureDelta, nowMs, successDelta, failureDelta, nowMs);
+  `).bind(targetHost, minute, successDelta, failureDelta, assistantStartDelta, nowMs, successDelta, failureDelta, assistantStartDelta, nowMs);
 }
 
 function createTargetModelAggregateStatement(
@@ -138,16 +139,17 @@ function createTargetModelAggregateStatement(
   const assistantStartColumn = ASSISTANT_START_COLUMNS[payload.assistantStartBucket] || ASSISTANT_START_COLUMNS.unknown;
   const successDelta = payload.ok ? 1 : 0;
   const failureDelta = payload.ok ? 0 : 1;
+  const assistantStartDelta = payload.ok ? 1 : 0;
 
   return db.prepare(`
     INSERT INTO target_model_minute_aggregates (
       target_host, minute, model_class, total_samples, success_samples, failure_samples, ${assistantStartColumn}, updated_at
-    ) VALUES (?, ?, ?, 1, ?, ?, 1, ?)
+    ) VALUES (?, ?, ?, 1, ?, ?, ?, ?)
     ON CONFLICT(target_host, minute, model_class) DO UPDATE SET
       total_samples = total_samples + 1,
       success_samples = success_samples + ?,
       failure_samples = failure_samples + ?,
-      ${assistantStartColumn} = ${assistantStartColumn} + 1,
+      ${assistantStartColumn} = ${assistantStartColumn} + ?,
       updated_at = ?
   `).bind(
     targetHost,
@@ -155,9 +157,11 @@ function createTargetModelAggregateStatement(
     payload.modelClass,
     successDelta,
     failureDelta,
+    assistantStartDelta,
     nowMs,
     successDelta,
     failureDelta,
+    assistantStartDelta,
     nowMs
   );
 }

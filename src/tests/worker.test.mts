@@ -122,6 +122,30 @@ test("worker batches report aggregate writes", async () => {
   ]);
 });
 
+test("worker counts assistant start buckets only for successful reports", async () => {
+  const successCalls: RecordedQuery[] = [];
+  const success = await handleReport(reportRequest("anon_latencySuccessabcdefghijkl"), { DB: recordingDb(successCalls) });
+  assert.equal(success.status, 200);
+
+  const successTarget = findInsertCall(successCalls, "target_minute_aggregates");
+  const successModel = findInsertCall(successCalls, "target_model_minute_aggregates");
+  assert.equal(successTarget.values[4], 1);
+  assert.equal(successTarget.values[8], 1);
+  assert.equal(successModel.values[5], 1);
+  assert.equal(successModel.values[9], 1);
+
+  const failureCalls: RecordedQuery[] = [];
+  const failure = await handleReport(reportRequest("anon_latencyFailureabcdefghijkl", false), { DB: recordingDb(failureCalls) });
+  assert.equal(failure.status, 200);
+
+  const failureTarget = findInsertCall(failureCalls, "target_minute_aggregates");
+  const failureModel = findInsertCall(failureCalls, "target_model_minute_aggregates");
+  assert.equal(failureTarget.values[4], 0);
+  assert.equal(failureTarget.values[8], 0);
+  assert.equal(failureModel.values[5], 0);
+  assert.equal(failureModel.values[9], 0);
+});
+
 test("config endpoint exposes fixed AnyRouter hosts", async () => {
   const response = await handleRequest(new Request("https://api.example.test/v1/config"), {});
   const body = await response.json();
@@ -233,7 +257,7 @@ test("status aggregation detects unstable high error windows", () => {
       total_samples: 20,
       success_samples: 17,
       failure_samples: 3,
-      assistant_start_3_10s: 20,
+      assistant_start_3_10s: 17,
       err_server_error: 3
     }
   ], "15m");
@@ -277,6 +301,35 @@ test("status aggregation attaches error status codes and hints", () => {
   assert.deepEqual(status.models[0]!.buckets.at(-1)!.errors[0]!.statusCodes, [{ code: 429, count: 3 }]);
 });
 
+test("status aggregation ignores assistant start buckets on failure-only rows", () => {
+  const nowMinute = 30000010;
+  const status = buildStatusFromRows([
+    {
+      minute: nowMinute,
+      total_samples: 1,
+      success_samples: 0,
+      failure_samples: 1,
+      assistant_start_gt_60s: 1,
+      err_rate_limited: 1
+    }
+  ], "5m", [
+    {
+      minute: nowMinute,
+      model_class: "sonnet",
+      total_samples: 1,
+      success_samples: 0,
+      failure_samples: 1,
+      assistant_start_gt_60s: 1
+    }
+  ], nowMinute);
+
+  const sonnet = status.models.find((model) => model.modelClass === "sonnet");
+  assert.equal(status.assistantStart.known, 0);
+  assert.equal(status.assistantStart.medianBucket, null);
+  assert.equal(sonnet!.buckets.at(-1)!.state, "failure");
+  assert.equal(sonnet!.buckets.at(-1)!.assistantStart, null);
+});
+
 test("status aggregation builds model trend buckets", () => {
   const nowMinute = 30000010;
   const status = buildStatusFromRows([
@@ -285,7 +338,7 @@ test("status aggregation builds model trend buckets", () => {
       total_samples: 3,
       success_samples: 2,
       failure_samples: 1,
-      assistant_start_3_10s: 3,
+      assistant_start_3_10s: 2,
       err_server_error: 1
     }
   ], "90m", [
@@ -303,7 +356,7 @@ test("status aggregation builds model trend buckets", () => {
       total_samples: 3,
       success_samples: 2,
       failure_samples: 1,
-      assistant_start_3_10s: 3
+      assistant_start_3_10s: 2
     },
     {
       minute: nowMinute,
@@ -338,7 +391,7 @@ test("status aggregation builds model trend buckets", () => {
   assert.equal(status.models[0]!.modelClass, "opus");
   assert.equal(status.models[0]!.buckets.at(-1)!.state, "failure");
   assert.equal(status.models[0]!.buckets.at(-1)!.errors[0]!.type, "server_error");
-  assert.equal(status.models[0]!.buckets.at(-1)!.assistantStart?.medianBucket, "10_30s");
+  assert.equal(status.models[0]!.buckets.at(-1)!.assistantStart, null);
   assert.equal(status.models[1]!.modelClass, "sonnet");
   assert.equal(status.models[1]!.buckets.at(-2)!.assistantStart?.medianBucket, "lt_3s");
   assert.equal(status.models[1]!.buckets.at(-2)!.state, "success");
@@ -468,6 +521,12 @@ function dailyLimitedDb(count: number) {
 
 function normalizeSqlTable(query: string): string {
   return query.match(/INSERT INTO\s+([a-z_]+)/)?.[1] ?? "unknown";
+}
+
+function findInsertCall(calls: RecordedQuery[], table: string): RecordedQuery {
+  const call = calls.find((item) => normalizeSqlTable(item.query) === table);
+  assert.ok(call, `missing insert for ${table}`);
+  return call;
 }
 
 function readStatementQuery(statement: { run(): Promise<unknown> }): string {

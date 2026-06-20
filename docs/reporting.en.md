@@ -27,7 +27,7 @@ Submitted: success/failure, error class, HTTP status code, sanitized and truncat
 
 Not submitted: actual URL, prompt, response, tokens, cookies, keys, account identifiers, `session_id`, file paths, full logs, and precise timestamps.
 
-To avoid carrying a stale model after switching models inside a Claude Code session, the plugin reads the local transcript file from the hook input, extracts model metadata from this turn's assistant records, and computes the assistant-start bucket from the first assistant record timestamp; it never submits transcript paths or content. This bucket is not low-level API TTFT and includes user-visible waiting such as Claude Code automatic retries.
+To avoid carrying a stale model after switching models inside a Claude Code session, the plugin reads the local transcript file from the hook input, extracts model metadata from this turn's assistant records, and computes the assistant-start bucket from the first assistant record timestamp; it never submits transcript paths or content. The status page's assistant-start P50 only counts turns that eventually succeed. This bucket is not low-level API TTFT and includes user-visible waiting such as Claude Code automatic retries.
 
 ## Turning reporting off
 

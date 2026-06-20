@@ -31,7 +31,7 @@ export function buildStatusFromRows(rows, windowValue, modelRows = [], nowMinute
         meta: {
             unit: "turn",
             availabilityFormula: "successCount / sampleCount",
-            assistantStartDefinition: "Time from Claude Code UserPromptSubmit to the first assistant transcript record.",
+            assistantStartDefinition: "Time from Claude Code UserPromptSubmit to the first assistant transcript record for successful turns.",
             sampleCountDefinition: "Completed Claude Code user turns observed by the plugin in this window.",
             trendBucketRule: "empty=no samples; success=only successful turns; mixed=successful and failed turns; failure=only failed turns.",
             stateThresholds: { ...STATUS_STATE_THRESHOLDS }
@@ -75,9 +75,9 @@ function buildModelTimelines(rows, spec, nowMinute, errorRows = []) {
         model.sampleCount += total;
         model.successCount += success;
         model.failureCount += failure;
-        const assistantStart = getAssistantStartCounts(assistantStartByBucket, modelClass, bucketIndex);
-        for (const [key, column] of STATUS_ASSISTANT_START_COLUMNS) {
-            assistantStart[key] += Number(row[column] || 0);
+        const rowAssistantStart = readAssistantStartCounts(row);
+        if (shouldIncludeAssistantStartCounts(rowAssistantStart, success)) {
+            addAssistantStartCounts(getAssistantStartCounts(assistantStartByBucket, modelClass, bucketIndex), rowAssistantStart);
         }
     }
     attachModelAssistantStarts(models, assistantStartByBucket);
@@ -220,9 +220,10 @@ function sumRows(rows) {
         totals.total_samples += Number(row.total_samples || 0);
         totals.success_samples += Number(row.success_samples || 0);
         totals.failure_samples += Number(row.failure_samples || 0);
-        for (const [key, column] of STATUS_ASSISTANT_START_COLUMNS) {
-            totals.assistantStart[key] += Number(row[column] || 0);
-        }
+        const rowAssistantStart = readAssistantStartCounts(row);
+        const successSamples = Number(row.success_samples || 0);
+        if (shouldIncludeAssistantStartCounts(rowAssistantStart, successSamples))
+            addAssistantStartCounts(totals.assistantStart, rowAssistantStart);
         for (const [key, column] of STATUS_ERROR_COLUMNS)
             totals.errors[key] += Number(row[column] || 0);
     }
@@ -230,6 +231,23 @@ function sumRows(rows) {
 }
 function createAssistantStartCounts() {
     return Object.fromEntries(ASSISTANT_START_BUCKETS.map((key) => [key, 0]));
+}
+function readAssistantStartCounts(row) {
+    const counts = createAssistantStartCounts();
+    for (const [key, column] of STATUS_ASSISTANT_START_COLUMNS)
+        counts[key] = Number(row[column] || 0);
+    return counts;
+}
+function shouldIncludeAssistantStartCounts(counts, successSamples) {
+    const total = sumAssistantStartCounts(counts);
+    return successSamples > 0 && total > 0 && total <= successSamples;
+}
+function addAssistantStartCounts(target, counts) {
+    for (const key of ASSISTANT_START_BUCKETS)
+        target[key] += counts[key] || 0;
+}
+function sumAssistantStartCounts(counts) {
+    return ASSISTANT_START_BUCKETS.reduce((sum, key) => sum + (counts[key] || 0), 0);
 }
 function buildAssistantStartSummary(counts) {
     const buckets = Object.fromEntries(ASSISTANT_START_BUCKETS.map((key) => [key, counts[key] || 0]));
