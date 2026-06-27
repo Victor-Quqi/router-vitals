@@ -66,4 +66,14 @@ node plugin/scripts/statusline.mjs
 
 statusLine is display-only; hooks keep running independently. There is no interval polling; `近 60m 状态` is cached locally for 60 seconds. Update hints prefer statusLine, and fall back to low-frequency Claude Code system messages when statusLine is not configured. When the most recent local report attempt failed, statusLine shows a short hint; use the diagnosis script for details.
 
+`setup-statusline.mjs` writes a stable launcher, `router-vitals-statusline.mjs`, into Claude home and points Claude Code `settings.json` at it. After plugin updates, the launcher prefers the latest installed version.
+
+Manual update:
+
+```bash
+claude plugin update anyrouter-status-monitor@router-vitals
+```
+
+If a Claude Code session is already running, run `/reload-plugins` inside that session after updating.
+
 Claude Code currently accepts one `statusLine` command. When `setup-statusline.mjs` detects an unrelated existing statusLine, an interactive terminal asks before replacing it; non-interactive runs keep the existing command. To show multiple status sources, use your own wrapper or a third-party statusLine aggregator.

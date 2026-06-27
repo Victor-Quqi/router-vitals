@@ -24,20 +24,6 @@ node scripts/statusline.mjs
 node scripts/setup-statusline.mjs
 ```
 
-已有其他 statusLine 时会询问是否直接替换；要无提示替换可加 `--force`。
+已有其他 statusLine 时会询问是否直接替换；无提示替换加 `--force`。
 
-statusLine 大致显示：`Any Router 近 60m 状态: 可用 · 贡献开启 · 今日贡献 12 条`。
-
-有新版时会优先显示更新提示：`Any Router 近 60m 状态: 可用 · 插件有新版 <最新版本> · 运行 /plugin 更新`。命令行更新：
-
-```bash
-claude plugin update anyrouter-status-monitor@router-vitals
-```
-
-如果当前 Claude Code 会话正在运行，更新后在会话里执行 `/reload-plugins`。
-
-未配置 statusLine 时，插件也会低频提醒新版。
-
-**建议保持最新版本**。旧版本可能使用过期的上报规则、目标入口或状态判断逻辑，导致本机贡献被跳过，或状态栏显示不准。
-
-hooks 和 statusLine 是两条独立路径；statusLine 报错时，Claude Code 会继续跑 hooks。
+hooks 和 statusLine 是两条独立路径；statusLine 报错不影响 hooks。

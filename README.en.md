@@ -4,9 +4,9 @@
 
 A Claude Code plugin for monitoring the current Any Router status.
 
-Repeated probes from one account tend to trip upstream risk controls, rate limits, or bans, and only reflect that one account anyway. This plugin does not probe actively; instead, after each turn it anonymously reports whether the turn succeeded or failed, then aggregates those reports into a community status signal.
+Repeated probes from one account tend to trip upstream risk controls, rate limits, or bans, and only reflect that one account. This plugin anonymously reports whether each Claude Code turn succeeded or failed, then aggregates those reports into a community status signal.
 
-Install it and you're done; it stays quiet in the background. The plugin never touches the requests you send upstream, so it leaves no extra fingerprint on Any Router. To see the status inside Claude Code, set up the status line once; you can also open the status page.
+Install it and you're done. The plugin never touches the requests you send upstream, so it leaves no extra fingerprint on Any Router.
 
 Status page: https://router-vitals.pages.dev/
 
@@ -32,8 +32,6 @@ Once installed, the hooks start working. Don't want to contribute? Set `ANYROUTE
 
 ### Show status in the status line (recommended)
 
-To see live status in the Claude Code status line, run the setup command once.
-
 First find where the plugin is installed:
 
 ```bash
@@ -45,24 +43,6 @@ Take the `installPath` for `anyrouter-status-monitor@router-vitals`, then run:
 ```bash
 node "<installPath>/scripts/setup-statusline.mjs"
 ```
-
-On Linux/macOS use the matching absolute path.
-
-If another statusLine is already configured, the setup command asks before replacing it. Add `--force` when you want to replace it without prompting.
-
-Once configured, the status line looks roughly like: `Any Router 近 60m 状态: 可用 · 贡献开启 · 今日贡献 12 条`.
-
-When a newer plugin version is available, the status line prioritizes the update hint: `Any Router 近 60m 状态: 可用 · 插件有新版 <latest version> · 运行 /plugin 更新`. You can update manually from the CLI:
-
-```bash
-claude plugin update anyrouter-status-monitor@router-vitals
-```
-
-If a Claude Code session is already running, run `/reload-plugins` inside that session after updating.
-
-Without statusLine, the plugin still shows low-frequency update reminders.
-
-**Keep the plugin up to date.** Older versions may use outdated reporting rules, target endpoints, or status logic, which can skip your local contributions or make the status line less accurate.
 
 ## Learn more
 

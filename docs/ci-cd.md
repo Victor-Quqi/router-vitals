@@ -12,6 +12,12 @@ Cloudflare 从零配置见 [cloudflare-setup.md](cloudflare-setup.md)。
 pnpm test
 ```
 
+随后检查编译产物是否已提交：
+
+```bash
+git diff --exit-code -- plugin worker shared status-page scripts
+```
+
 ## CD
 
 `.github/workflows/deploy-cloudflare.yml` 会在 `main` push 且改到运行时代码、状态页、Worker、共享策略、依赖或 TypeScript 配置时运行，也能手动触发。运行时会：
@@ -24,35 +30,6 @@ pnpm test
 6. 部署 Worker。
 7. 部署 Cloudflare Pages。
 
-## GitHub Secrets
-
-仓库需要配置：
-
-- `CLOUDFLARE_API_TOKEN`
-- `CLOUDFLARE_ACCOUNT_ID`
-
-API token 至少需要能编辑 Workers、D1 和 Pages。
-
-## GitHub Variables
-
-仓库需要配置：
-
-- `CLOUDFLARE_D1_DATABASE_ID`
-- `STATUS_API_BASE_URL`
-
-`STATUS_API_BASE_URL` 填 Worker API origin：
-
-```text
-<worker-api-origin>
-```
+部署所需的 GitHub Secrets、Variables 和首次部署顺序见 [cloudflare-setup.md](cloudflare-setup.md)。
 
 Pages 项目名默认写死为 `router-vitals`。如果 Cloudflare Pages 项目使用其他名字，改 `.github/workflows/deploy-cloudflare.yml` 里的 `pages deploy` 命令。
-
-## 首次部署顺序
-
-先在 Cloudflare 创建：
-
-- D1 数据库：`router-vitals`
-- Pages 项目：`router-vitals`
-
-然后在 GitHub 配好 Secrets 和 Variables，手动触发 `Deploy Cloudflare` workflow。

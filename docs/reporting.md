@@ -66,4 +66,14 @@ node plugin/scripts/statusline.mjs
 
 statusLine 只是展示层，hooks 照常独立运行。这里不做定时轮询；`近 60m 状态` 本地缓存 60 秒。有新版时 statusLine 优先显示更新提示；没配 statusLine 时，hooks 会低频发 Claude Code 系统消息。最近一次本机上报失败时，statusLine 会显示短提示，详细原因用诊断脚本查看。
 
+`setup-statusline.mjs` 会在 Claude home 写入稳定入口 `router-vitals-statusline.mjs`，并把 Claude Code `settings.json` 的 `statusLine` 指到这个入口。插件更新后，稳定入口会优先调用最新安装版本。
+
+手动更新：
+
+```bash
+claude plugin update anyrouter-status-monitor@router-vitals
+```
+
+如果当前 Claude Code 会话正在运行，更新后在会话里执行 `/reload-plugins`。
+
 Claude Code 当前只接受一个 `statusLine` 命令。`setup-statusline.mjs` 检测到已有非本插件 statusLine 时，交互终端会询问是否直接替换；非交互环境默认不覆盖。若要同时显示多个状态源，请自行编写 wrapper，或使用第三方 statusLine 聚合工具。
