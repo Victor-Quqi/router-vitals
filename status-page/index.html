@@ -119,6 +119,13 @@
         </article>
       </section>
 
+      <section class="contributionCallout" id="contributionCallout" hidden>
+        <div>
+          <strong>样本偏少</strong>
+        </div>
+        <a href="https://github.com/Victor-Quqi/router-vitals#%E5%AE%89%E8%A3%85" target="_blank" rel="noreferrer">安装插件开始贡献</a>
+      </section>
+
       <section class="panel trendPanel">
         <div class="panelHeader">
           <h2>模型趋势</h2>
@@ -132,17 +139,17 @@
         <div class="modelTable" id="modelTable"></div>
       </section>
 
-      <section class="panel">
+      <section class="panel" id="errorPanel">
         <div class="panelHeader errorHeader">
           <div class="panelTitle">
             <h2>主要错误类型</h2>
             <span id="failureCount">当前窗口 --</span>
           </div>
           <div class="modelTabs" role="tablist" aria-label="错误模型">
-            <button class="active" data-error-model="opus" type="button">Opus</button>
-            <button data-error-model="sonnet" type="button">Sonnet</button>
-            <button data-error-model="haiku" type="button">Haiku</button>
-            <button data-error-model="unknown" type="button">Unknown</button>
+            <button class="active" data-error-model="opus" type="button" aria-selected="true">Opus</button>
+            <button data-error-model="sonnet" type="button" aria-selected="false">Sonnet</button>
+            <button data-error-model="haiku" type="button" aria-selected="false">Haiku</button>
+            <button data-error-model="unknown" type="button" aria-selected="false">Unknown</button>
           </div>
         </div>
         <div id="errors" class="errorList"></div>

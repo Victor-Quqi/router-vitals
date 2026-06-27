@@ -57,6 +57,7 @@ let activeWindow = "60m";
 let activeErrorModel = "opus";
 let activeTargetHost = "all";
 let latestStatusData = null;
+let selectedTrendBucket = null;
 const openErrorKeys = new Set();
 const autoRefreshWindows = new Set(["60m", "24h"]);
 const autoRefreshMs = 30000;
@@ -101,6 +102,7 @@ for (const element of document.querySelectorAll("[data-window]")) {
         if (!button.dataset.window)
             return;
         activeWindow = button.dataset.window;
+        selectedTrendBucket = null;
         document.querySelectorAll("[data-window]").forEach((item) => item.classList.toggle("active", item === button));
         syncRefreshControls();
         void loadStatus();
@@ -111,7 +113,8 @@ for (const element of document.querySelectorAll("[data-error-model]")) {
     button.addEventListener("click", () => {
         const model = normalizeModelClass(button.dataset.errorModel);
         activeErrorModel = model;
-        document.querySelectorAll("[data-error-model]").forEach((item) => item.classList.toggle("active", item === button));
+        selectedTrendBucket = null;
+        syncErrorModelTabs();
         if (latestStatusData)
             renderErrorsForModel(latestStatusData);
     });
@@ -126,6 +129,7 @@ for (const element of document.querySelectorAll("[data-target-host]")) {
         activeTargetHost = normalizeTargetHostFilter(button.dataset.targetHost);
         document.querySelectorAll("[data-target-host]").forEach((item) => item.classList.toggle("active", item === button));
         openErrorKeys.clear();
+        selectedTrendBucket = null;
         void loadStatus();
     });
 }
@@ -223,6 +227,7 @@ function applyTheme(mode) {
 function render(data) {
     latestStatusData = data;
     const state = normalizeServiceState(data.state);
+    syncSelectedTrendBucket(data);
     setText("state", labels[state] || "状态暂缺");
     setText("stateDetail", formatStateDetail(data));
     setText("updatedAt", formatUpdatedAt(data.generatedAt));
@@ -234,6 +239,7 @@ function render(data) {
     setText("assistantStartDetail", formatAssistantStartDetail(data.assistantStart, data.successCount));
     const stateNode = getElement("state");
     stateNode.className = `state ${state}`;
+    syncContributionCallout(data, state);
     renderModelTable(data.models || [], data.timeline);
     renderErrorsForModel(data);
 }
@@ -260,26 +266,33 @@ function renderModelTable(models, timeline) {
     for (const model of rows) {
         const row = document.createElement("div");
         row.className = "modelRow";
+        const modelClass = normalizeModelClass(model.modelClass);
         const name = document.createElement("strong");
-        name.textContent = modelLabels[model.modelClass] || model.modelClass || "unknown";
+        name.textContent = modelLabels[modelClass] || model.modelClass || "unknown";
         const availability = document.createElement("span");
         availability.textContent = formatPercent(model.availability);
         const sampleCount = document.createElement("span");
         sampleCount.textContent = String(model.sampleCount ?? 0);
         const failureCount = document.createElement("span");
         failureCount.textContent = String(model.failureCount ?? 0);
+        const trendCell = document.createElement("div");
+        trendCell.className = "trendCell";
         const trend = document.createElement("div");
         trend.className = "trendStrip";
         for (const bucket of model.buckets || []) {
             const block = document.createElement("span");
             block.className = `trendBlock ${bucket.state || "empty"}`;
+            block.classList.toggle("selected", isSelectedTrendBucket(modelClass, bucket));
             const tooltip = formatBucketTooltip(bucket);
             block.tabIndex = 0;
-            block.setAttribute("aria-label", tooltip);
+            block.setAttribute("role", "button");
+            block.setAttribute("aria-label", `${tooltip}\n查看该时间段错误详情`);
             bindTrendTooltip(block, tooltip);
+            bindTrendSelection(block, modelClass, bucket);
             trend.append(block);
         }
-        row.append(name, availability, sampleCount, failureCount, trend);
+        trendCell.append(trend, buildTrendAxis(model.buckets || []));
+        row.append(name, availability, sampleCount, failureCount, trendCell);
         root.append(row);
     }
 }
@@ -320,17 +333,22 @@ function minuteToIso(minute) {
 }
 function renderErrorsForModel(data) {
     const model = findModelStatus(data, activeErrorModel);
+    if (selectedTrendBucket?.modelClass === activeErrorModel) {
+        setText("failureCount", `${modelLabels[activeErrorModel]} · ${formatRange(selectedTrendBucket.startAt, selectedTrendBucket.endAt)} · 失败轮次 ${selectedTrendBucket.failureCount}`);
+        renderErrors(selectedTrendBucket.errors, selectedTrendBucket.failureCount > 0 ? "该时间段没有主要错误类型" : "该时间段没有失败轮次");
+        return;
+    }
     const errors = data.modelErrors?.[activeErrorModel] || [];
     setText("failureCount", `${formatWindowLabel(data.window)} · 失败轮次 ${model?.failureCount ?? 0}`);
-    renderErrors(errors);
+    renderErrors(errors, "当前窗口没有主要错误类型");
 }
-function renderErrors(errors) {
+function renderErrors(errors, emptyText = "当前窗口没有主要错误类型") {
     const root = getElement("errors");
     root.replaceChildren();
     if (errors.length === 0) {
         const empty = document.createElement("div");
         empty.className = "stateDetail";
-        empty.textContent = "当前窗口没有主要错误类型";
+        empty.textContent = emptyText;
         root.append(empty);
         return;
     }
@@ -417,6 +435,7 @@ function formatStatusSuffix(statusCodes) {
 }
 function renderUnavailable() {
     latestStatusData = null;
+    selectedTrendBucket = null;
     setText("state", "状态暂缺");
     setText("stateDetail", "API 暂时没有返回可用数据");
     setText("updatedAt", "更新于 --");
@@ -426,6 +445,7 @@ function renderUnavailable() {
     setText("availabilityMath", "--");
     setText("assistantStartDetail", "--");
     getElement("state").className = "state insufficient_data";
+    syncContributionCallout(null, "insufficient_data");
     renderModelTable([], null);
     renderErrors([]);
 }
@@ -444,6 +464,15 @@ function formatRange(startAt, endAt) {
         : { hour: "2-digit", minute: "2-digit" };
     const formatter = new Intl.DateTimeFormat("zh-CN", options);
     return `${formatter.format(new Date(startAt))} - ${formatter.format(new Date(endAt))}`;
+}
+function formatTrendTickLabel(value) {
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime()))
+        return "";
+    const options = activeWindow === "7d" || activeWindow === "30d"
+        ? { month: "2-digit", day: "2-digit" }
+        : { hour: "2-digit", minute: "2-digit" };
+    return new Intl.DateTimeFormat("zh-CN", options).format(date);
 }
 function formatPercent(value) {
     return typeof value === "number" ? `${Math.round(value * 1000) / 10}%` : "--";
@@ -562,6 +591,114 @@ function bindTrendTooltip(element, text) {
         positionTrendTooltip(rect.left + rect.width / 2, rect.top);
     });
     element.addEventListener("blur", hideTrendTooltip);
+}
+function bindTrendSelection(element, modelClass, bucket) {
+    element.addEventListener("click", () => {
+        selectTrendBucket(modelClass, bucket);
+    });
+    element.addEventListener("keydown", (event) => {
+        if (event.key !== "Enter" && event.key !== " ")
+            return;
+        event.preventDefault();
+        selectTrendBucket(modelClass, bucket);
+    });
+}
+function selectTrendBucket(modelClass, bucket) {
+    selectedTrendBucket = {
+        modelClass,
+        bucketIndex: bucket.index,
+        startAt: bucket.startAt,
+        endAt: bucket.endAt,
+        failureCount: bucket.failure ?? 0,
+        errors: bucket.errors || []
+    };
+    activeErrorModel = modelClass;
+    syncErrorModelTabs();
+    if (latestStatusData) {
+        renderModelTable(latestStatusData.models || [], latestStatusData.timeline);
+        renderErrorsForModel(latestStatusData);
+    }
+    scrollErrorPanelIntoView();
+}
+function syncSelectedTrendBucket(data) {
+    if (!selectedTrendBucket)
+        return;
+    const bucket = findModelStatus(data, selectedTrendBucket.modelClass)?.buckets?.find((item) => item.index === selectedTrendBucket?.bucketIndex &&
+        item.startAt === selectedTrendBucket?.startAt &&
+        item.endAt === selectedTrendBucket?.endAt);
+    if (!bucket) {
+        selectedTrendBucket = null;
+        return;
+    }
+    selectedTrendBucket = {
+        modelClass: selectedTrendBucket.modelClass,
+        bucketIndex: bucket.index,
+        startAt: bucket.startAt,
+        endAt: bucket.endAt,
+        failureCount: bucket.failure ?? 0,
+        errors: bucket.errors || []
+    };
+}
+function isSelectedTrendBucket(modelClass, bucket) {
+    return selectedTrendBucket?.modelClass === modelClass &&
+        selectedTrendBucket.bucketIndex === bucket.index &&
+        selectedTrendBucket.startAt === bucket.startAt &&
+        selectedTrendBucket.endAt === bucket.endAt;
+}
+function syncErrorModelTabs() {
+    document.querySelectorAll("[data-error-model]").forEach((item) => {
+        const button = item;
+        const selected = normalizeModelClass(button.dataset.errorModel) === activeErrorModel;
+        button.classList.toggle("active", selected);
+        button.setAttribute("aria-selected", selected ? "true" : "false");
+    });
+}
+function scrollErrorPanelIntoView() {
+    const panel = document.getElementById("errorPanel");
+    if (!panel)
+        return;
+    const behavior = window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth";
+    panel.scrollIntoView({ block: "start", behavior });
+}
+function buildTrendAxis(buckets) {
+    const axis = document.createElement("div");
+    axis.className = "trendAxis";
+    axis.setAttribute("aria-hidden", "true");
+    axis.style.setProperty("--bucket-count", String(Math.max(1, buckets.length)));
+    for (const index of getTrendTickIndices(buckets.length)) {
+        const bucket = buckets[index];
+        if (!bucket)
+            continue;
+        const tick = document.createElement("span");
+        tick.className = "trendTick";
+        if (index === 0)
+            tick.classList.add("first");
+        if (index === buckets.length - 1)
+            tick.classList.add("last");
+        tick.style.gridColumn = `${index + 1}`;
+        tick.textContent = formatTrendTickLabel(index === buckets.length - 1 ? bucket.endAt : bucket.startAt);
+        axis.append(tick);
+    }
+    return axis;
+}
+function getTrendTickIndices(count) {
+    if (count <= 0)
+        return [];
+    const segmentCount = count >= 24 ? 4 : 3;
+    const indices = new Set();
+    for (let i = 0; i <= segmentCount; i += 1)
+        indices.add(Math.round((count - 1) * i / segmentCount));
+    return [...indices].sort((a, b) => a - b);
+}
+function syncContributionCallout(data, state) {
+    const root = document.getElementById("contributionCallout");
+    if (!root || !data) {
+        if (root)
+            root.hidden = true;
+        return;
+    }
+    const sampleCount = Number(data.sampleCount ?? 0);
+    root.hidden = !(state === "insufficient_data" || sampleCount < 5);
 }
 function showTrendTooltip(text) {
     trendTooltip.textContent = text;
