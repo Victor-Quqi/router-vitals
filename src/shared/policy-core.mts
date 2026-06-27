@@ -1,4 +1,4 @@
-export const PLUGIN_VERSION = "0.1.29";
+export const PLUGIN_VERSION = "0.1.30";
 
 export const TARGET_HOSTS = Object.freeze([
   "anyrouter.top",
@@ -294,8 +294,6 @@ export function createErrorHint(input: LooseInput | null | undefined): string | 
   const candidates = [
     input?.error_details?.message,
     input?.error?.message,
-    input?.message,
-    input?.last_assistant_message,
     typeof input?.error_details === "string" ? input.error_details : null,
     typeof input?.error === "string" ? input.error : null
   ];

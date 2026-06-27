@@ -174,6 +174,18 @@ test("extracts and sanitizes StopFailure error details", () => {
   assert.equal(sanitizeErrorHint("failed at C:\\Users\\Lenovo\\secret\\file.txt with token=abc123"), "failed at [path] with token=[secret]");
 });
 
+test("error hints only use explicit error fields", () => {
+  const input = {
+    status: "429",
+    message: "request text should stay local",
+    last_assistant_message: "assistant text should stay local"
+  };
+
+  assert.equal(extractErrorStatusCode(input), 429);
+  assert.equal(createErrorHint(input), null);
+  assert.equal(createErrorHint({ error: "API Error 503: overloaded" }), "API Error 503: overloaded");
+});
+
 test("report payload accepts optional sanitized error details", () => {
   const payload = {
     ok: false,
