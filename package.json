@@ -2,6 +2,7 @@
   "name": "router-vitals",
   "version": "0.1.0",
   "private": true,
+  "license": "MIT",
   "type": "module",
   "description": "Anonymous community status monitor for AnyRouter Claude Code usage.",
   "packageManager": "pnpm@11.6.0",
