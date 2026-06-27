@@ -23,6 +23,7 @@ import {
   getDailyAnonymousId,
   hasReachedDailyReportLimit,
   incrementContribution,
+  type LastDecision,
   loadState,
   recordPluginUpdateReminder,
   saveState,
@@ -70,11 +71,26 @@ interface CompletionDebug {
   modelResolution?: ModelResolution;
   payload?: Record<string, unknown>;
   posted?: boolean;
+  postResult?: Record<string, unknown>;
   updateReminder?: {
     latestPluginVersion: string;
     emitted: boolean;
   };
 }
+
+type CompletionEventName = "Stop" | "StopFailure";
+type CompletionSkipReason =
+  | "pending_not_target_matched"
+  | "reporting_disabled"
+  | "current_target_not_matched"
+  | "target_host_invalid"
+  | "local_daily_limit"
+  | "sampled_out"
+  | "payload_invalid";
+
+type PostReportResult =
+  | { ok: true; statusCode: number }
+  | { ok: false; reason: "timeout" | "http_error" | "network_error"; statusCode?: number };
 
 main().catch(() => {
   process.exit(0);
@@ -119,7 +135,7 @@ async function main() {
   if (eventName === "Stop" || eventName === "StopFailure") {
     const config = await loadRemoteConfig();
     const updateReminderMessage = createPluginUpdateReminderMessage(state, config);
-    const debug = await reportCompletion({ eventName, input, state, config, sessionKey });
+    const debug = await reportCompletion({ eventName: eventName as CompletionEventName, input, state, config, sessionKey });
     if (updateReminderMessage) {
       debug.updateReminder = {
         latestPluginVersion: config.latestPluginVersion,
@@ -191,7 +207,7 @@ async function reportCompletion({
   config,
   sessionKey
 }: {
-  eventName: string;
+  eventName: CompletionEventName;
   input: HookInput;
   state: PluginState;
   config: RemoteConfig;
@@ -204,17 +220,27 @@ async function reportCompletion({
     skipped: null
   };
 
-  if (!pending?.targetMatched) return { ...debug, skipped: "pending_not_target_matched" };
-  if (config.reportingEnabled === false) return { ...debug, skipped: "reporting_disabled" };
+  const skip = (reason: CompletionSkipReason, details: Partial<LastDecision> = {}): CompletionDebug => {
+    recordLastDecision(state, eventName, {
+      kind: "skipped",
+      reason,
+      ...(pending?.modelClass ? { modelClass: pending.modelClass } : {}),
+      ...details
+    });
+    return { ...debug, skipped: reason };
+  };
+
+  if (!pending?.targetMatched) return skip("pending_not_target_matched");
+  if (config.reportingEnabled === false) return skip("reporting_disabled");
   const currentMatch = matchTargetBaseUrl(process.env.ANTHROPIC_BASE_URL, config.targetBaseUrlHosts);
-  if (!currentMatch.matched) return { ...debug, skipped: "current_target_not_matched" };
+  if (!currentMatch.matched) return skip("current_target_not_matched");
   const targetHost = normalizeTargetHost(currentMatch.host);
-  if (!targetHost) return { ...debug, skipped: "target_host_invalid" };
-  if (hasReachedDailyReportLimit(state)) return { ...debug, skipped: "local_daily_limit" };
+  if (!targetHost) return skip("target_host_invalid");
+  if (hasReachedDailyReportLimit(state)) return skip("local_daily_limit", { targetHost });
 
   const ok = eventName === "Stop";
   const sampleRate = pickSampleRate(ok, config);
-  if (!shouldSample(sampleRate)) return { ...debug, skipped: "sampled_out" };
+  if (!shouldSample(sampleRate)) return skip("sampled_out", { targetHost });
 
   const anonymousId = await getDailyAnonymousId(state);
   const turnStartedAtMs = getTurnStartedAtMs([pending]);
@@ -249,14 +275,29 @@ async function reportCompletion({
 
   const validation = validateReportPayload(payload);
   debug.payload = summarizePayload(payload, validation.ok);
-  if (!validation.ok) return { ...debug, skipped: "payload_invalid" };
+  if (!validation.ok) return skip("payload_invalid", { modelClass, targetHost });
 
-  const posted = await postReport(config.apiBaseUrl, payload);
-  debug.posted = posted;
-  if (posted) {
+  const postResult = await postReport(config.apiBaseUrl, payload);
+  debug.posted = postResult.ok;
+  debug.postResult = summarizePostResult(postResult);
+  if (postResult.ok) {
+    recordLastDecision(state, eventName, {
+      kind: "reported",
+      reason: null,
+      modelClass,
+      targetHost
+    });
     state.lastPayload = payload;
     state.lastReportAt = new Date().toISOString();
     incrementContribution(state);
+  } else {
+    recordLastDecision(state, eventName, {
+      kind: "post_failed",
+      reason: postResult.reason,
+      modelClass,
+      targetHost,
+      ...(postResult.statusCode ? { postStatusCode: postResult.statusCode } : {})
+    });
   }
   return debug;
 }
@@ -271,10 +312,15 @@ function writeHookSystemMessage(systemMessage: string): void {
   console.log(JSON.stringify({ systemMessage }));
 }
 
-async function postReport(apiBaseUrl: string, payload: ReportPayload): Promise<boolean> {
+async function postReport(apiBaseUrl: string, payload: ReportPayload): Promise<PostReportResult> {
+  let timedOut = false;
+  let timeout: ReturnType<typeof setTimeout> | null = null;
   try {
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 3000);
+    timeout = setTimeout(() => {
+      timedOut = true;
+      controller.abort();
+    }, 3000);
     const response = await fetch(`${apiBaseUrl.replace(/\/+$/, "")}/v1/report`, {
       method: "POST",
       signal: controller.signal,
@@ -284,11 +330,33 @@ async function postReport(apiBaseUrl: string, payload: ReportPayload): Promise<b
       },
       body: JSON.stringify(payload)
     });
-    clearTimeout(timeout);
-    return response.ok;
+    if (response.ok) return { ok: true, statusCode: response.status };
+    return { ok: false, reason: "http_error", statusCode: response.status };
   } catch {
-    return false;
+    return { ok: false, reason: timedOut ? "timeout" : "network_error" };
+  } finally {
+    if (timeout) clearTimeout(timeout);
   }
+}
+
+function recordLastDecision(
+  state: PluginState,
+  eventName: CompletionEventName,
+  decision: Omit<LastDecision, "at" | "eventName">
+): void {
+  state.lastDecision = {
+    at: new Date().toISOString(),
+    eventName,
+    ...decision
+  };
+}
+
+function summarizePostResult(result: PostReportResult): Record<string, unknown> {
+  return {
+    ok: result.ok,
+    ...(result.ok ? { statusCode: result.statusCode } : { reason: result.reason }),
+    ...(!result.ok && result.statusCode ? { statusCode: result.statusCode } : {})
+  };
 }
 
 function getTurnStartedAtMs(turns: Array<TurnState | undefined>): number | null {

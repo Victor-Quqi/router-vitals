@@ -1,7 +1,7 @@
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
-import { LOCAL_DAILY_REPORT_LIMIT, MODEL_CLASSES, PLUGIN_VERSION, createAnonymousId, getTodayKey, isPluginVersionNewer, validateReportPayload } from "./policy.mjs";
+import { LOCAL_DAILY_REPORT_LIMIT, MODEL_CLASSES, PLUGIN_VERSION, createAnonymousId, getTodayKey, isPluginVersionNewer, normalizeTargetHost, validateReportPayload } from "./policy.mjs";
 const STATE_VERSION = 1;
 const STATE_DIR_NAME = "anyrouter-status-monitor";
 const STATE_FILE_NAME = "state.json";
@@ -108,7 +108,8 @@ function normalizeState(value, now = new Date()) {
         contributions: normalizeContributions(record.contributions, now),
         updateReminder: normalizeUpdateReminder(record.updateReminder),
         lastPayload: normalizeLastPayload(record.lastPayload),
-        lastReportAt: typeof record.lastReportAt === "string" ? record.lastReportAt : null
+        lastReportAt: typeof record.lastReportAt === "string" ? record.lastReportAt : null,
+        lastDecision: normalizeLastDecision(record.lastDecision)
     };
 }
 function normalizeAnonymous(value) {
@@ -135,6 +136,37 @@ function normalizeUpdateReminder(value) {
         latestPluginVersion: value.latestPluginVersion,
         remindedAtMs: value.remindedAtMs
     };
+}
+function normalizeLastDecision(value) {
+    if (!isRecord(value))
+        return null;
+    if (typeof value.at !== "string" || Number.isNaN(Date.parse(value.at)))
+        return null;
+    if (value.eventName !== "Stop" && value.eventName !== "StopFailure")
+        return null;
+    if (value.kind !== "reported" && value.kind !== "skipped" && value.kind !== "post_failed")
+        return null;
+    if (value.reason !== null && !isReasonCode(value.reason))
+        return null;
+    const result = {
+        at: value.at,
+        eventName: value.eventName,
+        kind: value.kind,
+        reason: value.reason
+    };
+    if (typeof value.modelClass === "string" && MODEL_CLASSES.includes(value.modelClass)) {
+        result.modelClass = value.modelClass;
+    }
+    const targetHost = normalizeTargetHost(value.targetHost);
+    if (targetHost)
+        result.targetHost = targetHost;
+    if (typeof value.postStatusCode === "number" && Number.isInteger(value.postStatusCode) && value.postStatusCode >= 400 && value.postStatusCode <= 599) {
+        result.postStatusCode = value.postStatusCode;
+    }
+    return result;
+}
+function isReasonCode(value) {
+    return typeof value === "string" && /^[a-z0-9_]{1,64}$/.test(value);
 }
 function normalizeTurnMap(value, nowMs) {
     if (!value || typeof value !== "object" || Array.isArray(value))

@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { loadRemoteConfig } from "./lib/config.mjs";
 import { LOCAL_DAILY_REPORT_LIMIT, isPluginVersionNewer, matchTargetBaseUrl } from "./lib/policy.mjs";
-import { getTodayContributions, loadState, loadStatusCache, saveStatusCache } from "./lib/state.mjs";
+import { getTodayContributions, loadState, loadStatusCache, saveStatusCache, type LastDecision } from "./lib/state.mjs";
 
 const STATUS_CACHE_TTL_MS = 60 * 1000;
 
@@ -21,7 +21,11 @@ async function main() {
   const updateHint = formatUpdateHint(config.latestPluginVersion);
 
   if (!target.matched) {
-    const detail = updateHint || `贡献暂停 · ${formatContributionCount(count)}`;
+    const detail = updateHint || `${formatContributionStatus({
+      reportingEnabled: config.reportingEnabled,
+      count,
+      lastDecision: state.lastDecision
+    })} · ${formatContributionCount(count)}`;
     console.log(`Any Router 近 60m 状态: 未匹配目标站 · ${detail}`);
     return;
   }
@@ -33,7 +37,11 @@ async function main() {
     return;
   }
 
-  const contributionText = config.reportingEnabled === false ? "贡献暂停" : "贡献开启";
+  const contributionText = formatContributionStatus({
+    reportingEnabled: config.reportingEnabled,
+    count,
+    lastDecision: state.lastDecision
+  });
   console.log(`Any Router 近 60m 状态: ${statusText} · ${contributionText} · ${formatContributionCount(count)}`);
 }
 
@@ -77,8 +85,37 @@ function formatStatus(status: StatusSummary | null): string {
 }
 
 function formatContributionCount(count: number): string {
-  if (count >= LOCAL_DAILY_REPORT_LIMIT) return `今日贡献 ${count}/${LOCAL_DAILY_REPORT_LIMIT} 条 · 今日已满`;
   return `今日贡献 ${count} 条`;
+}
+
+function formatContributionStatus({
+  reportingEnabled,
+  count,
+  lastDecision
+}: {
+  reportingEnabled: boolean;
+  count: number;
+  lastDecision: LastDecision | null;
+}): string {
+  if (count >= LOCAL_DAILY_REPORT_LIMIT) return "今日贡献已满";
+  if (!reportingEnabled) return "贡献暂停";
+  if (isRecentPostFailure(lastDecision)) return `本机上报失败${formatPostFailureSuffix(lastDecision)}`;
+  return "贡献开启";
+}
+
+function isRecentPostFailure(decision: LastDecision | null): decision is LastDecision {
+  if (!decision || decision.kind !== "post_failed") return false;
+  const atMs = Date.parse(decision.at);
+  if (!Number.isFinite(atMs)) return false;
+  return atMs >= Date.now() - 24 * 60 * 60 * 1000;
+}
+
+function formatPostFailureSuffix(decision: LastDecision): string {
+  if (decision.reason === "timeout") return ": 超时";
+  if (decision.reason === "network_error") return ": 网络";
+  if (decision.reason === "http_error" && decision.postStatusCode) return `: HTTP ${decision.postStatusCode}`;
+  if (decision.reason === "http_error") return ": HTTP";
+  return "";
 }
 
 function formatUpdateHint(latestPluginVersion: string): string | null {

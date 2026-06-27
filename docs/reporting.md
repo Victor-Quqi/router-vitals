@@ -19,7 +19,7 @@ Any Router 入口：
 - 主站直连
 - 大陆优化
 
-下面这些情况直接跳过：`ANTHROPIC_BASE_URL` 为空、格式无效、host 不在内置端点里；开始时命中、结束时已经切到别的 host；这轮缺 `UserPromptSubmit` 起点；采样没命中；上报 API 临时不可用。
+下面这些情况直接跳过：`ANTHROPIC_BASE_URL` 为空、格式无效、host 不在内置端点里；开始时命中、结束时已经切到别的 host；这轮缺 `UserPromptSubmit` 起点；采样没命中。上报 API 临时不可用时，本轮不会计入贡献，插件会在本地状态里记录最近一次上报失败原因。
 
 ## 上报哪些内容
 
@@ -64,6 +64,6 @@ node plugin/scripts/preview.mjs
 node plugin/scripts/statusline.mjs
 ```
 
-statusLine 只是展示层，hooks 照常独立运行。这里不做定时轮询；`近 60m 状态` 本地缓存 60 秒。有新版时 statusLine 优先显示更新提示；没配 statusLine 时，hooks 会低频发 Claude Code 系统消息。
+statusLine 只是展示层，hooks 照常独立运行。这里不做定时轮询；`近 60m 状态` 本地缓存 60 秒。有新版时 statusLine 优先显示更新提示；没配 statusLine 时，hooks 会低频发 Claude Code 系统消息。最近一次本机上报失败时，statusLine 会显示短提示，详细原因用诊断脚本查看。
 
 Claude Code 当前只接受一个 `statusLine` 命令。`setup-statusline.mjs` 检测到已有非本插件 statusLine 时，交互终端会询问是否直接替换；非交互环境默认不覆盖。若要同时显示多个状态源，请自行编写 wrapper，或使用第三方 statusLine 聚合工具。

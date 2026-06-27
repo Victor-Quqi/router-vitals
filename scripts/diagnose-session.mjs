@@ -74,6 +74,9 @@ function printHookEvents(records) {
       if (record.data?.payload) {
         const payload = record.data.payload;
         console.log(`    payload: ok=${payload.ok} model=${payload.modelClass} error=${payload.errorType} status=${payload.errorStatusCode ?? "null"} target=${payload.targetHost || "unknown"} posted=${record.data?.posted ?? "unknown"}`);
+        if (record.data?.postResult) {
+          console.log(`    post result: ${formatPostResult(record.data.postResult)}`);
+        }
       }
       printModelEvidence("model resolution", {
         modelClass: resolution.modelClass || "unknown",
@@ -380,6 +383,14 @@ function previewText(value) {
 function formatTurn(turn) {
   if (!turn) return "none";
   return JSON.stringify(turn);
+}
+
+function formatPostResult(result) {
+  if (!result || typeof result !== "object") return "unknown";
+  if (result.ok === true) return `ok status=${result.statusCode ?? "unknown"}`;
+  const parts = [`failed reason=${result.reason || "unknown"}`];
+  if (result.statusCode) parts.push(`status=${result.statusCode}`);
+  return parts.join(" ");
 }
 
 function formatRecordType(record) {

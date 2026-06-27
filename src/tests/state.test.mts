@@ -92,6 +92,15 @@ test("loadState prunes stale local counters and turn state", async () => {
       latestPluginVersion: "9.9.9",
       remindedAtMs: freshMs
     },
+    lastDecision: {
+      at: new Date(freshMs).toISOString(),
+      eventName: "Stop",
+      kind: "post_failed",
+      reason: "http_error",
+      modelClass: "sonnet",
+      targetHost: "anyrouter.top",
+      postStatusCode: 503
+    },
     lastPayload: {
       ok: true,
       errorType: "none",
@@ -123,6 +132,15 @@ test("loadState prunes stale local counters and turn state", async () => {
       assert.deepEqual(state.updateReminder, {
         latestPluginVersion: "9.9.9",
         remindedAtMs: freshMs
+      });
+      assert.deepEqual(state.lastDecision, {
+        at: new Date(freshMs).toISOString(),
+        eventName: "Stop",
+        kind: "post_failed",
+        reason: "http_error",
+        modelClass: "sonnet",
+        targetHost: "anyrouter.top",
+        postStatusCode: 503
       });
       assert.equal(state.lastPayload, null);
     });

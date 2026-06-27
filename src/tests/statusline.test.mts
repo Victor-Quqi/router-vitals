@@ -53,8 +53,72 @@ test("statusLine shows a full daily contribution hint", async () => {
       ANYROUTER_STATUS_STATE_DIR: stateDir,
       ANTHROPIC_BASE_URL: "https://api.anthropic.com"
     });
-    assert.match(output, new RegExp(`今日贡献 ${LOCAL_DAILY_REPORT_LIMIT}/${LOCAL_DAILY_REPORT_LIMIT} 条 · 今日已满`));
+    assert.match(output, /今日贡献已满/);
+    assert.match(output, new RegExp(`今日贡献 ${LOCAL_DAILY_REPORT_LIMIT} 条`));
+    assert.doesNotMatch(output, new RegExp(`${LOCAL_DAILY_REPORT_LIMIT}/${LOCAL_DAILY_REPORT_LIMIT}`));
   } finally {
+    await rm(stateDir, { recursive: true, force: true });
+  }
+});
+
+test("statusLine shows recent local report failures", async () => {
+  const stateDir = await mkdtemp(join(tmpdir(), "router-vitals-statusline-"));
+  const statePath = join(stateDir, "anyrouter-status-monitor", "state.json");
+  const server = createServer((req, res) => {
+    if (req.method === "GET" && req.url === "/config.json") {
+      const base = `http://127.0.0.1:${serverPort(server)}`;
+      respondJson(res, {
+        reportingEnabled: true,
+        apiBaseUrl: base,
+        targetBaseUrlHosts: ["anyrouter.top", "a-ocnfniawgw.cn-shanghai.fcapp.run"],
+        sampleRateSuccess: 1,
+        sampleRateFailure: 1,
+        minPluginVersion: "0.1.0",
+        latestPluginVersion: "0.1.0",
+        statusWindows: ["60m"]
+      });
+      return;
+    }
+
+    if (req.method === "GET" && req.url === "/v1/status?window=60m") {
+      respondJson(res, { state: "available", label: "可用" });
+      return;
+    }
+
+    res.writeHead(404);
+    res.end();
+  });
+
+  await mkdir(dirname(statePath), { recursive: true });
+  await writeFile(statePath, JSON.stringify({
+    version: 1,
+    contributions: { [getTodayKey()]: 2 },
+    lastDecision: {
+      at: new Date().toISOString(),
+      eventName: "Stop",
+      kind: "post_failed",
+      reason: "http_error",
+      modelClass: "sonnet",
+      targetHost: "anyrouter.top",
+      postStatusCode: 503
+    }
+  }), "utf8");
+
+  await listen(server);
+
+  try {
+    const output = await runStatusLine({
+      ...process.env,
+      ANYROUTER_STATUS_STATE_DIR: stateDir,
+      ANYROUTER_STATUS_CONFIG_URL: `http://127.0.0.1:${serverPort(server)}/config.json`,
+      ANTHROPIC_BASE_URL: "https://anyrouter.top"
+    });
+
+    assert.match(output, /Any Router 近 60m 状态: 可用/);
+    assert.match(output, /本机上报失败: HTTP 503/);
+    assert.match(output, /今日贡献 2 条/);
+  } finally {
+    server.close();
     await rm(stateDir, { recursive: true, force: true });
   }
 });

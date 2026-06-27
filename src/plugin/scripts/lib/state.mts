@@ -8,9 +8,11 @@ import {
   createAnonymousId,
   getTodayKey,
   isPluginVersionNewer,
+  normalizeTargetHost,
   validateReportPayload,
   type ModelClass,
-  type ReportPayload
+  type ReportPayload,
+  type TargetHost
 } from "./policy.mjs";
 
 const STATE_VERSION = 1;
@@ -39,6 +41,18 @@ export interface UpdateReminderState {
   remindedAtMs: number;
 }
 
+export type LastDecisionKind = "reported" | "skipped" | "post_failed";
+
+export interface LastDecision {
+  at: string;
+  eventName: "Stop" | "StopFailure";
+  kind: LastDecisionKind;
+  reason: string | null;
+  modelClass?: ModelClass;
+  targetHost?: TargetHost;
+  postStatusCode?: number;
+}
+
 export interface PluginState {
   version: number;
   anonymous: AnonymousState | null;
@@ -48,6 +62,7 @@ export interface PluginState {
   updateReminder: UpdateReminderState | null;
   lastPayload: ReportPayload | null;
   lastReportAt: string | null;
+  lastDecision: LastDecision | null;
 }
 
 export interface StatusCache {
@@ -160,7 +175,8 @@ function normalizeState(value: unknown, now = new Date()): PluginState {
     contributions: normalizeContributions(record.contributions, now),
     updateReminder: normalizeUpdateReminder(record.updateReminder),
     lastPayload: normalizeLastPayload(record.lastPayload),
-    lastReportAt: typeof record.lastReportAt === "string" ? record.lastReportAt : null
+    lastReportAt: typeof record.lastReportAt === "string" ? record.lastReportAt : null,
+    lastDecision: normalizeLastDecision(record.lastDecision)
   };
 }
 
@@ -184,6 +200,38 @@ function normalizeUpdateReminder(value: unknown): UpdateReminderState | null {
     latestPluginVersion: value.latestPluginVersion,
     remindedAtMs: value.remindedAtMs
   };
+}
+
+function normalizeLastDecision(value: unknown): LastDecision | null {
+  if (!isRecord(value)) return null;
+  if (typeof value.at !== "string" || Number.isNaN(Date.parse(value.at))) return null;
+  if (value.eventName !== "Stop" && value.eventName !== "StopFailure") return null;
+  if (value.kind !== "reported" && value.kind !== "skipped" && value.kind !== "post_failed") return null;
+  if (value.reason !== null && !isReasonCode(value.reason)) return null;
+
+  const result: LastDecision = {
+    at: value.at,
+    eventName: value.eventName,
+    kind: value.kind,
+    reason: value.reason
+  };
+
+  if (typeof value.modelClass === "string" && MODEL_CLASSES.includes(value.modelClass as ModelClass)) {
+    result.modelClass = value.modelClass as ModelClass;
+  }
+
+  const targetHost = normalizeTargetHost(value.targetHost);
+  if (targetHost) result.targetHost = targetHost;
+
+  if (typeof value.postStatusCode === "number" && Number.isInteger(value.postStatusCode) && value.postStatusCode >= 400 && value.postStatusCode <= 599) {
+    result.postStatusCode = value.postStatusCode;
+  }
+
+  return result;
+}
+
+function isReasonCode(value: unknown): value is string {
+  return typeof value === "string" && /^[a-z0-9_]{1,64}$/.test(value);
 }
 
 function normalizeTurnMap(value: unknown, nowMs: number): Record<string, TurnState> {

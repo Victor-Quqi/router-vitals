@@ -19,7 +19,7 @@ Any Router targets:
 - Main endpoint
 - Mainland-optimized endpoint
 
-These cases are skipped: empty or invalid `ANTHROPIC_BASE_URL`, non-target hosts, target matched at turn start but changed before turn end, missing `UserPromptSubmit`, sampling miss, or temporary report API failure.
+These cases are skipped: empty or invalid `ANTHROPIC_BASE_URL`, non-target hosts, target matched at turn start but changed before turn end, missing `UserPromptSubmit`, or sampling miss. If the report API is temporarily unavailable, the turn is not counted as a contribution and the plugin records the most recent local report failure reason.
 
 ## What is reported
 
@@ -64,6 +64,6 @@ Test statusLine output:
 node plugin/scripts/statusline.mjs
 ```
 
-statusLine is display-only; hooks keep running independently. There is no interval polling; `近 60m 状态` is cached locally for 60 seconds. Update hints prefer statusLine, and fall back to low-frequency Claude Code system messages when statusLine is not configured.
+statusLine is display-only; hooks keep running independently. There is no interval polling; `近 60m 状态` is cached locally for 60 seconds. Update hints prefer statusLine, and fall back to low-frequency Claude Code system messages when statusLine is not configured. When the most recent local report attempt failed, statusLine shows a short hint; use the diagnosis script for details.
 
 Claude Code currently accepts one `statusLine` command. When `setup-statusline.mjs` detects an unrelated existing statusLine, an interactive terminal asks before replacing it; non-interactive runs keep the existing command. To show multiple status sources, use your own wrapper or a third-party statusLine aggregator.

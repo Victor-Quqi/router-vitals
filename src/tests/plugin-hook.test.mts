@@ -475,6 +475,68 @@ test("plugin hook skips uploads after the local daily contribution limit", async
     await runHook("Stop", { session_id: "session-limit" }, commonEnv);
 
     assert.equal(received.length, 0);
+    const state = JSON.parse(await readFile(statePath, "utf8"));
+    assert.equal(state.lastDecision.kind, "skipped");
+    assert.equal(state.lastDecision.reason, "local_daily_limit");
+    assert.equal(state.lastDecision.targetHost, "anyrouter.top");
+  } finally {
+    server.close();
+    await rm(stateDir, { recursive: true, force: true });
+  }
+});
+
+test("plugin hook records structured report failures", async () => {
+  let reportRequests = 0;
+  const server = createServer((req, res) => {
+    if (req.method === "GET" && req.url === "/config.json") {
+      const base = `http://127.0.0.1:${serverPort(server)}`;
+      respondJson(res, {
+        reportingEnabled: true,
+        apiBaseUrl: base,
+        targetBaseUrlHosts: ["anyrouter.top", "a-ocnfniawgw.cn-shanghai.fcapp.run"],
+        sampleRateSuccess: 1,
+        sampleRateFailure: 1,
+        minPluginVersion: "0.1.0",
+        statusWindows: ["5m", "15m", "60m"]
+      });
+      return;
+    }
+
+    if (req.method === "POST" && req.url === "/v1/report") {
+      reportRequests += 1;
+      res.writeHead(503, { "content-type": "application/json; charset=utf-8" });
+      res.end(JSON.stringify({ error: "temporarily_unavailable" }));
+      return;
+    }
+
+    res.writeHead(404);
+    res.end();
+  });
+
+  await listen(server);
+  const stateDir = await mkdtemp(join(tmpdir(), "router-vitals-post-failure-"));
+  const statePath = join(stateDir, "anyrouter-status-monitor", "state.json");
+
+  try {
+    const commonEnv = {
+      ...process.env,
+      ANYROUTER_STATUS_STATE_DIR: stateDir,
+      ANYROUTER_STATUS_CONFIG_URL: `http://127.0.0.1:${serverPort(server)}/config.json`,
+      ANTHROPIC_BASE_URL: "https://anyrouter.top"
+    };
+
+    await runHook("UserPromptSubmit", { session_id: "session-post-failure" }, commonEnv);
+    await runHook("Stop", { session_id: "session-post-failure" }, commonEnv);
+
+    const state = JSON.parse(await readFile(statePath, "utf8"));
+    assert.equal(reportRequests, 1);
+    assert.equal(state.contributions?.[getTodayKey()] ?? 0, 0);
+    assert.equal(state.lastPayload, null);
+    assert.equal(state.lastReportAt, null);
+    assert.equal(state.lastDecision.kind, "post_failed");
+    assert.equal(state.lastDecision.reason, "http_error");
+    assert.equal(state.lastDecision.postStatusCode, 503);
+    assert.equal(state.lastDecision.targetHost, "anyrouter.top");
   } finally {
     server.close();
     await rm(stateDir, { recursive: true, force: true });
