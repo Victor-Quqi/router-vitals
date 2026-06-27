@@ -200,6 +200,9 @@ function normalizeTurnState(value) {
     if (typeof value.modelClass === "string" && MODEL_CLASSES.includes(value.modelClass)) {
         result.modelClass = value.modelClass;
     }
+    if (typeof value.promptCount === "number" && Number.isInteger(value.promptCount) && value.promptCount >= 0) {
+        result.promptCount = value.promptCount;
+    }
     return Object.keys(result).length > 0 ? result : null;
 }
 function getTurnUpdatedAtMs(turn) {

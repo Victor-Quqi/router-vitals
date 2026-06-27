@@ -20,6 +20,7 @@ export function summarizeTurnState(turn) {
         ...(typeof turn.updatedAtMs === "number" ? { updatedAtMs: turn.updatedAtMs } : {}),
         ...(typeof turn.transcriptStartOffset === "number" ? { transcriptStartOffset: turn.transcriptStartOffset } : {}),
         ...(typeof turn.targetMatched === "boolean" ? { targetMatched: turn.targetMatched } : {}),
+        ...(typeof turn.promptCount === "number" ? { promptCount: turn.promptCount } : {}),
         ...(turn.modelClass ? { modelClass: turn.modelClass } : {})
     };
 }

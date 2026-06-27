@@ -102,6 +102,19 @@ export async function resolvePromptStartModelClass(
 
   const transcript = await inspectPromptStartTranscript(input, transcriptStartOffset);
   if (!transcript.inspected) {
+    const sessionModelClass = session?.modelClass;
+    const firstPromptSessionModelClass = session?.promptCount === 0 && sessionModelClass && sessionModelClass !== "unknown"
+      ? sessionModelClass
+      : "unknown";
+    if (firstPromptSessionModelClass !== "unknown") {
+      return {
+        modelClass: firstPromptSessionModelClass,
+        source: "session",
+        directInputModelClass: direct,
+        transcript
+      };
+    }
+
     return {
       modelClass: "unknown",
       source: "unknown",

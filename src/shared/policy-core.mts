@@ -1,4 +1,4 @@
-export const PLUGIN_VERSION = "0.1.30";
+export const PLUGIN_VERSION = "0.1.31";
 
 export const TARGET_HOSTS = Object.freeze([
   "anyrouter.top",

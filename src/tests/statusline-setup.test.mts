@@ -7,6 +7,7 @@ import { dirname, join, resolve } from "node:path";
 
 const setupPath = resolve("plugin/scripts/setup-statusline.mjs");
 const pluginId = "anyrouter-status-monitor@router-vitals";
+const pluginDataDirName = "anyrouter-status-monitor-router-vitals";
 
 test("setup writes a stable launcher and statusLine setting", async () => {
   const claudeHome = await mkdtemp(join(tmpdir(), "router-vitals-setup-"));
@@ -64,7 +65,7 @@ test("stable launcher runs the latest installed plugin statusLine", async () => 
 test("stable launcher passes plugin data to statusLine", async () => {
   const claudeHome = await mkdtemp(join(tmpdir(), "router-vitals-launcher-data-"));
   const pluginRoot = join(claudeHome, "plugins", "cache", "router-vitals", "anyrouter-status-monitor", "0.1.0");
-  const expectedDataDir = join(claudeHome, "plugins", "data", pluginId);
+  const expectedDataDir = join(claudeHome, "plugins", "data", pluginDataDirName);
 
   try {
     await writeFakeStatuslineSource(pluginRoot, "console.log(process.env.CLAUDE_PLUGIN_DATA || '');\n");

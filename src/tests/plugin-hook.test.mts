@@ -368,6 +368,81 @@ test("plugin hook debug log records model resolution evidence", async () => {
   }
 });
 
+test("plugin hook uses session model only for the first prompt when transcript is unavailable", async () => {
+  const received: Array<Record<string, any>> = [];
+  const server = createServer((req, res) => {
+    if (req.method === "GET" && req.url === "/config.json") {
+      const base = `http://127.0.0.1:${serverPort(server)}`;
+      respondJson(res, {
+        reportingEnabled: true,
+        apiBaseUrl: base,
+        targetBaseUrlHosts: ["anyrouter.top", "a-ocnfniawgw.cn-shanghai.fcapp.run"],
+        sampleRateSuccess: 1,
+        sampleRateFailure: 1,
+        minPluginVersion: "0.1.0",
+        statusWindows: ["5m", "15m", "60m"]
+      });
+      return;
+    }
+
+    if (req.method === "POST" && req.url === "/v1/report") {
+      const chunks: Buffer[] = [];
+      req.on("data", (chunk) => chunks.push(chunk));
+      req.on("end", () => {
+        received.push(JSON.parse(Buffer.concat(chunks).toString("utf8")));
+        respondJson(res, { ok: true });
+      });
+      return;
+    }
+
+    res.writeHead(404);
+    res.end();
+  });
+
+  await listen(server);
+  const stateDir = await mkdtemp(join(tmpdir(), "router-vitals-unavailable-transcript-"));
+
+  try {
+    const commonEnv = {
+      ...process.env,
+      ANYROUTER_STATUS_STATE_DIR: stateDir,
+      ANYROUTER_STATUS_CONFIG_URL: `http://127.0.0.1:${serverPort(server)}/config.json`,
+      ANTHROPIC_BASE_URL: "https://anyrouter.top"
+    };
+    const transcript = join(stateDir, "session-unavailable-transcript.jsonl");
+
+    await runHook("SessionStart", { session_id: "session-unavailable-transcript", model: "claude-opus-4-8[1m]" }, commonEnv);
+    await runHook("UserPromptSubmit", { session_id: "session-unavailable-transcript" }, commonEnv);
+    await writeTranscriptRecords(transcript, [createSyntheticAssistantErrorRecord(429)]);
+    await runHook("StopFailure", {
+      session_id: "session-unavailable-transcript",
+      transcript_path: transcript,
+      status_code: 429,
+      message: "rate_limit"
+    }, commonEnv);
+
+    assert.equal(received.length, 1);
+    assert.equal(received[0]!.modelClass, "opus");
+    assert.equal(received[0]!.errorType, "rate_limited");
+
+    await runHook("UserPromptSubmit", { session_id: "session-unavailable-transcript" }, commonEnv);
+    await writeTranscriptRecords(transcript, [createSyntheticAssistantErrorRecord(429)]);
+    await runHook("StopFailure", {
+      session_id: "session-unavailable-transcript",
+      transcript_path: transcript,
+      status_code: 429,
+      message: "rate_limit"
+    }, commonEnv);
+
+    assert.equal(received.length, 2);
+    assert.equal(received[1]!.modelClass, "unknown");
+    assert.equal(received[1]!.errorType, "rate_limited");
+  } finally {
+    server.close();
+    await rm(stateDir, { recursive: true, force: true });
+  }
+});
+
 test("plugin hook emits low-frequency update reminders", async () => {
   const server = createServer((req, res) => {
     if (req.method === "GET" && req.url === "/config.json") {
@@ -554,7 +629,7 @@ async function writeTranscriptRecords(path: string, records: Array<Record<string
 function createAssistantModelRecord(model: string, timestamp?: string): Record<string, unknown> {
   return {
     type: "assistant",
-    timestamp: timestamp || new Date().toISOString(),
+    timestamp: timestamp || new Date(Date.now() + 1000).toISOString(),
     message: {
       role: "assistant",
       model
@@ -596,7 +671,7 @@ function createUserModelSetOutputRecord(text: string): Record<string, unknown> {
 function createSyntheticAssistantErrorRecord(statusCode: number): Record<string, unknown> {
   return {
     type: "assistant",
-    timestamp: new Date().toISOString(),
+    timestamp: new Date(Date.now() + 1000).toISOString(),
     message: {
       role: "assistant",
       model: "<synthetic>",

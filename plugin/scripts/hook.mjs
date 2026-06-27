@@ -76,6 +76,7 @@ function recordSessionStart(state, sessionKey, input) {
     const modelClass = classifyModel(input);
     state.sessions[sessionKey] = {
         modelClass,
+        promptCount: 0,
         updatedAtMs: Date.now()
     };
     return modelClass;
@@ -86,12 +87,13 @@ async function recordPromptStart(state, sessionKey, input) {
     const sessionBefore = state.sessions[sessionKey];
     const resolution = await resolvePromptStartModelClass(input, sessionBefore, transcriptStartOffset);
     const modelClass = resolution.modelClass;
-    if (modelClass !== "unknown") {
-        state.sessions[sessionKey] = {
-            modelClass,
-            updatedAtMs: Date.now()
-        };
-    }
+    const promptCount = (sessionBefore?.promptCount ?? 0) + 1;
+    state.sessions[sessionKey] = {
+        ...(sessionBefore?.modelClass ? { modelClass: sessionBefore.modelClass } : {}),
+        ...(modelClass !== "unknown" ? { modelClass } : {}),
+        promptCount,
+        updatedAtMs: Date.now()
+    };
     state.pending[sessionKey] = {
         startedAtMs: Date.now(),
         targetMatched: match.matched === true,
@@ -152,6 +154,7 @@ async function reportCompletion({ eventName, input, state, config, sessionKey })
     if (modelClass !== "unknown") {
         state.sessions[sessionKey] = {
             modelClass,
+            ...(state.sessions[sessionKey]?.promptCount !== undefined ? { promptCount: state.sessions[sessionKey].promptCount } : {}),
             updatedAtMs: Date.now()
         };
     }

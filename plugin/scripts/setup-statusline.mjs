@@ -5,6 +5,7 @@ import { dirname, join, resolve } from "node:path";
 import { createInterface } from "node:readline/promises";
 import { fileURLToPath } from "node:url";
 const PLUGIN_ID = "anyrouter-status-monitor@router-vitals";
+const PLUGIN_DATA_DIR_NAME = "anyrouter-status-monitor-router-vitals";
 const LAUNCHER_FILE_NAME = "router-vitals-statusline.mjs";
 main().catch((error) => {
     console.error(`statusLine 设置失败: ${getErrorMessage(error)}`);
@@ -109,6 +110,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 
 const PLUGIN_ID = ${JSON.stringify(PLUGIN_ID)};
+const PLUGIN_DATA_DIR_NAME = ${JSON.stringify(PLUGIN_DATA_DIR_NAME)};
 const FALLBACK_INSTALL_PATH = ${JSON.stringify(fallbackInstallPath)};
 
 main().catch(() => {
@@ -199,7 +201,7 @@ function getClaudeHome() {
 }
 
 function getPluginDataDir() {
-  return process.env.CLAUDE_PLUGIN_DATA || join(getClaudeHome(), "plugins", "data", PLUGIN_ID);
+  return process.env.CLAUDE_PLUGIN_DATA || join(getClaudeHome(), "plugins", "data", PLUGIN_DATA_DIR_NAME);
 }
 
 function dedupe(values) {

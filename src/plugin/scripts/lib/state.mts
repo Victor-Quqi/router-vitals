@@ -33,6 +33,7 @@ export interface TurnState {
   transcriptStartOffset?: number;
   targetMatched?: boolean;
   modelClass?: ModelClass;
+  promptCount?: number;
   updatedAtMs?: number;
 }
 
@@ -259,6 +260,9 @@ function normalizeTurnState(value: unknown): TurnState | null {
   if (typeof value.targetMatched === "boolean") result.targetMatched = value.targetMatched;
   if (typeof value.modelClass === "string" && MODEL_CLASSES.includes(value.modelClass as ModelClass)) {
     result.modelClass = value.modelClass as ModelClass;
+  }
+  if (typeof value.promptCount === "number" && Number.isInteger(value.promptCount) && value.promptCount >= 0) {
+    result.promptCount = value.promptCount;
   }
   return Object.keys(result).length > 0 ? result : null;
 }
