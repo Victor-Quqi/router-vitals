@@ -10,6 +10,8 @@ Install it and you're done. The plugin never touches the requests you send upstr
 
 Status page: https://router-vitals.pages.dev/
 
+![Status page preview](docs/assets/status-page-preview.png)
+
 Thanks to the [LINUX DO](https://linux.do/) community for the support.
 
 ## Install

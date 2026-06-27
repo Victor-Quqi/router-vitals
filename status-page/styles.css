@@ -329,6 +329,17 @@ article span {
   font-size: 15px;
 }
 
+.stateDetail a {
+  color: var(--text);
+  text-decoration-color: rgb(139 148 158 / 48%);
+  text-underline-offset: 3px;
+}
+
+.stateDetail a:hover,
+.stateDetail a:focus-visible {
+  color: var(--link-hover);
+}
+
 .updated {
   margin-top: 6px;
 }
@@ -548,54 +559,6 @@ article em {
   color: var(--muted);
   font-size: 13px;
   font-style: normal;
-}
-
-.contributionCallout {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 14px;
-  margin-top: 18px;
-  padding: 14px 16px;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  background: var(--panel-2);
-}
-
-.contributionCallout[hidden] {
-  display: none;
-}
-
-.contributionCallout strong {
-  display: block;
-  font-size: 14px;
-  letter-spacing: 0;
-}
-
-.contributionCallout a {
-  flex: 0 0 auto;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-height: 32px;
-  padding: 0 13px;
-  border: 1px solid rgb(47 129 247 / 42%);
-  border-radius: 999px;
-  background: rgb(47 129 247 / 12%);
-  color: var(--text);
-  font-size: 13px;
-  text-decoration: none;
-}
-
-.contributionCallout a:hover,
-.contributionCallout a:focus-visible {
-  background: rgb(47 129 247 / 18%);
-  color: var(--link-hover);
-  outline: none;
-}
-
-.contributionCallout a:focus-visible {
-  box-shadow: 0 0 0 3px var(--focus-ring);
 }
 
 .help {
@@ -1233,14 +1196,4 @@ footer a:focus-visible {
     padding: 0 2px 8px;
   }
 
-  .contributionCallout {
-    align-items: stretch;
-    flex-direction: column;
-    gap: 12px;
-    margin-top: 14px;
-  }
-
-  .contributionCallout a {
-    width: 100%;
-  }
 }

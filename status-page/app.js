@@ -233,7 +233,7 @@ function render(data) {
     const state = normalizeServiceState(data.state);
     syncSelectedTrendBucket(data);
     setText("state", labels[state] || "状态暂缺");
-    setText("stateDetail", formatStateDetail(data));
+    renderStateDetail(data, state);
     setText("updatedAt", formatUpdatedAt(data.generatedAt));
     setText("availability", formatPercent(data.availability));
     setText("sampleCount", String(data.sampleCount ?? "--"));
@@ -243,7 +243,6 @@ function render(data) {
     setText("assistantStartDetail", formatAssistantStartDetail(data.assistantStart, data.successCount));
     const stateNode = getElement("state");
     stateNode.className = `state ${state}`;
-    syncContributionCallout(data, state);
     renderModelTable(data.models || [], data.timeline);
     renderErrorsForModel(data);
 }
@@ -454,12 +453,23 @@ function renderUnavailable(detail = "API 暂时没有返回可用数据") {
     setText("availabilityMath", "--");
     setText("assistantStartDetail", "--");
     getElement("state").className = "state insufficient_data";
-    syncContributionCallout(null, "insufficient_data");
     renderModelTable([], null);
     renderErrors([]);
 }
 function setText(id, value) {
     getElement(id).textContent = value;
+}
+function renderStateDetail(data, state) {
+    const root = getElement("stateDetail");
+    root.replaceChildren(document.createTextNode(formatStateDetail(data)));
+    if (state !== "insufficient_data")
+        return;
+    const link = document.createElement("a");
+    link.href = "https://github.com/Victor-Quqi/router-vitals#%E5%AE%89%E8%A3%85";
+    link.target = "_blank";
+    link.rel = "noreferrer";
+    link.textContent = "安装插件贡献观测";
+    root.append(document.createTextNode(" · "), link);
 }
 function getElement(id) {
     const element = document.getElementById(id);
@@ -529,7 +539,7 @@ function formatStateDetail(data) {
     const windowText = formatWindowLabel(data.window);
     const sampleCount = Number.isInteger(data.sampleCount) ? data.sampleCount : 0;
     if (data.state === "insufficient_data")
-        return `${windowText}完成轮次 ${sampleCount} 条，暂不判断可用状态`;
+        return `${windowText} · ${sampleCount} 条轮次`;
     if (typeof data.availability === "number") {
         return `${windowText}成功轮次 ${data.successCount}/${data.sampleCount}，成功率 ${formatPercent(data.availability)}`;
     }
@@ -698,16 +708,6 @@ function getTrendTickIndices(count) {
     for (let i = 0; i <= segmentCount; i += 1)
         indices.add(Math.round((count - 1) * i / segmentCount));
     return [...indices].sort((a, b) => a - b);
-}
-function syncContributionCallout(data, state) {
-    const root = document.getElementById("contributionCallout");
-    if (!root || !data) {
-        if (root)
-            root.hidden = true;
-        return;
-    }
-    const sampleCount = Number(data.sampleCount ?? 0);
-    root.hidden = !(state === "insufficient_data" || sampleCount < 5);
 }
 function showTrendTooltip(text) {
     trendTooltip.textContent = text;

@@ -10,6 +10,8 @@
 
 状态页：https://router-vitals.pages.dev/
 
+![状态页预览](docs/assets/status-page-preview.png)
+
 感谢 [LINUX DO](https://linux.do/) 社区的支持。
 
 ## 安装
