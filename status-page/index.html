@@ -138,12 +138,7 @@
             <h2>主要错误类型</h2>
             <span id="failureCount">当前窗口 --</span>
           </div>
-          <div class="modelTabs" role="tablist" aria-label="错误模型">
-            <button class="active" data-error-model="opus" type="button" aria-selected="true">Opus</button>
-            <button data-error-model="sonnet" type="button" aria-selected="false">Sonnet</button>
-            <button data-error-model="haiku" type="button" aria-selected="false">Haiku</button>
-            <button data-error-model="unknown" type="button" aria-selected="false">Unknown</button>
-          </div>
+          <div class="modelTabs" id="errorModelTabs" role="tablist" aria-label="错误模型"></div>
         </div>
         <div id="errors" class="errorList"></div>
       </section>

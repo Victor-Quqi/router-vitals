@@ -135,7 +135,7 @@ const modelLabels: Record<ModelClass, string> = {
   haiku: "Haiku",
   unknown: "Unknown"
 };
-const emptyTrendModelClasses: readonly ModelClass[] = ["opus", "sonnet", "haiku"];
+const defaultModelClasses: readonly ModelClass[] = ["opus", "sonnet", "haiku"];
 
 const assistantStartLabels: Record<AssistantStartBucket, string> = {
   lt_3s: "<3s",
@@ -206,17 +206,6 @@ for (const element of document.querySelectorAll("[data-window]")) {
   });
 }
 
-for (const element of document.querySelectorAll("[data-error-model]")) {
-  const button = element as HTMLButtonElement;
-  button.addEventListener("click", () => {
-    const model = normalizeModelClass(button.dataset.errorModel);
-    activeErrorModel = model;
-    selectedTrendBucket = null;
-    syncErrorModelTabs();
-    if (latestStatusData) renderErrorsForModel(latestStatusData);
-  });
-}
-
 refreshButton.addEventListener("click", () => {
   playManualRefreshSpin();
   void loadStatus({ bypassCache: true });
@@ -239,6 +228,7 @@ autoRefreshToggle.addEventListener("change", () => {
 });
 
 syncRefreshControls();
+syncErrorModelTabs();
 void loadStatus();
 
 async function loadStatus(options: RefreshOptions = {}): Promise<void> {
@@ -348,7 +338,7 @@ function renderModelTable(models: ModelStatus[], timeline?: TimelineMeta | null)
   const root = getElement("modelTable");
   root.replaceChildren();
   root.style.setProperty("--bucket-count", String(timeline?.bucketCount || 1));
-  const rows = models.length > 0 ? filterVisibleModels(models) : buildEmptyModels(timeline);
+  const rows = getVisibleModelRows(models, timeline);
 
   const header = document.createElement("div");
   header.className = "modelRow modelHead";
@@ -412,7 +402,7 @@ function buildEmptyModels(timeline?: TimelineMeta | null): ModelStatus[] {
   if (!timeline?.bucketCount) return [];
   const startMinute = Math.floor(new Date(timeline.startAt).getTime() / 60000);
   const endMinute = Math.floor(new Date(timeline.endAt).getTime() / 60000);
-  return emptyTrendModelClasses.map((modelClass) => ({
+  return defaultModelClasses.map((modelClass) => ({
     modelClass,
     sampleCount: 0,
     failureCount: 0,
@@ -429,8 +419,21 @@ function buildEmptyModels(timeline?: TimelineMeta | null): ModelStatus[] {
   }));
 }
 
+function getVisibleModelRows(models: ModelStatus[], timeline?: TimelineMeta | null): ModelStatus[] {
+  return models.length > 0 ? filterVisibleModels(models) : buildEmptyModels(timeline);
+}
+
 function filterVisibleModels(models: ModelStatus[]): ModelStatus[] {
   return models.filter((model) => normalizeModelClass(model.modelClass) !== "unknown" || hasModelData(model));
+}
+
+function getVisibleModelClasses(data: StatusData): ModelClass[] {
+  const classes: ModelClass[] = [];
+  for (const model of getVisibleModelRows(data.models || [], data.timeline)) {
+    const modelClass = normalizeModelClass(model.modelClass);
+    if (!classes.includes(modelClass)) classes.push(modelClass);
+  }
+  return classes.length > 0 ? classes : [...defaultModelClasses];
 }
 
 function hasModelData(model: ModelStatus): boolean {
@@ -448,6 +451,7 @@ function minuteToIso(minute: number): string {
 }
 
 function renderErrorsForModel(data: StatusData): void {
+  syncErrorModelTabs(data);
   const model = findModelStatus(data, activeErrorModel);
   if (selectedTrendBucket?.modelClass === activeErrorModel) {
     setText(
@@ -585,6 +589,7 @@ function renderUnavailable(detail = "API 暂时没有返回可用数据"): void 
   setText("assistantStartDetail", "--");
   getElement("state").className = "state insufficient_data";
   renderModelTable([], null);
+  syncErrorModelTabs();
   renderErrors([]);
 }
 
@@ -771,10 +776,11 @@ function selectTrendBucket(modelClass: ModelClass, bucket: TrendBucket): void {
     errors: bucket.errors || []
   };
   activeErrorModel = modelClass;
-  syncErrorModelTabs();
   if (latestStatusData) {
     renderModelTable(latestStatusData.models || [], latestStatusData.timeline);
     renderErrorsForModel(latestStatusData);
+  } else {
+    syncErrorModelTabs();
   }
   scrollErrorPanelIntoView();
 }
@@ -807,13 +813,34 @@ function isSelectedTrendBucket(modelClass: ModelClass, bucket: TrendBucket): boo
     selectedTrendBucket.endAt === bucket.endAt;
 }
 
-function syncErrorModelTabs(): void {
-  document.querySelectorAll("[data-error-model]").forEach((item) => {
-    const button = item as HTMLButtonElement;
-    const selected = normalizeModelClass(button.dataset.errorModel) === activeErrorModel;
+function syncErrorModelTabs(data?: StatusData): void {
+  const modelClasses = data ? getVisibleModelClasses(data) : [...defaultModelClasses];
+  if (!modelClasses.includes(activeErrorModel)) {
+    activeErrorModel = modelClasses[0] ?? "opus";
+    selectedTrendBucket = null;
+  }
+
+  const root = getElement("errorModelTabs");
+  root.style.setProperty("--tab-count", String(modelClasses.length));
+  root.classList.toggle("fourTabs", modelClasses.length >= 4);
+  root.replaceChildren();
+
+  for (const modelClass of modelClasses) {
+    const button = document.createElement("button");
+    const selected = modelClass === activeErrorModel;
+    button.type = "button";
+    button.dataset.errorModel = modelClass;
+    button.textContent = modelLabels[modelClass];
     button.classList.toggle("active", selected);
     button.setAttribute("aria-selected", selected ? "true" : "false");
-  });
+    button.addEventListener("click", () => {
+      activeErrorModel = modelClass;
+      selectedTrendBucket = null;
+      if (latestStatusData) renderErrorsForModel(latestStatusData);
+      else syncErrorModelTabs();
+    });
+    root.append(button);
+  }
 }
 
 function scrollErrorPanelIntoView(): void {
