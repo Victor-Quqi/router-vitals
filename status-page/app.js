@@ -155,13 +155,17 @@ async function loadStatus(options = {}) {
         });
         if (!response.ok)
             throw new Error(`HTTP ${response.status}`);
+        const contentType = response.headers.get("content-type") || "";
+        if (!contentType.toLowerCase().includes("application/json")) {
+            throw new Error("API base 配置异常，状态接口返回了非 JSON 内容");
+        }
         const data = await response.json();
         if (sequence === loadSequence)
             render(data);
     }
-    catch {
+    catch (error) {
         if (sequence === loadSequence)
-            renderUnavailable();
+            renderUnavailable(getStatusLoadErrorMessage(error));
     }
     finally {
         if (sequence === loadSequence)
@@ -433,11 +437,16 @@ function formatStatusSuffix(statusCodes) {
         return "";
     return ` (${statusCodes.slice(0, 2).map((item) => item.code).join("/")})`;
 }
-function renderUnavailable() {
+function getStatusLoadErrorMessage(error) {
+    if (error instanceof Error && error.message)
+        return error.message;
+    return "API 暂时没有返回可用数据";
+}
+function renderUnavailable(detail = "API 暂时没有返回可用数据") {
     latestStatusData = null;
     selectedTrendBucket = null;
     setText("state", "状态暂缺");
-    setText("stateDetail", "API 暂时没有返回可用数据");
+    setText("stateDetail", detail);
     setText("updatedAt", "更新于 --");
     for (const id of ["availability", "sampleCount", "failureCountMetric", "assistantStart"])
         setText(id, "--");

@@ -92,4 +92,19 @@ jobs:
         run: pnpm dlx wrangler@4 deploy --config worker/wrangler.toml
 
       - name: Deploy Pages
-        run: pnpm dlx wrangler@4 pages deploy status-page --project-name=router-vitals
+        run: pnpm dlx wrangler@4 pages deploy status-page --project-name=router-vitals --branch=main --commit-dirty=true
+
+      - name: Verify production Pages config
+        run: |
+          expected="window.ANYROUTER_STATUS_API_BASE = \"$STATUS_API_BASE_URL\";"
+          for attempt in 1 2 3 4 5 6 7 8 9 10 11 12; do
+            config="$(curl -fsSL https://router-vitals.pages.dev/config.js || true)"
+            if printf '%s' "$config" | grep -Fq "$expected"; then
+              exit 0
+            fi
+            sleep 5
+          done
+          printf 'production config.js did not contain expected API base\n'
+          printf 'expected: %s\n' "$expected"
+          printf 'actual:\n%s\n' "$config"
+          exit 1

@@ -254,10 +254,14 @@ async function loadStatus(options: RefreshOptions = {}): Promise<void> {
       headers: { accept: "application/json" }
     });
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const contentType = response.headers.get("content-type") || "";
+    if (!contentType.toLowerCase().includes("application/json")) {
+      throw new Error("API base 配置异常，状态接口返回了非 JSON 内容");
+    }
     const data = await response.json() as StatusData;
     if (sequence === loadSequence) render(data);
-  } catch {
-    if (sequence === loadSequence) renderUnavailable();
+  } catch (error) {
+    if (sequence === loadSequence) renderUnavailable(getStatusLoadErrorMessage(error));
   } finally {
     if (sequence === loadSequence) refreshButton.disabled = false;
   }
@@ -565,11 +569,16 @@ function formatStatusSuffix(statusCodes?: StatusCodeCount[]): string {
   return ` (${statusCodes.slice(0, 2).map((item) => item.code).join("/")})`;
 }
 
-function renderUnavailable(): void {
+function getStatusLoadErrorMessage(error: unknown): string {
+  if (error instanceof Error && error.message) return error.message;
+  return "API 暂时没有返回可用数据";
+}
+
+function renderUnavailable(detail = "API 暂时没有返回可用数据"): void {
   latestStatusData = null;
   selectedTrendBucket = null;
   setText("state", "状态暂缺");
-  setText("stateDetail", "API 暂时没有返回可用数据");
+  setText("stateDetail", detail);
   setText("updatedAt", "更新于 --");
   for (const id of ["availability", "sampleCount", "failureCountMetric", "assistantStart"]) setText(id, "--");
   setText("failureCount", formatWindowLabel(activeWindow));
