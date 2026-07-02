@@ -55,9 +55,10 @@ const assistantStartLabels = {
     unknown: "--"
 };
 const errorModelStorageKey = "router-vitals-error-model";
+const targetHostStorageKey = "router-vitals-target-host";
 let activeWindow = "60m";
 let activeErrorModel = readErrorModel();
-let activeTargetHost = "all";
+let activeTargetHost = readTargetHostFilter();
 let latestStatusData = null;
 let selectedTrendBucket = null;
 const openErrorKeys = new Set();
@@ -118,7 +119,8 @@ for (const element of document.querySelectorAll("[data-target-host]")) {
     const button = element;
     button.addEventListener("click", () => {
         activeTargetHost = normalizeTargetHostFilter(button.dataset.targetHost);
-        document.querySelectorAll("[data-target-host]").forEach((item) => item.classList.toggle("active", item === button));
+        saveTargetHostFilter(activeTargetHost);
+        syncTargetHostTabs();
         openErrorKeys.clear();
         selectedTrendBucket = null;
         void loadStatus();
@@ -129,6 +131,7 @@ autoRefreshToggle.addEventListener("change", () => {
     syncRefreshControls();
 });
 syncRefreshControls();
+syncTargetHostTabs();
 syncErrorModelTabs();
 void loadStatus();
 async function loadStatus(options = {}) {
@@ -232,6 +235,32 @@ function saveErrorModel(modelClass) {
     catch {
         return;
     }
+}
+function readTargetHostFilter() {
+    try {
+        return normalizeTargetHostFilter(localStorage.getItem(targetHostStorageKey));
+    }
+    catch {
+        return "all";
+    }
+}
+function saveTargetHostFilter(value) {
+    try {
+        if (value === "all")
+            localStorage.removeItem(targetHostStorageKey);
+        else
+            localStorage.setItem(targetHostStorageKey, value);
+    }
+    catch {
+        return;
+    }
+}
+function syncTargetHostTabs() {
+    document.querySelectorAll("[data-target-host]").forEach((item) => {
+        const selected = normalizeTargetHostFilter(item.dataset.targetHost) === activeTargetHost;
+        item.classList.toggle("active", selected);
+        item.setAttribute("aria-selected", selected ? "true" : "false");
+    });
 }
 function applyTheme(mode) {
     const resolved = mode === "system" ? (systemThemeQuery.matches ? "light" : "dark") : mode;

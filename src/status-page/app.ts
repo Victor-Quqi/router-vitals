@@ -164,9 +164,10 @@ const assistantStartLabels: Record<AssistantStartBucket, string> = {
 };
 
 const errorModelStorageKey = "router-vitals-error-model";
+const targetHostStorageKey = "router-vitals-target-host";
 let activeWindow = "60m";
 let activeErrorModel: ModelClass = readErrorModel();
-let activeTargetHost: TargetHostFilter = "all";
+let activeTargetHost: TargetHostFilter = readTargetHostFilter();
 let latestStatusData: StatusData | null = null;
 let selectedTrendBucket: SelectedTrendBucket | null = null;
 const openErrorKeys = new Set<string>();
@@ -233,7 +234,8 @@ for (const element of document.querySelectorAll("[data-target-host]")) {
   const button = element as HTMLButtonElement;
   button.addEventListener("click", () => {
     activeTargetHost = normalizeTargetHostFilter(button.dataset.targetHost);
-    document.querySelectorAll("[data-target-host]").forEach((item) => item.classList.toggle("active", item === button));
+    saveTargetHostFilter(activeTargetHost);
+    syncTargetHostTabs();
     openErrorKeys.clear();
     selectedTrendBucket = null;
     void loadStatus();
@@ -246,6 +248,7 @@ autoRefreshToggle.addEventListener("change", () => {
 });
 
 syncRefreshControls();
+syncTargetHostTabs();
 syncErrorModelTabs();
 void loadStatus();
 
@@ -340,6 +343,31 @@ function saveErrorModel(modelClass: ModelClass): void {
   } catch {
     return;
   }
+}
+
+function readTargetHostFilter(): TargetHostFilter {
+  try {
+    return normalizeTargetHostFilter(localStorage.getItem(targetHostStorageKey));
+  } catch {
+    return "all";
+  }
+}
+
+function saveTargetHostFilter(value: TargetHostFilter): void {
+  try {
+    if (value === "all") localStorage.removeItem(targetHostStorageKey);
+    else localStorage.setItem(targetHostStorageKey, value);
+  } catch {
+    return;
+  }
+}
+
+function syncTargetHostTabs(): void {
+  document.querySelectorAll("[data-target-host]").forEach((item) => {
+    const selected = normalizeTargetHostFilter((item as HTMLElement).dataset.targetHost) === activeTargetHost;
+    item.classList.toggle("active", selected);
+    item.setAttribute("aria-selected", selected ? "true" : "false");
+  });
 }
 
 function applyTheme(mode: ThemeMode): void {
