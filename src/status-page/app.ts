@@ -147,8 +147,9 @@ const assistantStartLabels: Record<AssistantStartBucket, string> = {
   unknown: "--"
 };
 
+const errorModelStorageKey = "router-vitals-error-model";
 let activeWindow = "60m";
-let activeErrorModel: ModelClass = "opus";
+let activeErrorModel: ModelClass = readErrorModel();
 let activeTargetHost: TargetHostFilter = "all";
 let latestStatusData: StatusData | null = null;
 let selectedTrendBucket: SelectedTrendBucket | null = null;
@@ -301,6 +302,25 @@ function saveThemeMode(mode: ThemeMode): void {
   try {
     if (mode === "system") localStorage.removeItem(themeStorageKey);
     else localStorage.setItem(themeStorageKey, mode);
+  } catch {
+    return;
+  }
+}
+
+function readErrorModel(): ModelClass {
+  try {
+    const value = localStorage.getItem(errorModelStorageKey);
+    const modelClass = normalizeModelClass(value);
+    if (modelClass !== "unknown") return modelClass;
+  } catch {
+    return "fable";
+  }
+  return "fable";
+}
+
+function saveErrorModel(modelClass: ModelClass): void {
+  try {
+    if (modelClass !== "unknown") localStorage.setItem(errorModelStorageKey, modelClass);
   } catch {
     return;
   }
@@ -777,6 +797,7 @@ function selectTrendBucket(modelClass: ModelClass, bucket: TrendBucket): void {
     errors: bucket.errors || []
   };
   activeErrorModel = modelClass;
+  saveErrorModel(modelClass);
   if (latestStatusData) {
     renderModelTable(latestStatusData.models || [], latestStatusData.timeline);
     renderErrorsForModel(latestStatusData);
@@ -817,7 +838,8 @@ function isSelectedTrendBucket(modelClass: ModelClass, bucket: TrendBucket): boo
 function syncErrorModelTabs(data?: StatusData): void {
   const modelClasses = data ? getVisibleModelClasses(data) : [...defaultModelClasses];
   if (!modelClasses.includes(activeErrorModel)) {
-    activeErrorModel = modelClasses[0] ?? "opus";
+    activeErrorModel = modelClasses[0] ?? "fable";
+    saveErrorModel(activeErrorModel);
     selectedTrendBucket = null;
   }
 
@@ -836,6 +858,7 @@ function syncErrorModelTabs(data?: StatusData): void {
     button.setAttribute("aria-selected", selected ? "true" : "false");
     button.addEventListener("click", () => {
       activeErrorModel = modelClass;
+      saveErrorModel(modelClass);
       selectedTrendBucket = null;
       if (latestStatusData) renderErrorsForModel(latestStatusData);
       else syncErrorModelTabs();

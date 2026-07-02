@@ -54,8 +54,9 @@ const assistantStartLabels = {
     gt_60s: ">60s",
     unknown: "--"
 };
+const errorModelStorageKey = "router-vitals-error-model";
 let activeWindow = "60m";
-let activeErrorModel = "opus";
+let activeErrorModel = readErrorModel();
 let activeTargetHost = "all";
 let latestStatusData = null;
 let selectedTrendBucket = null;
@@ -206,6 +207,27 @@ function saveThemeMode(mode) {
             localStorage.removeItem(themeStorageKey);
         else
             localStorage.setItem(themeStorageKey, mode);
+    }
+    catch {
+        return;
+    }
+}
+function readErrorModel() {
+    try {
+        const value = localStorage.getItem(errorModelStorageKey);
+        const modelClass = normalizeModelClass(value);
+        if (modelClass !== "unknown")
+            return modelClass;
+    }
+    catch {
+        return "fable";
+    }
+    return "fable";
+}
+function saveErrorModel(modelClass) {
+    try {
+        if (modelClass !== "unknown")
+            localStorage.setItem(errorModelStorageKey, modelClass);
     }
     catch {
         return;
@@ -637,6 +659,7 @@ function selectTrendBucket(modelClass, bucket) {
         errors: bucket.errors || []
     };
     activeErrorModel = modelClass;
+    saveErrorModel(modelClass);
     if (latestStatusData) {
         renderModelTable(latestStatusData.models || [], latestStatusData.timeline);
         renderErrorsForModel(latestStatusData);
@@ -674,7 +697,8 @@ function isSelectedTrendBucket(modelClass, bucket) {
 function syncErrorModelTabs(data) {
     const modelClasses = data ? getVisibleModelClasses(data) : [...defaultModelClasses];
     if (!modelClasses.includes(activeErrorModel)) {
-        activeErrorModel = modelClasses[0] ?? "opus";
+        activeErrorModel = modelClasses[0] ?? "fable";
+        saveErrorModel(activeErrorModel);
         selectedTrendBucket = null;
     }
     const root = getElement("errorModelTabs");
@@ -691,6 +715,7 @@ function syncErrorModelTabs(data) {
         button.setAttribute("aria-selected", selected ? "true" : "false");
         button.addEventListener("click", () => {
             activeErrorModel = modelClass;
+            saveErrorModel(modelClass);
             selectedTrendBucket = null;
             if (latestStatusData)
                 renderErrorsForModel(latestStatusData);
