@@ -243,17 +243,18 @@ function applyTheme(mode) {
 }
 function render(data) {
     latestStatusData = data;
-    const state = normalizeServiceState(data.state);
     syncSelectedTrendBucket(data);
+    const scope = getDisplayScope(data);
+    const state = getDisplayState(data, scope);
     setText("state", labels[state] || "状态暂缺");
-    renderStateDetail(data, state);
+    renderStateDetail(data, state, scope);
     setText("updatedAt", formatUpdatedAt(data.generatedAt));
-    setText("availability", formatPercent(data.availability));
-    setText("sampleCount", String(data.sampleCount ?? "--"));
-    setText("failureCountMetric", String(data.failureCount ?? "--"));
-    setText("availabilityMath", formatAvailabilityMath(data));
-    setText("assistantStart", formatAssistantStart(data.assistantStart, data.successCount));
-    setText("assistantStartDetail", formatAssistantStartDetail(data.assistantStart, data.successCount));
+    setText("availability", formatPercent(scope.availability));
+    setText("sampleCount", formatCount(scope.sampleCount));
+    setText("failureCountMetric", formatCount(scope.failureCount));
+    setText("availabilityMath", formatAvailabilityMath(scope));
+    setText("assistantStart", formatAssistantStart(scope.assistantStart || undefined, scope.successCount));
+    setText("assistantStartDetail", formatAssistantStartDetail(scope.assistantStart || undefined, scope.successCount));
     const stateNode = getElement("state");
     stateNode.className = `state ${state}`;
     renderModelTable(data.models || [], data.timeline);
@@ -302,7 +303,7 @@ function renderModelTable(models, timeline) {
             const tooltip = formatBucketTooltip(bucket);
             block.tabIndex = 0;
             block.setAttribute("role", "button");
-            block.setAttribute("aria-label", `${tooltip}\n查看该时间段错误详情`);
+            block.setAttribute("aria-label", `${tooltip}\n查看该时间段状态详情`);
             bindTrendTooltip(block, tooltip);
             bindTrendSelection(block, modelClass, bucket);
             trend.append(block);
@@ -486,9 +487,13 @@ function renderUnavailable(detail = "API 暂时没有返回可用数据") {
 function setText(id, value) {
     getElement(id).textContent = value;
 }
-function renderStateDetail(data, state) {
+function renderStateDetail(data, state, scope) {
     const root = getElement("stateDetail");
-    root.replaceChildren(document.createTextNode(formatStateDetail(data)));
+    root.replaceChildren(document.createTextNode(formatStateDetail(data, scope)));
+    if (scope.selected) {
+        root.append(document.createTextNode(" · "), buildClearScopeButton());
+        return;
+    }
     if (state !== "insufficient_data")
         return;
     const link = document.createElement("a");
@@ -497,6 +502,15 @@ function renderStateDetail(data, state) {
     link.rel = "noreferrer";
     link.textContent = "安装插件贡献观测";
     root.append(document.createTextNode(" · "), link);
+}
+function buildClearScopeButton() {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "clearScopeButton";
+    button.textContent = "清除";
+    button.setAttribute("aria-label", "清除时间段选择");
+    button.addEventListener("click", clearTrendSelection);
+    return button;
 }
 function getElement(id) {
     const element = document.getElementById(id);
@@ -523,12 +537,15 @@ function formatTrendTickLabel(value) {
 function formatPercent(value) {
     return typeof value === "number" ? `${Math.round(value * 1000) / 10}%` : "--";
 }
-function formatAvailabilityMath(data) {
-    if (typeof data.successCount !== "number" || typeof data.sampleCount !== "number")
+function formatCount(value) {
+    return typeof value === "number" ? String(value) : "--";
+}
+function formatAvailabilityMath(scope) {
+    if (typeof scope.successCount !== "number" || typeof scope.sampleCount !== "number")
         return "--";
-    if (data.sampleCount === 0)
+    if (scope.sampleCount === 0)
         return "0 / 0";
-    return `${data.successCount} / ${data.sampleCount}`;
+    return `${scope.successCount} / ${scope.sampleCount}`;
 }
 function formatAssistantStart(value, successCount) {
     if (typeof successCount === "number" && successCount <= 0)
@@ -562,7 +579,18 @@ function formatUpdatedAt(value) {
         second: "2-digit"
     }).format(date)}`;
 }
-function formatStateDetail(data) {
+function formatStateDetail(data, scope) {
+    if (scope.selected && scope.modelClass && scope.startAt && scope.endAt) {
+        const prefix = `${modelLabels[scope.modelClass]} · ${formatRange(scope.startAt, scope.endAt)} · `;
+        const sampleCount = typeof scope.sampleCount === "number" ? scope.sampleCount : 0;
+        const successCount = typeof scope.successCount === "number" ? scope.successCount : 0;
+        if (sampleCount < 5)
+            return `${prefix}${sampleCount} 条轮次`;
+        if (typeof scope.availability === "number") {
+            return `${prefix}成功轮次 ${successCount}/${sampleCount}，成功率 ${formatPercent(scope.availability)}`;
+        }
+        return `${prefix}社区轮次观测`;
+    }
     const windowText = formatWindowLabel(data.window);
     const sampleCount = Number.isInteger(data.sampleCount) ? data.sampleCount : 0;
     if (data.state === "insufficient_data")
@@ -575,10 +603,49 @@ function formatStateDetail(data) {
 function formatWindowLabel(value) {
     return windowLabels[value || ""] || windowLabels[activeWindow] || activeWindow;
 }
+function getDisplayScope(data) {
+    if (selectedTrendBucket)
+        return { selected: true, ...selectedTrendBucket };
+    return {
+        selected: false,
+        sampleCount: data.sampleCount,
+        successCount: data.successCount,
+        failureCount: data.failureCount,
+        availability: data.availability,
+        assistantStart: data.assistantStart
+    };
+}
+function getDisplayState(data, scope) {
+    if (!scope.selected)
+        return normalizeServiceState(data.state);
+    const sampleCount = scope.sampleCount ?? 0;
+    if (sampleCount < 5 || typeof scope.availability !== "number")
+        return "insufficient_data";
+    if (scope.availability >= 0.9)
+        return "available";
+    if (scope.availability >= 0.5)
+        return "unstable";
+    return "down";
+}
+function getBucketCounts(bucket) {
+    const hasTotal = typeof bucket.total === "number" && Number.isFinite(bucket.total);
+    const hasSuccess = typeof bucket.success === "number" && Number.isFinite(bucket.success);
+    const hasFailure = typeof bucket.failure === "number" && Number.isFinite(bucket.failure);
+    const total = hasTotal ? Math.max(0, Math.trunc(bucket.total)) : 0;
+    let success = hasSuccess ? Math.max(0, Math.trunc(bucket.success)) : 0;
+    let failure = hasFailure ? Math.max(0, Math.trunc(bucket.failure)) : 0;
+    if (hasTotal && !hasSuccess && hasFailure)
+        success = Math.max(0, total - failure);
+    if (hasTotal && hasSuccess && !hasFailure)
+        failure = Math.max(0, total - success);
+    return {
+        total: hasTotal ? total : success + failure,
+        success,
+        failure
+    };
+}
 function formatBucketTooltip(bucket) {
-    const total = bucket.total ?? 0;
-    const success = bucket.success ?? 0;
-    const failure = bucket.failure ?? 0;
+    const { total, success, failure } = getBucketCounts(bucket);
     const lines = [formatRange(bucket.startAt, bucket.endAt)];
     if (total <= 0) {
         lines.push("无数据");
@@ -650,24 +717,34 @@ function bindTrendSelection(element, modelClass, bucket) {
     });
 }
 function selectTrendBucket(modelClass, bucket) {
+    const counts = getBucketCounts(bucket);
     selectedTrendBucket = {
         modelClass,
         bucketIndex: bucket.index,
         startAt: bucket.startAt,
         endAt: bucket.endAt,
-        failureCount: bucket.failure ?? 0,
+        sampleCount: counts.total,
+        successCount: counts.success,
+        failureCount: counts.failure,
+        availability: counts.total > 0 ? counts.success / counts.total : null,
+        assistantStart: bucket.assistantStart || null,
         errors: bucket.errors || []
     };
     activeErrorModel = modelClass;
     saveErrorModel(modelClass);
-    if (latestStatusData) {
-        renderModelTable(latestStatusData.models || [], latestStatusData.timeline);
-        renderErrorsForModel(latestStatusData);
-    }
-    else {
+    if (latestStatusData)
+        render(latestStatusData);
+    else
         syncErrorModelTabs();
-    }
-    scrollErrorPanelIntoView();
+}
+function clearTrendSelection() {
+    if (!selectedTrendBucket)
+        return;
+    selectedTrendBucket = null;
+    if (latestStatusData)
+        render(latestStatusData);
+    else
+        syncErrorModelTabs();
 }
 function syncSelectedTrendBucket(data) {
     if (!selectedTrendBucket)
@@ -679,12 +756,17 @@ function syncSelectedTrendBucket(data) {
         selectedTrendBucket = null;
         return;
     }
+    const counts = getBucketCounts(bucket);
     selectedTrendBucket = {
         modelClass: selectedTrendBucket.modelClass,
         bucketIndex: bucket.index,
         startAt: bucket.startAt,
         endAt: bucket.endAt,
-        failureCount: bucket.failure ?? 0,
+        sampleCount: counts.total,
+        successCount: counts.success,
+        failureCount: counts.failure,
+        availability: counts.total > 0 ? counts.success / counts.total : null,
+        assistantStart: bucket.assistantStart || null,
         errors: bucket.errors || []
     };
 }
@@ -718,19 +800,12 @@ function syncErrorModelTabs(data) {
             saveErrorModel(modelClass);
             selectedTrendBucket = null;
             if (latestStatusData)
-                renderErrorsForModel(latestStatusData);
+                render(latestStatusData);
             else
                 syncErrorModelTabs();
         });
         root.append(button);
     }
-}
-function scrollErrorPanelIntoView() {
-    const panel = document.getElementById("errorPanel");
-    if (!panel)
-        return;
-    const behavior = window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth";
-    panel.scrollIntoView({ block: "start", behavior });
 }
 function buildTrendAxis(buckets) {
     const axis = document.createElement("div");

@@ -340,6 +340,30 @@ article span {
   color: var(--link-hover);
 }
 
+.clearScopeButton {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  line-height: inherit;
+  text-decoration: underline;
+  text-decoration-color: rgb(139 148 158 / 48%);
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+
+.clearScopeButton:hover,
+.clearScopeButton:focus-visible {
+  color: var(--link-hover);
+  outline: none;
+}
+
+.clearScopeButton:focus-visible {
+  border-radius: 3px;
+  box-shadow: 0 0 0 3px var(--focus-ring);
+}
+
 .updated {
   margin-top: 6px;
 }
@@ -1088,11 +1112,11 @@ footer a:focus-visible {
     border-top: 1px solid var(--line);
   }
 
-  article:nth-child(even) {
+  article:nth-of-type(even) {
     border-right: 0;
   }
 
-  article:nth-child(-n + 2) {
+  article:nth-of-type(-n + 2) {
     border-top: 0;
   }
 
@@ -1217,7 +1241,7 @@ footer a:focus-visible {
     border-right: 0;
   }
 
-  article:nth-child(2) {
+  article:nth-of-type(2) {
     border-top: 1px solid var(--line);
   }
 }

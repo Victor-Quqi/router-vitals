@@ -83,8 +83,24 @@ interface SelectedTrendBucket {
   bucketIndex: number;
   startAt: string;
   endAt: string;
+  sampleCount: number;
+  successCount: number;
   failureCount: number;
+  availability: number | null;
+  assistantStart?: AssistantStartSummary | null;
   errors: ErrorStatus[];
+}
+
+interface DisplayScope {
+  selected: boolean;
+  modelClass?: ModelClass | undefined;
+  startAt?: string | undefined;
+  endAt?: string | undefined;
+  sampleCount?: number | undefined;
+  successCount?: number | undefined;
+  failureCount?: number | undefined;
+  availability?: number | null | undefined;
+  assistantStart?: AssistantStartSummary | null | undefined;
 }
 
 const labels: Record<ServiceState, string> = {
@@ -337,17 +353,18 @@ function applyTheme(mode: ThemeMode): void {
 
 function render(data: StatusData): void {
   latestStatusData = data;
-  const state = normalizeServiceState(data.state);
   syncSelectedTrendBucket(data);
+  const scope = getDisplayScope(data);
+  const state = getDisplayState(data, scope);
   setText("state", labels[state] || "状态暂缺");
-  renderStateDetail(data, state);
+  renderStateDetail(data, state, scope);
   setText("updatedAt", formatUpdatedAt(data.generatedAt));
-  setText("availability", formatPercent(data.availability));
-  setText("sampleCount", String(data.sampleCount ?? "--"));
-  setText("failureCountMetric", String(data.failureCount ?? "--"));
-  setText("availabilityMath", formatAvailabilityMath(data));
-  setText("assistantStart", formatAssistantStart(data.assistantStart, data.successCount));
-  setText("assistantStartDetail", formatAssistantStartDetail(data.assistantStart, data.successCount));
+  setText("availability", formatPercent(scope.availability));
+  setText("sampleCount", formatCount(scope.sampleCount));
+  setText("failureCountMetric", formatCount(scope.failureCount));
+  setText("availabilityMath", formatAvailabilityMath(scope));
+  setText("assistantStart", formatAssistantStart(scope.assistantStart || undefined, scope.successCount));
+  setText("assistantStartDetail", formatAssistantStartDetail(scope.assistantStart || undefined, scope.successCount));
 
   const stateNode = getElement("state");
   stateNode.className = `state ${state}`;
@@ -407,7 +424,7 @@ function renderModelTable(models: ModelStatus[], timeline?: TimelineMeta | null)
       const tooltip = formatBucketTooltip(bucket);
       block.tabIndex = 0;
       block.setAttribute("role", "button");
-      block.setAttribute("aria-label", `${tooltip}\n查看该时间段错误详情`);
+      block.setAttribute("aria-label", `${tooltip}\n查看该时间段状态详情`);
       bindTrendTooltip(block, tooltip);
       bindTrendSelection(block, modelClass, bucket);
       trend.append(block);
@@ -618,9 +635,13 @@ function setText(id: string, value: string): void {
   getElement(id).textContent = value;
 }
 
-function renderStateDetail(data: StatusData, state: ServiceState): void {
+function renderStateDetail(data: StatusData, state: ServiceState, scope: DisplayScope): void {
   const root = getElement("stateDetail");
-  root.replaceChildren(document.createTextNode(formatStateDetail(data)));
+  root.replaceChildren(document.createTextNode(formatStateDetail(data, scope)));
+  if (scope.selected) {
+    root.append(document.createTextNode(" · "), buildClearScopeButton());
+    return;
+  }
   if (state !== "insufficient_data") return;
 
   const link = document.createElement("a");
@@ -629,6 +650,16 @@ function renderStateDetail(data: StatusData, state: ServiceState): void {
   link.rel = "noreferrer";
   link.textContent = "安装插件贡献观测";
   root.append(document.createTextNode(" · "), link);
+}
+
+function buildClearScopeButton(): HTMLButtonElement {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "clearScopeButton";
+  button.textContent = "清除";
+  button.setAttribute("aria-label", "清除时间段选择");
+  button.addEventListener("click", clearTrendSelection);
+  return button;
 }
 
 function getElement(id: string): HTMLElement {
@@ -658,10 +689,14 @@ function formatPercent(value: number | null | undefined): string {
   return typeof value === "number" ? `${Math.round(value * 1000) / 10}%` : "--";
 }
 
-function formatAvailabilityMath(data: StatusData): string {
-  if (typeof data.successCount !== "number" || typeof data.sampleCount !== "number") return "--";
-  if (data.sampleCount === 0) return "0 / 0";
-  return `${data.successCount} / ${data.sampleCount}`;
+function formatCount(value: number | undefined): string {
+  return typeof value === "number" ? String(value) : "--";
+}
+
+function formatAvailabilityMath(scope: DisplayScope): string {
+  if (typeof scope.successCount !== "number" || typeof scope.sampleCount !== "number") return "--";
+  if (scope.sampleCount === 0) return "0 / 0";
+  return `${scope.successCount} / ${scope.sampleCount}`;
 }
 
 function formatAssistantStart(value?: AssistantStartSummary, successCount?: number): string {
@@ -693,7 +728,18 @@ function formatUpdatedAt(value?: string): string {
   }).format(date)}`;
 }
 
-function formatStateDetail(data: StatusData): string {
+function formatStateDetail(data: StatusData, scope: DisplayScope): string {
+  if (scope.selected && scope.modelClass && scope.startAt && scope.endAt) {
+    const prefix = `${modelLabels[scope.modelClass]} · ${formatRange(scope.startAt, scope.endAt)} · `;
+    const sampleCount = typeof scope.sampleCount === "number" ? scope.sampleCount : 0;
+    const successCount = typeof scope.successCount === "number" ? scope.successCount : 0;
+    if (sampleCount < 5) return `${prefix}${sampleCount} 条轮次`;
+    if (typeof scope.availability === "number") {
+      return `${prefix}成功轮次 ${successCount}/${sampleCount}，成功率 ${formatPercent(scope.availability)}`;
+    }
+    return `${prefix}社区轮次观测`;
+  }
+
   const windowText = formatWindowLabel(data.window);
   const sampleCount = Number.isInteger(data.sampleCount) ? data.sampleCount : 0;
   if (data.state === "insufficient_data") return `${windowText} · ${sampleCount} 条轮次`;
@@ -707,10 +753,47 @@ function formatWindowLabel(value?: string): string {
   return windowLabels[value || ""] || windowLabels[activeWindow] || activeWindow;
 }
 
+function getDisplayScope(data: StatusData): DisplayScope {
+  if (selectedTrendBucket) return { selected: true, ...selectedTrendBucket };
+  return {
+    selected: false,
+    sampleCount: data.sampleCount,
+    successCount: data.successCount,
+    failureCount: data.failureCount,
+    availability: data.availability,
+    assistantStart: data.assistantStart
+  };
+}
+
+function getDisplayState(data: StatusData, scope: DisplayScope): ServiceState {
+  if (!scope.selected) return normalizeServiceState(data.state);
+  const sampleCount = scope.sampleCount ?? 0;
+  if (sampleCount < 5 || typeof scope.availability !== "number") return "insufficient_data";
+  if (scope.availability >= 0.9) return "available";
+  if (scope.availability >= 0.5) return "unstable";
+  return "down";
+}
+
+function getBucketCounts(bucket: TrendBucket): { total: number; success: number; failure: number } {
+  const hasTotal = typeof bucket.total === "number" && Number.isFinite(bucket.total);
+  const hasSuccess = typeof bucket.success === "number" && Number.isFinite(bucket.success);
+  const hasFailure = typeof bucket.failure === "number" && Number.isFinite(bucket.failure);
+  const total = hasTotal ? Math.max(0, Math.trunc(bucket.total as number)) : 0;
+  let success = hasSuccess ? Math.max(0, Math.trunc(bucket.success as number)) : 0;
+  let failure = hasFailure ? Math.max(0, Math.trunc(bucket.failure as number)) : 0;
+
+  if (hasTotal && !hasSuccess && hasFailure) success = Math.max(0, total - failure);
+  if (hasTotal && hasSuccess && !hasFailure) failure = Math.max(0, total - success);
+
+  return {
+    total: hasTotal ? total : success + failure,
+    success,
+    failure
+  };
+}
+
 function formatBucketTooltip(bucket: TrendBucket): string {
-  const total = bucket.total ?? 0;
-  const success = bucket.success ?? 0;
-  const failure = bucket.failure ?? 0;
+  const { total, success, failure } = getBucketCounts(bucket);
   const lines = [formatRange(bucket.startAt, bucket.endAt)];
 
   if (total <= 0) {
@@ -788,23 +871,30 @@ function bindTrendSelection(element: HTMLElement, modelClass: ModelClass, bucket
 }
 
 function selectTrendBucket(modelClass: ModelClass, bucket: TrendBucket): void {
+  const counts = getBucketCounts(bucket);
   selectedTrendBucket = {
     modelClass,
     bucketIndex: bucket.index,
     startAt: bucket.startAt,
     endAt: bucket.endAt,
-    failureCount: bucket.failure ?? 0,
+    sampleCount: counts.total,
+    successCount: counts.success,
+    failureCount: counts.failure,
+    availability: counts.total > 0 ? counts.success / counts.total : null,
+    assistantStart: bucket.assistantStart || null,
     errors: bucket.errors || []
   };
   activeErrorModel = modelClass;
   saveErrorModel(modelClass);
-  if (latestStatusData) {
-    renderModelTable(latestStatusData.models || [], latestStatusData.timeline);
-    renderErrorsForModel(latestStatusData);
-  } else {
-    syncErrorModelTabs();
-  }
-  scrollErrorPanelIntoView();
+  if (latestStatusData) render(latestStatusData);
+  else syncErrorModelTabs();
+}
+
+function clearTrendSelection(): void {
+  if (!selectedTrendBucket) return;
+  selectedTrendBucket = null;
+  if (latestStatusData) render(latestStatusData);
+  else syncErrorModelTabs();
 }
 
 function syncSelectedTrendBucket(data: StatusData): void {
@@ -818,12 +908,17 @@ function syncSelectedTrendBucket(data: StatusData): void {
     selectedTrendBucket = null;
     return;
   }
+  const counts = getBucketCounts(bucket);
   selectedTrendBucket = {
     modelClass: selectedTrendBucket.modelClass,
     bucketIndex: bucket.index,
     startAt: bucket.startAt,
     endAt: bucket.endAt,
-    failureCount: bucket.failure ?? 0,
+    sampleCount: counts.total,
+    successCount: counts.success,
+    failureCount: counts.failure,
+    availability: counts.total > 0 ? counts.success / counts.total : null,
+    assistantStart: bucket.assistantStart || null,
     errors: bucket.errors || []
   };
 }
@@ -860,18 +955,11 @@ function syncErrorModelTabs(data?: StatusData): void {
       activeErrorModel = modelClass;
       saveErrorModel(modelClass);
       selectedTrendBucket = null;
-      if (latestStatusData) renderErrorsForModel(latestStatusData);
+      if (latestStatusData) render(latestStatusData);
       else syncErrorModelTabs();
     });
     root.append(button);
   }
-}
-
-function scrollErrorPanelIntoView(): void {
-  const panel = document.getElementById("errorPanel");
-  if (!panel) return;
-  const behavior: ScrollBehavior = window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth";
-  panel.scrollIntoView({ block: "start", behavior });
 }
 
 function buildTrendAxis(buckets: TrendBucket[]): HTMLElement {
