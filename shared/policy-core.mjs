@@ -1,4 +1,4 @@
-export const PLUGIN_VERSION = "0.1.31";
+export const PLUGIN_VERSION = "0.1.32";
 export const TARGET_HOSTS = Object.freeze([
     "anyrouter.top",
     "a-ocnfniawgw.cn-shanghai.fcapp.run"
@@ -18,8 +18,8 @@ export const ERROR_TYPES = Object.freeze([
     "timeout",
     "unknown"
 ]);
-export const MODEL_CLASSES = Object.freeze(["haiku", "sonnet", "opus", "unknown"]);
-export const STATUS_MODEL_ORDER = Object.freeze(["opus", "sonnet", "haiku", "unknown"]);
+export const MODEL_CLASSES = Object.freeze(["haiku", "sonnet", "opus", "fable", "unknown"]);
+export const STATUS_MODEL_ORDER = Object.freeze(["fable", "opus", "sonnet", "haiku", "unknown"]);
 export const ASSISTANT_START_BUCKETS = Object.freeze([
     "lt_3s",
     "3_10s",
@@ -195,6 +195,8 @@ export function classifyModel(input, { includeEnv = true } = {}) {
         .toLowerCase());
 }
 function classifyModelText(raw) {
+    if (raw.includes("fable"))
+        return "fable";
     if (raw.includes("haiku"))
         return "haiku";
     if (raw.includes("sonnet"))

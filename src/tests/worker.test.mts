@@ -298,7 +298,8 @@ test("status aggregation attaches error status codes and hints", () => {
   assert.deepEqual(status.errors[0]!.statusCodes, [{ code: 429, count: 3 }]);
   assert.equal(status.errors[0]!.hints[0]!.text, "API Error 429: Rate limit reached");
   assert.equal(status.modelErrors.opus[0]!.type, "rate_limited");
-  assert.deepEqual(status.models[0]!.buckets.at(-1)!.errors[0]!.statusCodes, [{ code: 429, count: 3 }]);
+  const opus = status.models.find((model) => model.modelClass === "opus");
+  assert.deepEqual(opus!.buckets.at(-1)!.errors[0]!.statusCodes, [{ code: 429, count: 3 }]);
 });
 
 test("status aggregation ignores assistant start buckets on failure-only rows", () => {
@@ -387,20 +388,22 @@ test("status aggregation builds model trend buckets", () => {
 
   assert.equal(status.timeline!.bucketCount, 18);
   assert.equal(status.timeline!.bucketMinutes, 5);
-  assert.equal(status.models.length, 4);
-  assert.equal(status.models[0]!.modelClass, "opus");
-  assert.equal(status.models[0]!.buckets.at(-1)!.state, "failure");
-  assert.equal(status.models[0]!.buckets.at(-1)!.errors[0]!.type, "server_error");
-  assert.equal(status.models[0]!.buckets.at(-1)!.assistantStart, null);
-  assert.equal(status.models[1]!.modelClass, "sonnet");
-  assert.equal(status.models[1]!.buckets.at(-2)!.assistantStart?.medianBucket, "lt_3s");
-  assert.equal(status.models[1]!.buckets.at(-2)!.state, "success");
-  assert.equal(status.models[1]!.buckets.at(-1)!.state, "mixed");
-  assert.equal(status.models[1]!.buckets.at(-1)!.assistantStart?.medianBucket, "3_10s");
+  assert.equal(status.models.length, 5);
+  assert.equal(status.models[0]!.modelClass, "fable");
+  assert.equal(status.models[0]!.buckets.at(-1)!.state, "empty");
+  assert.equal(status.models[1]!.modelClass, "opus");
+  assert.equal(status.models[1]!.buckets.at(-1)!.state, "failure");
+  assert.equal(status.models[1]!.buckets.at(-1)!.errors[0]!.type, "server_error");
+  assert.equal(status.models[1]!.buckets.at(-1)!.assistantStart, null);
+  assert.equal(status.models[2]!.modelClass, "sonnet");
+  assert.equal(status.models[2]!.buckets.at(-2)!.assistantStart?.medianBucket, "lt_3s");
+  assert.equal(status.models[2]!.buckets.at(-2)!.state, "success");
+  assert.equal(status.models[2]!.buckets.at(-1)!.state, "mixed");
+  assert.equal(status.models[2]!.buckets.at(-1)!.assistantStart?.medianBucket, "3_10s");
   assert.equal(status.modelErrors.sonnet[0]!.type, "server_error");
-  assert.equal(status.models[2]!.modelClass, "haiku");
-  assert.equal(status.models[2]!.buckets.at(-1)!.state, "empty");
-  assert.equal(status.models[3]!.modelClass, "unknown");
+  assert.equal(status.models[3]!.modelClass, "haiku");
+  assert.equal(status.models[3]!.buckets.at(-1)!.state, "empty");
+  assert.equal(status.models[4]!.modelClass, "unknown");
 });
 
 function failingDb() {

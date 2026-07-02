@@ -264,6 +264,35 @@ test("plugin hook uploads only for matched AnyRouter sessions", async () => {
     assert.equal(received.length, 9);
     assert.equal(received[8]!.modelClass, "unknown");
 
+    const sessionKTranscript = join(stateDir, "session-k.jsonl");
+    await writeTranscriptRecords(sessionKTranscript, [
+      createModelSwitchCommandRecord(),
+      createModelSetOutputRecord("Set model to Fable 5 and saved as your default for new sessions")
+    ]);
+    await runHook("SessionStart", { session_id: "session-k" }, {
+      ...commonEnv,
+      ANTHROPIC_BASE_URL: "https://anyrouter.top",
+      CLAUDE_MODEL: "claude-opus-4-8"
+    });
+    await runHook("UserPromptSubmit", { session_id: "session-k", transcript_path: sessionKTranscript }, {
+      ...commonEnv,
+      ANTHROPIC_BASE_URL: "https://anyrouter.top",
+      CLAUDE_MODEL: "claude-opus-4-8"
+    });
+    await runHook("StopFailure", {
+      session_id: "session-k",
+      transcript_path: sessionKTranscript,
+      status_code: 429,
+      message: "API Error 429: rate limit reached"
+    }, {
+      ...commonEnv,
+      ANTHROPIC_BASE_URL: "https://anyrouter.top/v1/messages",
+      CLAUDE_MODEL: "claude-opus-4-8"
+    });
+
+    assert.equal(received.length, 10);
+    assert.equal(received[9]!.modelClass, "fable");
+
     await runHook("UserPromptSubmit", { session_id: "session-b" }, {
       ...commonEnv,
       ANTHROPIC_BASE_URL: "https://api.anthropic.com"
@@ -273,7 +302,7 @@ test("plugin hook uploads only for matched AnyRouter sessions", async () => {
       ANTHROPIC_BASE_URL: "https://api.anthropic.com"
     });
 
-    assert.equal(received.length, 9);
+    assert.equal(received.length, 10);
 
     await runHook("SessionEnd", { session_id: "session-a" }, {
       ...commonEnv,

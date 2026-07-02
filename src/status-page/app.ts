@@ -1,7 +1,7 @@
 const API_BASE = window.ANYROUTER_STATUS_API_BASE || window.location.origin;
 
 type ServiceState = "available" | "unstable" | "down" | "insufficient_data";
-type ModelClass = "haiku" | "sonnet" | "opus" | "unknown";
+type ModelClass = "haiku" | "sonnet" | "opus" | "fable" | "unknown";
 type BucketState = "empty" | "success" | "mixed" | "failure";
 type RefreshOptions = { bypassCache?: boolean };
 type TargetHostFilter = "all" | "main" | "optimized";
@@ -130,12 +130,13 @@ const errorLabels: Record<string, { title: string; detail: string }> = {
 };
 
 const modelLabels: Record<ModelClass, string> = {
+  fable: "Fable",
   opus: "Opus",
   sonnet: "Sonnet",
   haiku: "Haiku",
   unknown: "Unknown"
 };
-const defaultModelClasses: readonly ModelClass[] = ["opus", "sonnet", "haiku"];
+const defaultModelClasses: readonly ModelClass[] = ["fable", "opus", "sonnet", "haiku"];
 
 const assistantStartLabels: Record<AssistantStartBucket, string> = {
   lt_3s: "<3s",
@@ -725,7 +726,7 @@ function normalizeServiceState(value: unknown): ServiceState {
 }
 
 function normalizeModelClass(value: unknown): ModelClass {
-  if (value === "opus" || value === "sonnet" || value === "haiku" || value === "unknown") return value;
+  if (value === "fable" || value === "opus" || value === "sonnet" || value === "haiku" || value === "unknown") return value;
   return "unknown";
 }
 

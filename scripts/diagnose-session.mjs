@@ -222,7 +222,7 @@ function inspectModelSetOutput(record) {
 }
 
 function parseModelSetOutput(text) {
-  const match = text.match(/(?:^|[>\r\n])\s*set\s+model\s+to\s+(opus|sonnet|haiku)\b/i);
+  const match = text.match(/(?:^|[>\r\n])\s*set\s+model\s+to\s+(fable|opus|sonnet|haiku)\b/i);
   return match ? match[1].toLowerCase() : "unknown";
 }
 
@@ -358,6 +358,7 @@ function hashLocalSessionId(id) {
 
 function classifyModelText(value) {
   const lower = value.toLowerCase();
+  if (lower.includes("fable")) return "fable";
   if (lower.includes("haiku")) return "haiku";
   if (lower.includes("sonnet")) return "sonnet";
   if (lower.includes("opus")) return "opus";

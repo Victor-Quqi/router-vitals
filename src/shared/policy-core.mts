@@ -1,4 +1,4 @@
-export const PLUGIN_VERSION = "0.1.31";
+export const PLUGIN_VERSION = "0.1.32";
 
 export const TARGET_HOSTS = Object.freeze([
   "anyrouter.top",
@@ -22,8 +22,8 @@ export const ERROR_TYPES = Object.freeze([
   "unknown"
 ] as const);
 
-export const MODEL_CLASSES = Object.freeze(["haiku", "sonnet", "opus", "unknown"] as const);
-export const STATUS_MODEL_ORDER = Object.freeze(["opus", "sonnet", "haiku", "unknown"] as const);
+export const MODEL_CLASSES = Object.freeze(["haiku", "sonnet", "opus", "fable", "unknown"] as const);
+export const STATUS_MODEL_ORDER = Object.freeze(["fable", "opus", "sonnet", "haiku", "unknown"] as const);
 
 export const ASSISTANT_START_BUCKETS = Object.freeze([
   "lt_3s",
@@ -245,6 +245,7 @@ export function classifyModel(input: LooseInput | null | undefined, { includeEnv
 }
 
 function classifyModelText(raw: string): ModelClass {
+  if (raw.includes("fable")) return "fable";
   if (raw.includes("haiku")) return "haiku";
   if (raw.includes("sonnet")) return "sonnet";
   if (raw.includes("opus")) return "opus";

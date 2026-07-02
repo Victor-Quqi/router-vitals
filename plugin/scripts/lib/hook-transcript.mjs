@@ -197,7 +197,7 @@ function inspectModelSetOutput(value) {
     if (!isLocalCommand)
         return null;
     const normalized = stripAnsiControlSequences(text);
-    const match = normalized.match(/(?:^|[>\r\n])\s*set\s+model\s+to\s+(opus|sonnet|haiku)\b/i);
+    const match = normalized.match(/(?:^|[>\r\n])\s*set\s+model\s+to\s+(fable|opus|sonnet|haiku)\b/i);
     if (!match) {
         if (!/(?:^|[>\r\n])\s*set\s+model\s+to\b/i.test(normalized))
             return null;
@@ -209,7 +209,7 @@ function inspectModelSetOutput(value) {
         };
     }
     const model = match[1].toLowerCase();
-    const modelClass = model === "opus" || model === "sonnet" || model === "haiku" ? model : "unknown";
+    const modelClass = model === "fable" || model === "opus" || model === "sonnet" || model === "haiku" ? model : "unknown";
     return {
         timestampMs: getRecordTimestampMs(value),
         modelClass,
