@@ -48,4 +48,4 @@ rollout（`$CODEX_HOME/sessions/**/rollout-*.jsonl`）每行 `{timestamp, type, 
 - 失败轮由下一个 hook 事件补结算，Worker 端按接收分钟聚合，时间桶有滞后（同会话内通常是用户下一次重试的间隔）。
 - 已在真实 AnyRouter 上游实测：成功轮 Stop 结算与上报 payload 构造正确；故障轮（high demand）无 error 事件，失败判定走"无输出证据"，错误分类退化为 `unknown`。TUI 错误轮已实测（0.142.5）：同样无 error 事件、无 Stop，由下一事件结算。TUI 成功轮的 Stop 未单独实测（与 exec 同语义，上线后首条 TUI 数据即可确认）。
 - Codex 侧更新提醒走 `Stop` hook 的 `systemMessage`（与 Claude 侧同频率）。更新是固定两步（已用 git 市场实测）：`codex plugin marketplace upgrade router-vitals` 刷新市场快照，`codex plugin add anyrouter-status-monitor@router-vitals` 从快照装进插件实际运行的版本化缓存——只 `add` 会装回旧快照版本，只 `upgrade` 不动缓存（此时 `codex plugin list` 显示的是快照版本，有误导性）。提醒文案不用 `&&`（PowerShell 5.1 不支持）。statusLine 无对应扩展点。
-- Codex 信任模型按 hook 定义 hash 记录，插件每次更新 hooks 定义后用户需在 `/hooks` 重新信任。
+- Codex 信任模型按 hook 定义 hash 记录，插件每次更新 hooks 定义后，新会话会提示 hook 有变化，用户可批准当前插件或全部信任；`/hooks` 作为手动管理入口。

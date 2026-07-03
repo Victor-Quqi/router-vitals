@@ -29,7 +29,7 @@ Not submitted: actual URL, prompt, response, tokens, cookies, keys, account iden
 
 To avoid carrying a stale model after switching models inside a Claude Code session, the plugin reads the local transcript file from the hook input and extracts only the metadata needed for model classification and assistant-start timing: model fields from this turn's assistant records, the model name from successful local `/model` command output before the prompt, and the first assistant record timestamp. It never submits transcript paths or content. Codex likewise only extracts metadata from this session's records (outcome, error summary, model name, response timing). The status page's assistant-start P50 only counts turns that eventually succeed. This bucket is not low-level API TTFT; the Claude Code reading includes user-visible waiting such as automatic retries, while the Codex reading uses the client's own time-to-first-token measurement — the two definitions differ.
 
-Codex also requires reviewing and trusting non-managed hooks before they run: after installing, run `/hooks` inside a Codex session and trust this plugin's hooks; re-trust after plugin updates. Implementation details of turn detection and settlement live in [codex-monitoring.md](codex-monitoring.md) (Chinese).
+Codex also requires reviewing and trusting non-managed hooks before they run: after installing, start a Codex session and approve this plugin's hooks when Codex shows the hook trust prompt. You can also run `/hooks` inside a session to manage hook trust manually. Implementation details of turn detection and settlement live in [codex-monitoring.md](codex-monitoring.md) (Chinese).
 
 ## Turning reporting off
 
@@ -83,6 +83,6 @@ codex plugin marketplace upgrade router-vitals
 codex plugin add anyrouter-status-monitor@router-vitals
 ```
 
-If a Claude Code session is already running, run `/reload-plugins` inside that session after updating. On Codex, run `/hooks` and re-trust this plugin's hooks after updating.
+If a Claude Code session is already running, run `/reload-plugins` inside that session after updating. On Codex, a new session prompts for trust when the hook sha changes; approve that prompt, or use `/hooks` to manage it manually.
 
 Claude Code currently accepts one `statusLine` command. When `setup-statusline.mjs` detects an unrelated existing statusLine, an interactive terminal asks before replacing it; non-interactive runs keep the existing command. To show multiple status sources, use your own wrapper or a third-party statusLine aggregator.

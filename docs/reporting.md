@@ -29,7 +29,7 @@ Any Router 入口：
 
 为避免 Claude Code 会话内切换模型后串到旧模型，插件会在本机读取 hook 输入里的 transcript 文件，只提取模型归类和响应开始所需的元数据：本轮 assistant 记录中的模型字段、prompt 前 `/model` 本地命令成功输出里的模型名、首条 assistant 记录时间；不会提交 transcript 路径或内容。Codex 侧同样只从本会话记录提取元数据（成败、报错摘要、模型名、响应耗时）。状态页的首次响应 P50 只统计最终成功的轮次。这个区间不是底层 API TTFT；Claude Code 侧包含自动重试等用户实际等待，Codex 侧用客户端自测的首 token 耗时，两者口径不同。
 
-Codex 还要求非托管 hooks 审查信任后才运行：装完插件在 Codex 会话里执行 `/hooks`，信任本插件的 hooks；插件更新后需重新信任一次。轮次判定与结算的实现细节见 [codex-monitoring.md](codex-monitoring.md)。
+Codex 还要求非托管 hooks 审查信任后才运行：装完插件启动 Codex 会话时，按 hook 变化提示批准本插件 hooks；也可在会话里执行 `/hooks` 手动管理信任。轮次判定与结算的实现细节见 [codex-monitoring.md](codex-monitoring.md)。
 
 ## 关掉上报
 
@@ -83,6 +83,6 @@ codex plugin marketplace upgrade router-vitals
 codex plugin add anyrouter-status-monitor@router-vitals
 ```
 
-如果当前 Claude Code 会话正在运行，更新后在会话里执行 `/reload-plugins`。Codex 更新后在会话里执行 `/hooks`，重新信任本插件 hooks。
+如果当前 Claude Code 会话正在运行，更新后在会话里执行 `/reload-plugins`。Codex 更新后新会话会在 hook sha 变化时提示信任，按提示批准即可；也可用 `/hooks` 手动管理。
 
 Claude Code 当前只接受一个 `statusLine` 命令。`setup-statusline.mjs` 检测到已有非本插件 statusLine 时，交互终端会询问是否直接替换；非交互环境默认不覆盖。若要同时显示多个状态源，请自行编写 wrapper，或使用第三方 statusLine 聚合工具。

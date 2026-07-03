@@ -41,7 +41,7 @@ codex plugin marketplace add Victor-Quqi/router-vitals
 codex plugin add anyrouter-status-monitor@router-vitals
 ```
 
-Then run `/hooks` inside a Codex session and trust this plugin's hooks; re-trust after plugin updates.
+Then start a Codex session and approve this plugin's hooks when Codex shows the trust prompt. You can also run `/hooks` inside a session to manage hook trust manually.
 
 Don't want to contribute? Set `ANYROUTER_STATUS_DISABLED=1`.
 

@@ -41,7 +41,7 @@ codex plugin marketplace add Victor-Quqi/router-vitals
 codex plugin add anyrouter-status-monitor@router-vitals
 ```
 
-装完在 Codex 会话里执行 `/hooks`，信任本插件的 hooks 即开始工作；插件更新后需重新信任一次。
+装完启动 Codex 会话时，按 hook 信任提示批准本插件 hooks 即开始工作；也可在会话里执行 `/hooks` 手动管理信任。
 
 不想参与贡献，设环境变量 `ANYROUTER_STATUS_DISABLED=1` 即可。
 

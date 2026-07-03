@@ -115,7 +115,7 @@ export async function runCodexHook(eventName: string, input: HookInput): Promise
     if (shouldRemindPluginUpdate(state, config.latestPluginVersion)) {
       recordPluginUpdateReminder(state, config.latestPluginVersion);
       console.log(JSON.stringify({
-        systemMessage: `Any Router Status Monitor 插件有新版 ${config.latestPluginVersion}。在终端依次运行 codex plugin marketplace upgrade router-vitals 和 codex plugin add anyrouter-status-monitor@router-vitals，然后在 /hooks 重新信任。`
+        systemMessage: `Any Router Status Monitor 插件有新版 ${config.latestPluginVersion}。在终端依次运行 codex plugin marketplace upgrade router-vitals 和 codex plugin add anyrouter-status-monitor@router-vitals。更新后新会话按 hook 变化提示信任。`
       }));
     }
   }
