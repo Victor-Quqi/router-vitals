@@ -9,7 +9,7 @@ The plugin works at user-turn granularity with an independent path per client: a
 All of these must hold:
 
 - The base URL host the client actually uses matches an Any Router target host at both turn start and turn end.
-- `ANYROUTER_STATUS_DISABLED=1` is not set locally.
+- `ROUTER_VITALS_DISABLED=1` is not set locally.
 - Remote reporting config is enabled.
 - The turn passes success/failure sampling.
 - The local daily report cap has not been reached.
@@ -33,16 +33,16 @@ Codex also requires reviewing and trusting non-managed hooks before they run: af
 
 ## Turning reporting off
 
-Set `ANYROUTER_STATUS_DISABLED=1` and the machine stops reporting (both clients).
+Set `ROUTER_VITALS_DISABLED=1` and the machine stops reporting (both clients).
 
 ## Self-hosting / debugging overrides
 
 Not needed normally — only when self-hosting or debugging:
 
-- `ANYROUTER_STATUS_API_BASE_URL`: report API base URL.
-- `ANYROUTER_STATUS_CONFIG_URL`: remote config JSON URL.
-- `ANYROUTER_STATUS_STATE_DIR`: local state root override; otherwise the plugin uses the client-provided plugin data directory or the system state directory.
-- `ANYROUTER_STATUS_DEBUG_HOOK=1`: writes the local hook diagnostic log `debug-hook.jsonl` for session events, hook input summaries, pending/session state, report decisions, errors, and transcript evidence.
+- `ROUTER_VITALS_API_BASE_URL`: report API base URL.
+- `ROUTER_VITALS_CONFIG_URL`: remote config JSON URL.
+- `ROUTER_VITALS_STATE_DIR`: local state root override; otherwise the plugin uses the client-provided plugin data directory or the system state directory.
+- `ROUTER_VITALS_DEBUG_HOOK=1`: writes the local hook diagnostic log `debug-hook.jsonl` for session events, hook input summaries, pending/session state, report decisions, errors, and transcript evidence.
 
 Diagnose one Claude Code session:
 
@@ -50,7 +50,7 @@ Diagnose one Claude Code session:
 pnpm diagnose:session <session-id>
 ```
 
-Historical sessions without `ANYROUTER_STATUS_DEBUG_HOOK=1` can only be diagnosed from transcript evidence; their hook stdin cannot be reconstructed. The diagnostic log is a local opt-in file and mainly records field names, the local transcript path, error summaries, model candidate fields, state transitions, and report results, not full prompts or responses.
+Historical sessions without `ROUTER_VITALS_DEBUG_HOOK=1` can only be diagnosed from transcript evidence; their hook stdin cannot be reconstructed. The diagnostic log is a local opt-in file and mainly records field names, the local transcript path, error summaries, model candidate fields, state transitions, and report results, not full prompts or responses.
 
 ## Local checks
 

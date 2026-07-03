@@ -6,11 +6,17 @@ import { createServer, type Server, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { classifyModel } from "../plugin/scripts/lib/policy.mjs";
+import { TARGET_HOSTS, classifyModel } from "../plugin/scripts/lib/policy.mjs";
 import { parseCodexConfigSnapshot, resolveCodexTarget } from "../plugin/scripts/lib/codex-target.mjs";
 import { inspectCodexTurn, readCodexSessionMeta } from "../plugin/scripts/lib/codex-transcript.mjs";
+import { MARKETPLACE_NAME, PLUGIN_FULL_ID } from "../shared/site-config.mjs";
 
 const hookPath = resolve("plugin/scripts/hook.mjs");
+const primaryTargetHost = TARGET_HOSTS[0]!;
+const secondaryTargetHost = TARGET_HOSTS[1]!;
+const providerId = "target_provider";
+const targetBaseUrl = `https://${primaryTargetHost}/v1`;
+const targetResponsesUrl = `${targetBaseUrl}/responses`;
 
 test("classifies gpt-5.5 model ids into the gpt-5.5 class", () => {
   assert.equal(classifyModel({ model: "gpt-5.5" }, { includeEnv: false }), "gpt-5.5");
@@ -21,12 +27,12 @@ test("classifies gpt-5.5 model ids into the gpt-5.5 class", () => {
 test("codex config snapshot extracts providers without touching secrets", () => {
   const snapshot = parseCodexConfigSnapshot([
     'model = "gpt-5.5"',
-    'model_provider = "anyrouter"',
+    `model_provider = "${providerId}"`,
     "",
-    "[model_providers.anyrouter]",
-    'name = "AnyRouter"',
+    `[model_providers.${providerId}]`,
+    'name = "Target Provider"',
     'env_key = "SHOULD_NEVER_BE_READ"',
-    'base_url = "https://anyrouter.top/v1"',
+    `base_url = "${targetBaseUrl}"`,
     "",
     "[model_providers.other]",
     'base_url = "https://api.other.example/v1"',
@@ -35,7 +41,7 @@ test("codex config snapshot extracts providers without touching secrets", () => 
     'model_provider = "other"'
   ].join("\n"));
 
-  assert.equal(snapshot.providerBaseUrls.anyrouter, "https://anyrouter.top/v1");
+  assert.equal(snapshot.providerBaseUrls[providerId], targetBaseUrl);
   assert.equal(snapshot.providerBaseUrls.other, "https://api.other.example/v1");
   assert.equal(JSON.stringify(snapshot).includes("SHOULD_NEVER_BE_READ"), false);
 });
@@ -43,18 +49,18 @@ test("codex config snapshot extracts providers without touching secrets", () => 
 test("codex target resolution requires the rollout session provider", () => {
   const config = parseCodexConfigSnapshot([
     'profile = "backup"',
-    'model_provider = "anyrouter"',
-    "[model_providers.anyrouter]",
-    'base_url = "https://anyrouter.top/v1"',
+    `model_provider = "${providerId}"`,
+    `[model_providers.${providerId}]`,
+    `base_url = "${targetBaseUrl}"`,
     "[model_providers.other]",
     'base_url = "https://api.other.example/v1"',
     "[profiles.backup]",
     'model_provider = "other"'
   ].join("\n"));
 
-  const fromSession = resolveCodexTarget({ sessionProviderId: "anyrouter", config });
+  const fromSession = resolveCodexTarget({ sessionProviderId: providerId, config });
   assert.equal(fromSession.matched, true);
-  assert.equal(fromSession.host, "anyrouter.top");
+  assert.equal(fromSession.host, primaryTargetHost);
 
   const withoutSessionProvider = resolveCodexTarget({ sessionProviderId: null, config });
   assert.equal(withoutSessionProvider.providerId, null);
@@ -68,7 +74,7 @@ test("codex target resolution requires the rollout session provider", () => {
     sessionProviderId: "openai",
     config: parseCodexConfigSnapshot([
       "[model_providers.openai]",
-      'base_url = "https://anyrouter.top/v1"'
+      `base_url = "${targetBaseUrl}"`
     ].join("\n"))
   });
   assert.equal(openaiProvider.matched, true);
@@ -79,7 +85,7 @@ test("codex turn inspection reads success, failure, and abort evidence", async (
   const path = join(dir, "rollout-test.jsonl");
   const baseMs = Date.parse("2026-07-02T08:00:00.000Z");
   await writeFile(path, [
-    rolloutLine(baseMs - 60000, "session_meta", { session_id: "s1", model_provider: "anyrouter", cli_version: "0.142.5" }),
+    rolloutLine(baseMs - 60000, "session_meta", { session_id: "s1", model_provider: providerId, cli_version: "0.142.5" }),
     rolloutLine(baseMs, "event_msg", { type: "task_started", turn_id: "t-ok" }),
     rolloutLine(baseMs, "turn_context", { turn_id: "t-ok", model: "gpt-5.5" }),
     rolloutLine(baseMs + 100, "event_msg", { type: "user_message", message: "hi" }),
@@ -89,14 +95,14 @@ test("codex turn inspection reads success, failure, and abort evidence", async (
     rolloutLine(baseMs + 10000, "event_msg", { type: "task_started", turn_id: "t-fail" }),
     rolloutLine(baseMs + 10000, "turn_context", { turn_id: "t-fail", model: "gpt-5.5" }),
     rolloutLine(baseMs + 10100, "event_msg", { type: "user_message", message: "again" }),
-    rolloutLine(baseMs + 15000, "event_msg", { type: "error", message: "unexpected status 503 Service Unavailable: no channel, url: https://anyrouter.top/v1/responses", codex_error_info: "other" }),
+    rolloutLine(baseMs + 15000, "event_msg", { type: "error", message: `unexpected status 503 Service Unavailable: no channel, url: ${targetResponsesUrl}`, codex_error_info: "other" }),
     rolloutLine(baseMs + 15001, "event_msg", { type: "task_complete", turn_id: "t-fail", duration_ms: 5001 }),
     rolloutLine(baseMs + 20000, "event_msg", { type: "task_started", turn_id: "t-abort" }),
     rolloutLine(baseMs + 21000, "event_msg", { type: "turn_aborted", turn_id: "t-abort", reason: "interrupted" })
   ].join("\n") + "\n", "utf8");
 
   const meta = await readCodexSessionMeta(path);
-  assert.equal(meta?.modelProvider, "anyrouter");
+  assert.equal(meta?.modelProvider, providerId);
 
   const okTurn = await inspectCodexTurn(path, "t-ok", 0);
   assert.equal(okTurn.found, true);
@@ -124,7 +130,7 @@ test("codex turn inspection rewinds past offsets taken after the turn markers", 
   const path = join(dir, "rollout-rewind.jsonl");
   const baseMs = Date.parse("2026-07-02T08:00:00.000Z");
   const lines = [
-    rolloutLine(baseMs - 60000, "session_meta", { session_id: "s1", model_provider: "anyrouter" }),
+    rolloutLine(baseMs - 60000, "session_meta", { session_id: "s1", model_provider: providerId }),
     rolloutLine(baseMs, "event_msg", { type: "task_started", turn_id: "t-late" }),
     rolloutLine(baseMs, "turn_context", { turn_id: "t-late", model: "gpt-5.5" }),
     rolloutLine(baseMs + 100, "event_msg", { type: "user_message", message: "hi" }),
@@ -151,7 +157,7 @@ test("codex hook reports settled turns only for matched providers", async () => 
       respondJson(res, {
         reportingEnabled: true,
         apiBaseUrl: `http://127.0.0.1:${serverPort(server)}`,
-        targetBaseUrlHosts: ["anyrouter.top", "a-ocnfniawgw.cn-shanghai.fcapp.run"],
+        targetBaseUrlHosts: [primaryTargetHost, secondaryTargetHost],
         sampleRateSuccess: 1,
         sampleRateFailure: 1,
         minPluginVersion: "0.1.0",
@@ -177,16 +183,16 @@ test("codex hook reports settled turns only for matched providers", async () => 
   const codexHome = await mkdtemp(join(tmpdir(), "codex-home-"));
   await writeFile(join(codexHome, "config.toml"), [
     'model = "gpt-5.5"',
-    'model_provider = "anyrouter"',
-    "[model_providers.anyrouter]",
-    'base_url = "https://anyrouter.top/v1"'
+    `model_provider = "${providerId}"`,
+    `[model_providers.${providerId}]`,
+    `base_url = "${targetBaseUrl}"`
   ].join("\n") + "\n", "utf8");
 
   const transcript = join(stateDir, "rollout-codex.jsonl");
   const env = {
     ...process.env,
-    ANYROUTER_STATUS_STATE_DIR: stateDir,
-    ANYROUTER_STATUS_CONFIG_URL: `http://127.0.0.1:${serverPort(server)}/config.json`,
+    ROUTER_VITALS_STATE_DIR: stateDir,
+    ROUTER_VITALS_CONFIG_URL: `http://127.0.0.1:${serverPort(server)}/config.json`,
     CODEX_HOME: codexHome
   };
   const baseMs = Date.now() - 60000;
@@ -195,7 +201,7 @@ test("codex hook reports settled turns only for matched providers", async () => 
   try {
     await writeFile(transcript, rolloutLine(baseMs, "session_meta", {
       session_id: "codex-session",
-      model_provider: "anyrouter",
+      model_provider: providerId,
       cli_version: "0.142.5"
     }) + "\n", "utf8");
 
@@ -220,7 +226,7 @@ test("codex hook reports settled turns only for matched providers", async () => 
     assert.equal(success.modelClass, "gpt-5.5");
     assert.equal(success.assistantStartBucket, "10_30s");
     assert.equal(success.errorType, "none");
-    assert.equal(success.targetHost, "anyrouter.top");
+    assert.equal(success.targetHost, primaryTargetHost);
     assert.equal("session_id" in success, false);
     assert.equal("transcriptPath" in success, false);
 
@@ -230,7 +236,7 @@ test("codex hook reports settled turns only for matched providers", async () => 
       rolloutLine(baseMs + 10000, "event_msg", { type: "task_started", turn_id: "turn-2" }),
       rolloutLine(baseMs + 10000, "turn_context", { turn_id: "turn-2", model: "gpt-5.5" }),
       rolloutLine(baseMs + 10100, "event_msg", { type: "user_message", message: "again" }),
-      rolloutLine(baseMs + 15000, "event_msg", { type: "error", message: "unexpected status 503 Service Unavailable: no channel, url: https://anyrouter.top/v1/responses, request id: 20260702", codex_error_info: "other" }),
+      rolloutLine(baseMs + 15000, "event_msg", { type: "error", message: `unexpected status 503 Service Unavailable: no channel, url: ${targetResponsesUrl}, request id: 20260702`, codex_error_info: "other" }),
       rolloutLine(baseMs + 15001, "event_msg", { type: "task_complete", turn_id: "turn-2", duration_ms: 5001 })
     ]);
     await runCodexHook("UserPromptSubmit", { ...baseInput, turn_id: "turn-3", prompt: "retry" }, env);
@@ -242,7 +248,7 @@ test("codex hook reports settled turns only for matched providers", async () => 
     assert.equal(failure.errorType, "server_error");
     assert.equal(failure.errorStatusCode, 503);
     assert.equal(typeof failure.errorHint, "string");
-    assert.equal(failure.errorHint.includes("anyrouter.top"), false);
+    assert.equal(failure.errorHint.includes(primaryTargetHost), false);
     assert.equal(failure.assistantStartBucket, "unknown");
 
     // Turn 3: user interrupt is settled as a skip, not a report.
@@ -306,8 +312,8 @@ test("codex hook emits low-frequency update reminders via Stop systemMessage", a
 
   const env = {
     ...process.env,
-    ANYROUTER_STATUS_STATE_DIR: stateDir,
-    ANYROUTER_STATUS_CONFIG_URL: `http://127.0.0.1:${serverPort(server)}/config.json`,
+    ROUTER_VITALS_STATE_DIR: stateDir,
+    ROUTER_VITALS_CONFIG_URL: `http://127.0.0.1:${serverPort(server)}/config.json`,
     CODEX_HOME: codexHome
   };
   const input = { session_id: "codex-reminder", transcript_path: transcript, cwd: stateDir, model: "gpt-5.5", turn_id: "turn-r" };
@@ -317,7 +323,8 @@ test("codex hook emits low-frequency update reminders via Stop systemMessage", a
     const message = JSON.parse(firstStop.trim());
     assert.equal(typeof message.systemMessage, "string");
     assert.equal(message.systemMessage.includes("9.9.9"), true);
-    assert.equal(message.systemMessage.includes("codex plugin marketplace upgrade"), true);
+    assert.equal(message.systemMessage.includes(`codex plugin marketplace upgrade ${MARKETPLACE_NAME}`), true);
+    assert.equal(message.systemMessage.includes(`codex plugin add ${PLUGIN_FULL_ID}`), true);
 
     const secondStop = await runCodexHook("Stop", input, env);
     assert.equal(secondStop.trim(), "");

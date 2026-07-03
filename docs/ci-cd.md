@@ -32,4 +32,4 @@ git diff --exit-code -- plugin worker shared status-page scripts
 
 部署所需的 GitHub Secrets、Variables 和首次部署顺序见 [cloudflare-setup.md](cloudflare-setup.md)。
 
-Pages 项目名默认写死为 `router-vitals`。如果 Cloudflare Pages 项目使用其他名字，改 `.github/workflows/deploy-cloudflare.yml` 里的 `pages deploy` 命令。
+Worker、D1 和 Pages 项目名来自 `site.config.json`。改站点身份后先运行 `pnpm run sync:site`。

@@ -1,4 +1,5 @@
 import { PLUGIN_VERSION } from "./policy.mjs";
+import { PLUGIN_ID } from "./site-config.mjs";
 export async function postReport(apiBaseUrl, payload) {
     let timedOut = false;
     let timeout = null;
@@ -13,7 +14,7 @@ export async function postReport(apiBaseUrl, payload) {
             signal: controller.signal,
             headers: {
                 "content-type": "application/json",
-                "user-agent": `anyrouter-status-monitor/${PLUGIN_VERSION}`
+                "user-agent": `${PLUGIN_ID}/${PLUGIN_VERSION}`
             },
             body: JSON.stringify(payload)
         });

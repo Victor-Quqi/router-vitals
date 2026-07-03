@@ -6,6 +6,7 @@ on:
       - main
     paths:
       - "src/**"
+      - "site.config.json"
       - "status-page/**"
       - "worker/**"
       - "shared/**"
@@ -42,6 +43,11 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Check site config sync
+        run: |
+          pnpm run sync:site
+          git diff --exit-code -- site.config.json src/shared/site-config.mts plugin/.claude-plugin/plugin.json plugin/.codex-plugin/plugin.json .claude-plugin/marketplace.json .agents/plugins/marketplace.json worker/wrangler.toml worker/wrangler.preview.toml status-page/index.html
+
       - name: Test
         run: pnpm test
 
@@ -74,31 +80,45 @@ jobs:
       - name: Build
         run: pnpm run build
 
+      - name: Read site config
+        id: site
+        run: |
+          node <<'NODE'
+          const fs = require('node:fs');
+          const config = JSON.parse(fs.readFileSync('site.config.json', 'utf8'));
+          fs.appendFileSync(process.env.GITHUB_ENV, `CLOUDFLARE_D1_NAME=${config.cloudflare.d1Name}\n`);
+          fs.appendFileSync(process.env.GITHUB_ENV, `CLOUDFLARE_PAGES_PROJECT=${config.cloudflare.pagesProject}\n`);
+          fs.appendFileSync(process.env.GITHUB_ENV, `STATUS_PAGE_URL=${config.statusPageUrl}\n`);
+          NODE
+
       - name: Validate deployment variables
         run: |
           test -n "$CLOUDFLARE_D1_DATABASE_ID"
           test -n "$STATUS_API_BASE_URL"
+          test -n "$CLOUDFLARE_D1_NAME"
+          test -n "$CLOUDFLARE_PAGES_PROJECT"
+          test -n "$STATUS_PAGE_URL"
 
       - name: Inject D1 database id
         run: perl -0pi -e 's/replace-with-d1-database-id/$ENV{CLOUDFLARE_D1_DATABASE_ID}/g' worker/wrangler.toml
 
       - name: Inject status page API base
-        run: node -e "const fs = require('fs'); const value = 'window.ANYROUTER_STATUS_API_BASE = ' + JSON.stringify(process.env.STATUS_API_BASE_URL) + ';\\n'; fs.writeFileSync('status-page/config.js', value);"
+        run: node -e "const fs = require('fs'); const value = 'window.ROUTER_VITALS_API_BASE = ' + JSON.stringify(process.env.STATUS_API_BASE_URL) + ';\\n'; fs.writeFileSync('status-page/config.js', value);"
 
       - name: Apply D1 migrations
-        run: pnpm dlx wrangler@4 d1 migrations apply router-vitals --remote --config worker/wrangler.toml
+        run: pnpm dlx wrangler@4 d1 migrations apply "$CLOUDFLARE_D1_NAME" --remote --config worker/wrangler.toml
 
       - name: Deploy Worker
         run: pnpm dlx wrangler@4 deploy --config worker/wrangler.toml
 
       - name: Deploy Pages
-        run: pnpm dlx wrangler@4 pages deploy status-page --project-name=router-vitals --branch=main --commit-dirty=true
+        run: pnpm dlx wrangler@4 pages deploy status-page --project-name="$CLOUDFLARE_PAGES_PROJECT" --branch=main --commit-dirty=true
 
       - name: Verify production Pages config
         run: |
-          expected="window.ANYROUTER_STATUS_API_BASE = \"$STATUS_API_BASE_URL\";"
+          expected="window.ROUTER_VITALS_API_BASE = \"$STATUS_API_BASE_URL\";"
           for attempt in 1 2 3 4 5 6 7 8 9 10 11 12; do
-            config="$(curl -fsSL https://router-vitals.pages.dev/config.js || true)"
+            config="$(curl -fsSL "$STATUS_PAGE_URL/config.js" || true)"
             if printf '%s' "$config" | grep -Fq "$expected"; then
               exit 0
             fi

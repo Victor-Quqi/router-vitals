@@ -1,1 +1,1 @@
-window.ANYROUTER_STATUS_API_BASE ||= window.location.origin;
+window.ROUTER_VITALS_API_BASE ||= window.location.origin;

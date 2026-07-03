@@ -7,6 +7,7 @@ const excludedTopLevel = new Set(["_build", "tests"]);
 
 await copyChildren(outRoot, repoRoot, 0);
 await packagePluginPolicyCore();
+await packageStatusPageSiteConfig();
 
 async function copyChildren(fromDir: string, toDir: string, depth: number): Promise<void> {
   await mkdir(toDir, { recursive: true });
@@ -29,7 +30,19 @@ async function copyChildren(fromDir: string, toDir: string, depth: number): Prom
 
 async function packagePluginPolicyCore(): Promise<void> {
   const sharedPolicyCorePath = join(repoRoot, "shared", "policy-core.mjs");
+  const sharedSiteConfigPath = join(repoRoot, "shared", "site-config.mjs");
   const pluginPolicyCorePath = join(repoRoot, "plugin", "scripts", "lib", "policy-core.mjs");
+  const pluginSiteConfigPath = join(repoRoot, "plugin", "scripts", "lib", "site-config.mjs");
 
   await cp(sharedPolicyCorePath, pluginPolicyCorePath);
+  await cp(sharedSiteConfigPath, pluginSiteConfigPath);
+}
+
+async function packageStatusPageSiteConfig(): Promise<void> {
+  const sharedSiteConfigPath = join(repoRoot, "shared", "site-config.mjs");
+  const statusPageSharedDir = join(repoRoot, "status-page", "shared");
+  const statusPageSiteConfigPath = join(statusPageSharedDir, "site-config.mjs");
+
+  await mkdir(statusPageSharedDir, { recursive: true });
+  await cp(sharedSiteConfigPath, statusPageSiteConfigPath);
 }

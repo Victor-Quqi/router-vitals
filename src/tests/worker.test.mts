@@ -3,7 +3,10 @@ import assert from "node:assert/strict";
 import worker, { handleReport, handleRequest } from "../worker/src/index.mjs";
 import { createMemoryResponseBodyCache } from "../worker/src/runtime-cache.mjs";
 import { buildStatusFromRows } from "../worker/src/status.mjs";
-import { PLUGIN_VERSION, SERVER_DAILY_REPORT_HARD_LIMIT, SERVER_DAILY_REPORT_SAMPLE_RATE, SERVER_DAILY_REPORT_SOFT_LIMIT, STATUS_MODEL_ORDER } from "../shared/policy.mjs";
+import { PLUGIN_VERSION, SERVER_DAILY_REPORT_HARD_LIMIT, SERVER_DAILY_REPORT_SAMPLE_RATE, SERVER_DAILY_REPORT_SOFT_LIMIT, STATUS_MODEL_ORDER, TARGET_HOSTS } from "../shared/policy.mjs";
+
+const primaryTargetHost = TARGET_HOSTS[0]!;
+const secondaryTargetHost = TARGET_HOSTS[1]!;
 
 test("worker rejects unknown report fields before touching D1", async () => {
   const request = new Request("https://api.example.test/v1/report", {
@@ -19,8 +22,8 @@ test("worker rejects unknown report fields before touching D1", async () => {
       anonymousId: "anon_abcdefghijklmnop",
       sampleRate: 1,
       targetMatched: true,
-      targetHost: "anyrouter.top",
-      actualUrl: "https://anyrouter.top"
+      targetHost: primaryTargetHost,
+      actualUrl: `https://${primaryTargetHost}`
     })
   });
 
@@ -71,7 +74,7 @@ test("worker rejects non-canonical client values before touching D1", async () =
       anonymousId: "anon_clientStrictabcdefghijkl",
       sampleRate: 1,
       targetMatched: true,
-      targetHost: "anyrouter.top"
+      targetHost: primaryTargetHost
     })
   });
 
@@ -174,10 +177,10 @@ test("worker counts assistant start buckets only for successful reports", async 
   assert.equal(failureModel.values[10], 0);
 });
 
-test("config endpoint exposes fixed AnyRouter hosts", async () => {
+test("config endpoint exposes fixed target hosts", async () => {
   const response = await handleRequest(new Request("https://api.example.test/v1/config"), {});
   const body = await response.json();
-  assert.deepEqual(body.targetBaseUrlHosts, ["anyrouter.top", "a-ocnfniawgw.cn-shanghai.fcapp.run"]);
+  assert.deepEqual(body.targetBaseUrlHosts, [primaryTargetHost, secondaryTargetHost]);
   assert.equal(body.apiBaseUrl, "https://api.example.test");
   assert.equal(body.latestPluginVersion, PLUGIN_VERSION);
 });
@@ -209,13 +212,13 @@ test("status endpoint caches reads and refresh can bypass cache", async () => {
 
 test("status endpoint can filter by target host", async () => {
   const db = statusDb();
-  const response = await handleRequest(new Request("https://api.example.test/v1/status?window=15m&targetHost=anyrouter.top&refresh=1"), { DB: db });
+  const response = await handleRequest(new Request(`https://api.example.test/v1/status?window=15m&targetHost=${primaryTargetHost}&refresh=1`), { DB: db });
   assert.equal(response.status, 200);
   assert.equal(db.calls.length, 3);
   assert.match(db.calls[0]!.query, /target_minute_aggregates/);
   assert.match(db.calls[1]!.query, /target_model_minute_aggregates/);
   assert.match(db.calls[2]!.query, /target_model_error_observations/);
-  assert.equal(db.calls[0]!.values[0], "anyrouter.top");
+  assert.equal(db.calls[0]!.values[0], primaryTargetHost);
 });
 
 test("status endpoint can filter by client", async () => {
@@ -545,7 +548,7 @@ function reportRequest(anonymousId: string, ok = true): Request {
       anonymousId,
       sampleRate: 1,
       targetMatched: true,
-      targetHost: "anyrouter.top"
+      targetHost: primaryTargetHost
     })
   });
 }

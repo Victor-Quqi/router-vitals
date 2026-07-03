@@ -1,5 +1,6 @@
 import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { PLUGIN_ID } from "../shared/site-config.mjs";
 
 type Mode = "check" | "sync";
 
@@ -71,10 +72,10 @@ async function checkMarketplaceVersion(version: string, mismatches: string[]): P
   }
 
   const plugins = Array.isArray(marketplace.plugins) ? marketplace.plugins : [];
-  const plugin = plugins.find((item) => isRecord(item) && item.name === "anyrouter-status-monitor");
+  const plugin = plugins.find((item) => isRecord(item) && item.name === PLUGIN_ID);
   const pluginVersion = isRecord(plugin) ? plugin.version : undefined;
   if (pluginVersion !== version) {
-    mismatches.push(`${marketplacePath}: anyrouter-status-monitor version is ${String(pluginVersion)}, expected ${version}`);
+    mismatches.push(`${marketplacePath}: ${PLUGIN_ID} version is ${String(pluginVersion)}, expected ${version}`);
   }
 }
 
@@ -83,7 +84,7 @@ async function syncMarketplaceVersion(version: string): Promise<void> {
   marketplace.version = version;
   const plugins = Array.isArray(marketplace.plugins) ? marketplace.plugins : [];
   for (const item of plugins) {
-    if (isRecord(item) && item.name === "anyrouter-status-monitor") item.version = version;
+    if (isRecord(item) && item.name === PLUGIN_ID) item.version = version;
   }
   await writeFile(marketplacePath, `${JSON.stringify(marketplace, null, 2)}\n`, "utf8");
 }

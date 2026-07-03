@@ -1,3 +1,3 @@
 interface Window {
-  ANYROUTER_STATUS_API_BASE?: string;
+  ROUTER_VITALS_API_BASE?: string;
 }

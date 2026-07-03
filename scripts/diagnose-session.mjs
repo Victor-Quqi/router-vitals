@@ -4,6 +4,7 @@ import { existsSync } from "node:fs";
 import { readdir, readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, join } from "node:path";
+import { PLUGIN_ID } from "../shared/site-config.mjs";
 
 const sessionId = getSessionIdArg();
 
@@ -32,7 +33,7 @@ printTranscriptTimeline(transcriptSessionRecords);
 function printHookEvents(records) {
   console.log("hook events:");
   if (records.length === 0) {
-    console.log("  missing: ANYROUTER_STATUS_DEBUG_HOOK was not enabled, so hook stdin evidence is unavailable");
+    console.log("  missing: ROUTER_VITALS_DEBUG_HOOK was not enabled, so hook stdin evidence is unavailable");
     console.log("");
     return;
   }
@@ -321,12 +322,12 @@ async function findFile(root, targetName) {
 }
 
 function getDefaultDebugLogPath() {
-  return join(getStateRoot(), "anyrouter-status-monitor", "debug-hook.jsonl");
+  return join(getStateRoot(), PLUGIN_ID, "debug-hook.jsonl");
 }
 
 function getStateRoot() {
   return (
-    process.env.ANYROUTER_STATUS_STATE_DIR ||
+    process.env.ROUTER_VITALS_STATE_DIR ||
     process.env.XDG_STATE_HOME ||
     process.env.LOCALAPPDATA ||
     process.env.APPDATA ||

@@ -30,6 +30,11 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Check site config sync
+        run: |
+          pnpm run sync:site
+          git diff --exit-code -- site.config.json src/shared/site-config.mts plugin/.claude-plugin/plugin.json plugin/.codex-plugin/plugin.json .claude-plugin/marketplace.json .agents/plugins/marketplace.json worker/wrangler.toml worker/wrangler.preview.toml status-page/index.html
+
       - name: Test
         run: pnpm test
 

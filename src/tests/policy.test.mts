@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   PLUGIN_VERSION,
+  TARGET_HOSTS,
   bucketAssistantStart,
   classifyError,
   classifyModel,
@@ -17,9 +18,12 @@ import {
   validateReportPayload
 } from "../shared/policy.mjs";
 
-test("matches only AnyRouter target hosts", () => {
-  assert.equal(matchTargetBaseUrl("https://anyrouter.top/v1/messages").matched, true);
-  assert.equal(matchTargetBaseUrl("https://a-ocnfniawgw.cn-shanghai.fcapp.run").matched, true);
+const primaryTargetHost = TARGET_HOSTS[0]!;
+const secondaryTargetHost = TARGET_HOSTS[1]!;
+
+test("matches only configured target hosts", () => {
+  assert.equal(matchTargetBaseUrl(`https://${primaryTargetHost}/v1/messages`).matched, true);
+  assert.equal(matchTargetBaseUrl(`https://${secondaryTargetHost}`).matched, true);
   assert.equal(matchTargetBaseUrl("https://api.anthropic.com").matched, false);
   assert.equal(matchTargetBaseUrl("https://example.com").matched, false);
 });
@@ -32,23 +36,23 @@ test("classifies current Claude model fields", () => {
   assert.equal(classifyModel({}, { includeEnv: false }), "unknown");
 });
 
-test("remote target hosts are constrained to baked AnyRouter hosts", () => {
+test("remote target hosts are constrained to baked target hosts", () => {
   const config = sanitizeRemoteConfig({
-    targetBaseUrlHosts: ["anyrouter.top", "evil.example"],
+    targetBaseUrlHosts: [primaryTargetHost, "evil.example"],
     sampleRateSuccess: 2,
     sampleRateFailure: -1,
     latestPluginVersion: "9.9.9"
   });
 
-  assert.deepEqual(config.targetBaseUrlHosts, ["anyrouter.top"]);
+  assert.deepEqual(config.targetBaseUrlHosts, [primaryTargetHost]);
   assert.equal(config.sampleRateSuccess, 1);
   assert.equal(config.sampleRateFailure, 0);
   assert.equal(config.latestPluginVersion, "9.9.9");
 });
 
-test("target host normalization only accepts fixed AnyRouter hosts", () => {
-  assert.equal(normalizeTargetHost("ANYROUTER.TOP"), "anyrouter.top");
-  assert.equal(normalizeTargetHost("https://anyrouter.top"), null);
+test("target host normalization only accepts fixed target hosts", () => {
+  assert.equal(normalizeTargetHost(primaryTargetHost.toUpperCase()), primaryTargetHost);
+  assert.equal(normalizeTargetHost(`https://${primaryTargetHost}`), null);
   assert.equal(normalizeTargetHost("api.anthropic.com"), null);
 });
 
@@ -104,9 +108,9 @@ test("report payload rejects actual URLs and station fields", () => {
     anonymousId: "anon_abcdefghijklmnop",
     sampleRate: 1,
     targetMatched: true,
-    targetHost: "anyrouter.top",
-    baseUrl: "https://anyrouter.top",
-    stationId: "anyrouter"
+    targetHost: primaryTargetHost,
+    baseUrl: `https://${primaryTargetHost}`,
+    stationId: "target-provider"
   };
 
   const validation = validateReportPayload(payload);
@@ -145,7 +149,7 @@ test("report payload rejects full URL as target host", () => {
     anonymousId: "anon_abcdefghijklmnop",
     sampleRate: 1,
     targetMatched: true,
-    targetHost: "https://anyrouter.top"
+    targetHost: `https://${primaryTargetHost}`
   };
 
   const validation = validateReportPayload(payload);
@@ -201,7 +205,7 @@ test("report payload accepts optional sanitized error details", () => {
     anonymousId: "anon_abcdefghijklmnop",
     sampleRate: 1,
     targetMatched: true,
-    targetHost: "anyrouter.top"
+    targetHost: primaryTargetHost
   };
 
   assert.equal(validateReportPayload(payload).ok, true);

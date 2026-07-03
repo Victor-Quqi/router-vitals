@@ -1,6 +1,14 @@
 {
   "name": "anyrouter-status-monitor",
-  "version": "0.2.5",
+  "version": "0.3.0",
   "description": "Anonymous community status monitor for Any Router Codex usage.",
-  "hooks": "./hooks/codex-hooks.json"
+  "hooks": "./hooks/codex-hooks.json",
+  "displayName": "Any Router Status Monitor",
+  "homepage": "https://github.com/Victor-Quqi/router-vitals",
+  "repository": "https://github.com/Victor-Quqi/router-vitals",
+  "keywords": [
+    "codex",
+    "status",
+    "anyrouter"
+  ]
 }

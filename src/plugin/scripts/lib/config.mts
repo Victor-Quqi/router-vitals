@@ -8,17 +8,17 @@ interface ConfigCache {
 }
 
 interface ConfigGlobal {
-  __ANYROUTER_STATUS_CONFIG_CACHE__?: ConfigCache;
+  __ROUTER_VITALS_CONFIG_CACHE__?: ConfigCache;
 }
 
 export async function loadRemoteConfig(fetchImpl: typeof fetch = fetch): Promise<RemoteConfig> {
-  const envDisabled = process.env.ANYROUTER_STATUS_DISABLED === "1";
+  const envDisabled = process.env.ROUTER_VITALS_DISABLED === "1";
   if (envDisabled) return { ...DEFAULT_REMOTE_CONFIG, reportingEnabled: false };
 
   const cached = readMemoryCache();
   if (cached) return cached;
 
-  const url = process.env.ANYROUTER_STATUS_CONFIG_URL || DEFAULT_CONFIG_URL;
+  const url = process.env.ROUTER_VITALS_CONFIG_URL || DEFAULT_CONFIG_URL;
   try {
     const response = await fetchWithTimeout(fetchImpl, url, 900);
     if (!response.ok) throw new Error(`config http ${response.status}`);
@@ -26,14 +26,14 @@ export async function loadRemoteConfig(fetchImpl: typeof fetch = fetch): Promise
     const remoteConfig = isRecord(json) ? json : {};
     const config = sanitizeRemoteConfig({
       ...remoteConfig,
-      apiBaseUrl: process.env.ANYROUTER_STATUS_API_BASE_URL || remoteConfig.apiBaseUrl
+      apiBaseUrl: process.env.ROUTER_VITALS_API_BASE_URL || remoteConfig.apiBaseUrl
     });
     writeMemoryCache(config);
     return config;
   } catch {
     const config = sanitizeRemoteConfig({
       ...DEFAULT_REMOTE_CONFIG,
-      apiBaseUrl: process.env.ANYROUTER_STATUS_API_BASE_URL || DEFAULT_REMOTE_CONFIG.apiBaseUrl
+      apiBaseUrl: process.env.ROUTER_VITALS_API_BASE_URL || DEFAULT_REMOTE_CONFIG.apiBaseUrl
     });
     writeMemoryCache(config);
     return config;
@@ -51,13 +51,13 @@ async function fetchWithTimeout(fetchImpl: typeof fetch, url: string, timeoutMs:
 }
 
 function readMemoryCache(): RemoteConfig | null {
-  const cached = (globalThis as typeof globalThis & ConfigGlobal).__ANYROUTER_STATUS_CONFIG_CACHE__;
+  const cached = (globalThis as typeof globalThis & ConfigGlobal).__ROUTER_VITALS_CONFIG_CACHE__;
   if (!cached || cached.expiresAt <= Date.now()) return null;
   return cached.value;
 }
 
 function writeMemoryCache(value: RemoteConfig): void {
-  (globalThis as typeof globalThis & ConfigGlobal).__ANYROUTER_STATUS_CONFIG_CACHE__ = {
+  (globalThis as typeof globalThis & ConfigGlobal).__ROUTER_VITALS_CONFIG_CACHE__ = {
     value,
     expiresAt: Date.now() + CACHE_TTL_MS
   };

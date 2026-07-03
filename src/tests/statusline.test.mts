@@ -7,13 +7,16 @@ import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { LOCAL_DAILY_REPORT_LIMIT } from "../plugin/scripts/lib/policy.mjs";
-import { getTodayKey } from "../shared/policy.mjs";
+import { TARGET_HOSTS, getTodayKey } from "../shared/policy.mjs";
+import { PLUGIN_ID, SITE_NAME } from "../shared/site-config.mjs";
 
 const statuslinePath = resolve("plugin/scripts/statusline.mjs");
+const primaryTargetHost = TARGET_HOSTS[0]!;
+const secondaryTargetHost = TARGET_HOSTS[1]!;
 
 test("statusLine prints today's local contribution count", async () => {
   const stateDir = await mkdtemp(join(tmpdir(), "router-vitals-statusline-"));
-  const statePath = join(stateDir, "anyrouter-status-monitor", "state.json");
+  const statePath = join(stateDir, PLUGIN_ID, "state.json");
   const today = getTodayKey();
 
   await mkdir(dirname(statePath), { recursive: true });
@@ -25,8 +28,8 @@ test("statusLine prints today's local contribution count", async () => {
   try {
     const output = await runStatusLine({
       ...process.env,
-      ANYROUTER_STATUS_DISABLED: "1",
-      ANYROUTER_STATUS_STATE_DIR: stateDir,
+      ROUTER_VITALS_DISABLED: "1",
+      ROUTER_VITALS_STATE_DIR: stateDir,
       ANTHROPIC_BASE_URL: "https://api.anthropic.com"
     });
     assert.match(output, /今日贡献 2 条/);
@@ -37,7 +40,7 @@ test("statusLine prints today's local contribution count", async () => {
 
 test("statusLine shows a full daily contribution hint", async () => {
   const stateDir = await mkdtemp(join(tmpdir(), "router-vitals-statusline-"));
-  const statePath = join(stateDir, "anyrouter-status-monitor", "state.json");
+  const statePath = join(stateDir, PLUGIN_ID, "state.json");
   const today = getTodayKey();
 
   await mkdir(dirname(statePath), { recursive: true });
@@ -49,8 +52,8 @@ test("statusLine shows a full daily contribution hint", async () => {
   try {
     const output = await runStatusLine({
       ...process.env,
-      ANYROUTER_STATUS_DISABLED: "1",
-      ANYROUTER_STATUS_STATE_DIR: stateDir,
+      ROUTER_VITALS_DISABLED: "1",
+      ROUTER_VITALS_STATE_DIR: stateDir,
       ANTHROPIC_BASE_URL: "https://api.anthropic.com"
     });
     assert.match(output, /今日贡献已满/);
@@ -63,14 +66,14 @@ test("statusLine shows a full daily contribution hint", async () => {
 
 test("statusLine shows recent local report failures", async () => {
   const stateDir = await mkdtemp(join(tmpdir(), "router-vitals-statusline-"));
-  const statePath = join(stateDir, "anyrouter-status-monitor", "state.json");
+  const statePath = join(stateDir, PLUGIN_ID, "state.json");
   const server = createServer((req, res) => {
     if (req.method === "GET" && req.url === "/config.json") {
       const base = `http://127.0.0.1:${serverPort(server)}`;
       respondJson(res, {
         reportingEnabled: true,
         apiBaseUrl: base,
-        targetBaseUrlHosts: ["anyrouter.top", "a-ocnfniawgw.cn-shanghai.fcapp.run"],
+        targetBaseUrlHosts: [primaryTargetHost, secondaryTargetHost],
         sampleRateSuccess: 1,
         sampleRateFailure: 1,
         minPluginVersion: "0.1.0",
@@ -99,7 +102,7 @@ test("statusLine shows recent local report failures", async () => {
       kind: "post_failed",
       reason: "http_error",
       modelClass: "sonnet",
-      targetHost: "anyrouter.top",
+      targetHost: primaryTargetHost,
       postStatusCode: 503
     }
   }), "utf8");
@@ -109,12 +112,12 @@ test("statusLine shows recent local report failures", async () => {
   try {
     const output = await runStatusLine({
       ...process.env,
-      ANYROUTER_STATUS_STATE_DIR: stateDir,
-      ANYROUTER_STATUS_CONFIG_URL: `http://127.0.0.1:${serverPort(server)}/config.json`,
-      ANTHROPIC_BASE_URL: "https://anyrouter.top"
+      ROUTER_VITALS_STATE_DIR: stateDir,
+      ROUTER_VITALS_CONFIG_URL: `http://127.0.0.1:${serverPort(server)}/config.json`,
+      ANTHROPIC_BASE_URL: `https://${primaryTargetHost}`
     });
 
-    assert.match(output, /Any Router 近 60m 状态: 可用/);
+    assert.match(output, new RegExp(`${SITE_NAME} 近 60m 状态: 可用`));
     assert.match(output, /本机上报失败: HTTP 503/);
     assert.match(output, /今日贡献 2 条/);
   } finally {
@@ -132,7 +135,7 @@ test("statusLine caches remote status between invocations", async () => {
       respondJson(res, {
         reportingEnabled: true,
         apiBaseUrl: base,
-        targetBaseUrlHosts: ["anyrouter.top", "a-ocnfniawgw.cn-shanghai.fcapp.run"],
+        targetBaseUrlHosts: [primaryTargetHost, secondaryTargetHost],
         sampleRateSuccess: 1,
         sampleRateFailure: 1,
         minPluginVersion: "0.1.0",
@@ -157,18 +160,18 @@ test("statusLine caches remote status between invocations", async () => {
   try {
     const env = {
       ...process.env,
-      ANYROUTER_STATUS_STATE_DIR: stateDir,
-      ANYROUTER_STATUS_CONFIG_URL: `http://127.0.0.1:${serverPort(server)}/config.json`,
-      ANTHROPIC_BASE_URL: "https://anyrouter.top"
+      ROUTER_VITALS_STATE_DIR: stateDir,
+      ROUTER_VITALS_CONFIG_URL: `http://127.0.0.1:${serverPort(server)}/config.json`,
+      ANTHROPIC_BASE_URL: `https://${primaryTargetHost}`
     };
 
     const first = await runStatusLine(env);
     const second = await runStatusLine(env);
 
-    assert.match(first, /Any Router 近 60m 状态: 可用/);
+    assert.match(first, new RegExp(`${SITE_NAME} 近 60m 状态: 可用`));
     assert.match(first, /插件有新版 9\.9\.9 · 运行 \/plugin 更新/);
     assert.doesNotMatch(first, /贡献开启|今日贡献/);
-    assert.match(second, /Any Router 近 60m 状态: 可用/);
+    assert.match(second, new RegExp(`${SITE_NAME} 近 60m 状态: 可用`));
     assert.match(second, /插件有新版 9\.9\.9 · 运行 \/plugin 更新/);
     assert.doesNotMatch(second, /贡献开启|今日贡献/);
     assert.equal(statusRequests, 1);

@@ -1,8 +1,11 @@
 import { spawn } from "node:child_process";
+import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import process from "node:process";
 
 const wranglerConfig = "worker/wrangler.preview.toml";
+const siteConfig = JSON.parse(await readFile("site.config.json", "utf8")) as { cloudflare?: { d1Name?: unknown } };
+const d1Name = readD1Name(siteConfig);
 const port = process.env.STATUS_PREVIEW_PORT || "8788";
 if (!/^\d+$/.test(port)) throw new Error("STATUS_PREVIEW_PORT must be a numeric port");
 const pnpm = "pnpm";
@@ -11,11 +14,11 @@ const wranglerEnv = buildWranglerEnv();
 const seedPreviewData = process.env.STATUS_PREVIEW_SEED !== "0";
 
 if (seedPreviewData) {
-  await runWrangler(["d1", "execute", "router-vitals", "--local", "--config", wranglerConfig, "--file", "worker/preview/reset.sql"]);
-  await runWrangler(["d1", "execute", "router-vitals", "--local", "--config", wranglerConfig, "--file", "worker/migrations/0001_initial.sql"]);
-  await runWrangler(["d1", "execute", "router-vitals", "--local", "--config", wranglerConfig, "--file", "worker/preview/seed.sql"]);
+  await runWrangler(["d1", "execute", d1Name, "--local", "--config", wranglerConfig, "--file", "worker/preview/reset.sql"]);
+  await runWrangler(["d1", "execute", d1Name, "--local", "--config", wranglerConfig, "--file", "worker/migrations/0001_initial.sql"]);
+  await runWrangler(["d1", "execute", d1Name, "--local", "--config", wranglerConfig, "--file", "worker/preview/seed.sql"]);
 } else {
-  await runWrangler(["d1", "migrations", "apply", "router-vitals", "--local", "--config", wranglerConfig]);
+  await runWrangler(["d1", "migrations", "apply", d1Name, "--local", "--config", wranglerConfig]);
 }
 
 const dev = spawnPnpm([
@@ -79,4 +82,10 @@ function buildWranglerEnv(): NodeJS.ProcessEnv {
   }
   env.XDG_CONFIG_HOME = resolve(".wrangler", "config");
   return env;
+}
+
+function readD1Name(config: { cloudflare?: { d1Name?: unknown } }): string {
+  const d1Name = config.cloudflare?.d1Name;
+  if (typeof d1Name !== "string" || d1Name.trim() === "") throw new Error("site.config.json cloudflare.d1Name must be a non-empty string");
+  return d1Name;
 }

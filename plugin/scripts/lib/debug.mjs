@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { getPluginStateDir } from "./state.mjs";
 const DEBUG_LOG_FILE_NAME = "debug-hook.jsonl";
 export function isHookDebugEnabled() {
-    return process.env.ANYROUTER_STATUS_DEBUG_HOOK === "1";
+    return process.env.ROUTER_VITALS_DEBUG_HOOK === "1";
 }
 export function getHookDebugLogPath() {
     return join(getPluginStateDir(), DEBUG_LOG_FILE_NAME);

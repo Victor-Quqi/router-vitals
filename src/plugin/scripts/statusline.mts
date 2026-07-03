@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { loadRemoteConfig } from "./lib/config.mjs";
 import { LOCAL_DAILY_REPORT_LIMIT, isPluginVersionNewer, matchTargetBaseUrl } from "./lib/policy.mjs";
+import { SITE_NAME } from "./lib/site-config.mjs";
 import { getTodayContributions, loadState, loadStatusCache, saveStatusCache, type LastDecision } from "./lib/state.mjs";
 
 const STATUS_CACHE_TTL_MS = 60 * 1000;
@@ -13,7 +14,7 @@ interface StatusSummary {
 }
 
 main().catch(() => {
-  console.log("Any Router 近 60m 状态: 状态暂缺");
+  console.log(`${SITE_NAME} 近 60m 状态: 状态暂缺`);
 });
 
 async function main() {
@@ -28,14 +29,14 @@ async function main() {
       count,
       lastDecision: state.lastDecision
     })} · ${formatContributionCount(count)}`;
-    console.log(`Any Router 近 60m 状态: 未匹配目标站 · ${detail}`);
+    console.log(`${SITE_NAME} 近 60m 状态: 未匹配目标站 · ${detail}`);
     return;
   }
 
   const status = await getCachedStatus(config.apiBaseUrl);
   const statusText = formatStatus(status);
   if (updateHint) {
-    console.log(`Any Router 近 60m 状态: ${statusText} · ${updateHint}`);
+    console.log(`${SITE_NAME} 近 60m 状态: ${statusText} · ${updateHint}`);
     return;
   }
 
@@ -44,7 +45,7 @@ async function main() {
     count,
     lastDecision: state.lastDecision
   });
-  console.log(`Any Router 近 60m 状态: ${statusText} · ${contributionText} · ${formatContributionCount(count)}`);
+  console.log(`${SITE_NAME} 近 60m 状态: ${statusText} · ${contributionText} · ${formatContributionCount(count)}`);
 }
 
 async function getCachedStatus(apiBaseUrl: string): Promise<StatusSummary | null> {

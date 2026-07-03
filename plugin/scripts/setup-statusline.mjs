@@ -4,9 +4,8 @@ import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { createInterface } from "node:readline/promises";
 import { fileURLToPath } from "node:url";
-const PLUGIN_ID = "anyrouter-status-monitor@router-vitals";
-const PLUGIN_DATA_DIR_NAME = "anyrouter-status-monitor-router-vitals";
-const LAUNCHER_FILE_NAME = "router-vitals-statusline.mjs";
+import { PLUGIN_DATA_DIR_NAME, PLUGIN_FULL_ID, PLUGIN_ID, SITE_NAME, STATUSLINE_LAUNCHER_FILE_NAME } from "./lib/site-config.mjs";
+const LAUNCHER_FILE_NAME = STATUSLINE_LAUNCHER_FILE_NAME;
 main().catch((error) => {
     console.error(`statusLine 设置失败: ${getErrorMessage(error)}`);
     process.exitCode = 1;
@@ -41,7 +40,7 @@ function parseOptions(args) {
 async function confirmOverwriteStatusLine(existing, nextCommand) {
     console.log(`检测到已有 statusLine: ${formatStatusLineCommand(existing)}`);
     console.log("Claude Code 当前只支持一个 statusLine 命令。若要同时显示多个状态源，请自行编写 wrapper，或使用第三方 statusLine 聚合工具。");
-    console.log(`Any Router statusLine 命令: ${nextCommand}`);
+    console.log(`${SITE_NAME} statusLine 命令: ${nextCommand}`);
     if (!process.stdin.isTTY || !process.stdout.isTTY) {
         console.log("当前不是交互终端，未覆盖。确认要直接替换时重新运行并加上 --force。");
         return false;
@@ -64,7 +63,7 @@ function formatStatusLineCommand(value) {
     return value.command;
 }
 function getClaudeHome() {
-    return process.env.ANYROUTER_STATUS_CLAUDE_HOME || join(homedir(), ".claude");
+    return process.env.ROUTER_VITALS_CLAUDE_HOME || join(homedir(), ".claude");
 }
 async function loadSettings(path) {
     try {
@@ -89,8 +88,8 @@ function hasUnrelatedStatusLine(value) {
 function isRouterVitalsStatusLineCommand(command) {
     const normalized = command.replace(/\\/g, "/").toLowerCase();
     return (normalized.includes(LAUNCHER_FILE_NAME) ||
-        (normalized.includes("anyrouter-status-monitor") && normalized.includes("statusline.mjs")) ||
-        (normalized.includes("router-vitals") && normalized.includes("plugin/scripts/statusline.mjs")));
+        (normalized.includes(PLUGIN_ID.toLowerCase()) && normalized.includes("statusline.mjs")) ||
+        (normalized.includes(PLUGIN_DATA_DIR_NAME.toLowerCase()) && normalized.includes("plugin/scripts/statusline.mjs")));
 }
 async function writeJsonFileAtomic(path, value) {
     await writeTextFileAtomic(path, `${JSON.stringify(value, null, 2)}\n`);
@@ -109,12 +108,13 @@ import { access, readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
-const PLUGIN_ID = ${JSON.stringify(PLUGIN_ID)};
+const PLUGIN_ID = ${JSON.stringify(PLUGIN_FULL_ID)};
 const PLUGIN_DATA_DIR_NAME = ${JSON.stringify(PLUGIN_DATA_DIR_NAME)};
+const SITE_NAME = ${JSON.stringify(SITE_NAME)};
 const FALLBACK_INSTALL_PATH = ${JSON.stringify(fallbackInstallPath)};
 
 main().catch(() => {
-  console.log("Any Router 近 60m 状态: 状态暂缺");
+  console.log(\`\${SITE_NAME} 近 60m 状态: 状态暂缺\`);
 });
 
 async function main() {
@@ -197,7 +197,7 @@ async function fileExists(path) {
 }
 
 function getClaudeHome() {
-  return process.env.ANYROUTER_STATUS_CLAUDE_HOME || join(homedir(), ".claude");
+  return process.env.ROUTER_VITALS_CLAUDE_HOME || join(homedir(), ".claude");
 }
 
 function getPluginDataDir() {

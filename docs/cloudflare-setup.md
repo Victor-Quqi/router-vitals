@@ -16,6 +16,8 @@ Workers & Pages -> D1 -> Create database
 router-vitals
 ```
 
+这个名字来自 `site.config.json` 的 `cloudflare.d1Name`。
+
 创建后复制 database ID，后面填到 GitHub Variables：
 
 ```text
@@ -36,13 +38,15 @@ Workers & Pages -> Create -> Pages
 router-vitals
 ```
 
+这个名字来自 `site.config.json` 的 `cloudflare.pagesProject`。
+
 首次可以先建空项目；后续 GitHub Actions 会用：
 
 ```text
 wrangler pages deploy status-page --project-name=router-vitals
 ```
 
-如果你想换项目名，需要同步改 `.github/workflows/deploy-cloudflare.yml` 里的 `--project-name`。
+如果你想换项目名，改 `site.config.json` 后运行 `pnpm run sync:site`。
 
 ## 3. 创建 API Token
 

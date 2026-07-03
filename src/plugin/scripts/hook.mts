@@ -51,6 +51,7 @@ import {
 } from "./lib/hook-model-resolution.mjs";
 import { postReport, recordLastDecision as recordDecision, summarizePostResult, type PostReportResult } from "./lib/report.mjs";
 import { runCodexHook } from "./lib/codex-flow.mjs";
+import { PLUGIN_FULL_ID, SITE_NAME } from "./lib/site-config.mjs";
 
 const eventName = process.argv[2] || "";
 const isCodexClient = process.argv.slice(3).includes("--client=codex");
@@ -312,7 +313,7 @@ async function reportCompletion({
 function createPluginUpdateReminderMessage(state: PluginState, config: RemoteConfig): string | null {
   if (!shouldRemindPluginUpdate(state, config.latestPluginVersion)) return null;
   recordPluginUpdateReminder(state, config.latestPluginVersion);
-  return `Any Router Status Monitor 插件有新版 ${config.latestPluginVersion}。运行 /plugin update anyrouter-status-monitor@router-vitals，更新后执行 /reload-plugins。`;
+  return `${SITE_NAME} Status Monitor 插件有新版 ${config.latestPluginVersion}。运行 /plugin update ${PLUGIN_FULL_ID}，更新后执行 /reload-plugins。`;
 }
 
 function writeHookSystemMessage(systemMessage: string): void {

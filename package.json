@@ -9,6 +9,7 @@
   "scripts": {
     "clean:build": "node -e \"require('node:fs').rmSync('.tsbuild/out',{recursive:true,force:true})\"",
     "build": "pnpm run clean:build && tsc -p tsconfig.build.json && node .tsbuild/out/_build/copy-output.mjs",
+    "sync:site": "node scripts/site-sync.mjs",
     "check:version": "node scripts/version.mjs check",
     "sync:version": "pnpm run build && node scripts/version.mjs sync",
     "typecheck": "tsc -p tsconfig.json",

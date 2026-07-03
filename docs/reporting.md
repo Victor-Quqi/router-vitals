@@ -9,7 +9,7 @@
 要同时满足这些条件：
 
 - 这轮开始和结束时，客户端实际使用的 base URL host 都命中 Any Router 入口。
-- 本机没设 `ANYROUTER_STATUS_DISABLED=1`。
+- 本机没设 `ROUTER_VITALS_DISABLED=1`。
 - 远程配置处于开启状态。
 - 这轮通过成功/失败采样。
 - 今日上报量没到上限。
@@ -33,16 +33,16 @@ Codex 还要求非托管 hooks 审查信任后才运行：装完插件启动 Cod
 
 ## 关掉上报
 
-设环境变量 `ANYROUTER_STATUS_DISABLED=1`，本机（两个客户端）就不再上报。
+设环境变量 `ROUTER_VITALS_DISABLED=1`，本机（两个客户端）就不再上报。
 
 ## 自托管 / 调试的覆盖项
 
 自己部署或调试时可能需要：
 
-- `ANYROUTER_STATUS_API_BASE_URL`：上报 API base URL。
-- `ANYROUTER_STATUS_CONFIG_URL`：远程配置 JSON URL。
-- `ANYROUTER_STATUS_STATE_DIR`：本地状态根目录覆盖；未设置时使用客户端提供的插件数据目录或系统状态目录。
-- `ANYROUTER_STATUS_DEBUG_HOOK=1`：写本地 hook 诊断日志 `debug-hook.jsonl`，用于排查 session 事件、hook 输入摘要、pending/session 状态、上报决策、错误和 transcript 证据。
+- `ROUTER_VITALS_API_BASE_URL`：上报 API base URL。
+- `ROUTER_VITALS_CONFIG_URL`：远程配置 JSON URL。
+- `ROUTER_VITALS_STATE_DIR`：本地状态根目录覆盖；未设置时使用客户端提供的插件数据目录或系统状态目录。
+- `ROUTER_VITALS_DEBUG_HOOK=1`：写本地 hook 诊断日志 `debug-hook.jsonl`，用于排查 session 事件、hook 输入摘要、pending/session 状态、上报决策、错误和 transcript 证据。
 
 诊断某个 Claude Code session：
 
@@ -50,7 +50,7 @@ Codex 还要求非托管 hooks 审查信任后才运行：装完插件启动 Cod
 pnpm diagnose:session <session-id>
 ```
 
-没有提前开启 `ANYROUTER_STATUS_DEBUG_HOOK=1` 的历史 session 只能读取 transcript 证据，无法还原当时的 hook stdin。诊断日志是本地 opt-in 文件，主要记录字段名、本地 transcript 路径、错误摘要、模型候选字段、状态转移和上报结果，不记录完整 prompt/response。
+没有提前开启 `ROUTER_VITALS_DEBUG_HOOK=1` 的历史 session 只能读取 transcript 证据，无法还原当时的 hook stdin。诊断日志是本地 opt-in 文件，主要记录字段名、本地 transcript 路径、错误摘要、模型候选字段、状态转移和上报结果，不记录完整 prompt/response。
 
 ## 本地验证
 

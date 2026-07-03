@@ -1,10 +1,8 @@
-export const PLUGIN_VERSION = "0.2.5";
-export const TARGET_HOSTS = Object.freeze([
-    "anyrouter.top",
-    "a-ocnfniawgw.cn-shanghai.fcapp.run"
-]);
-export const DEFAULT_API_BASE_URL = "https://router-vitals-api.v1756251285.workers.dev";
-export const DEFAULT_CONFIG_URL = "https://router-vitals-api.v1756251285.workers.dev/config.json";
+import { SITE_CONFIG, SITE_ENDPOINTS } from "./site-config.mjs";
+export const PLUGIN_VERSION = "0.3.0";
+export const TARGET_HOSTS = Object.freeze(SITE_ENDPOINTS.map((endpoint) => endpoint.host));
+export const DEFAULT_API_BASE_URL = SITE_CONFIG.defaultApiBaseUrl;
+export const DEFAULT_CONFIG_URL = `${DEFAULT_API_BASE_URL.replace(/\/+$/, "")}/config.json`;
 export const LOCAL_DAILY_REPORT_LIMIT = 500;
 export const SERVER_DAILY_REPORT_SOFT_LIMIT = 500;
 export const SERVER_DAILY_REPORT_HARD_LIMIT = 1000;

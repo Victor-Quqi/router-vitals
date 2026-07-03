@@ -43,7 +43,7 @@ codex plugin add anyrouter-status-monitor@router-vitals
 
 Then start a Codex session and approve this plugin's hooks when Codex shows the trust prompt. You can also run `/hooks` inside a session to manage hook trust manually.
 
-Don't want to contribute? Set `ANYROUTER_STATUS_DISABLED=1`.
+Don't want to contribute? Set `ROUTER_VITALS_DISABLED=1`.
 
 ### Show status in the status line (recommended, Claude Code only)
 
@@ -62,4 +62,4 @@ node "<installPath>/scripts/setup-statusline.mjs"
 ## Learn more
 
 - [What gets reported, and how privacy is handled](docs/reporting.en.md)
-- Self-hosting: [Cloudflare setup](docs/cloudflare-setup.md) · [CI/CD](docs/ci-cd.md) (both in Chinese)
+- Self-hosting: [Fork guide](docs/fork-guide.md) · [Cloudflare setup](docs/cloudflare-setup.md) · [CI/CD](docs/ci-cd.md) (all in Chinese)

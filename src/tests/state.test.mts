@@ -4,10 +4,13 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { getStatePath, loadState } from "../plugin/scripts/lib/state.mjs";
-import { getTodayKey } from "../shared/policy.mjs";
+import { TARGET_HOSTS, getTodayKey } from "../shared/policy.mjs";
+import { PLUGIN_ID } from "../shared/site-config.mjs";
+
+const primaryTargetHost = TARGET_HOSTS[0]!;
 
 const ENV_KEYS = [
-  "ANYROUTER_STATUS_STATE_DIR",
+  "ROUTER_VITALS_STATE_DIR",
   "XDG_STATE_HOME",
   "LOCALAPPDATA",
   "APPDATA",
@@ -16,25 +19,25 @@ const ENV_KEYS = [
 
 test("state path uses Claude plugin data before shared user state", async () => {
   await withEnv({
-    ANYROUTER_STATUS_STATE_DIR: undefined,
+    ROUTER_VITALS_STATE_DIR: undefined,
     XDG_STATE_HOME: "/tmp/router-vitals-state",
     LOCALAPPDATA: undefined,
     APPDATA: undefined,
     CLAUDE_PLUGIN_DATA: "/tmp/router-vitals-plugin-data"
   }, async () => {
-    assert.equal(getStatePath(), join("/tmp/router-vitals-plugin-data", "anyrouter-status-monitor", "state.json"));
+    assert.equal(getStatePath(), join("/tmp/router-vitals-plugin-data", PLUGIN_ID, "state.json"));
   });
 });
 
 test("state path override wins over user and plugin data dirs", async () => {
   await withEnv({
-    ANYROUTER_STATUS_STATE_DIR: "/tmp/router-vitals-override",
+    ROUTER_VITALS_STATE_DIR: "/tmp/router-vitals-override",
     XDG_STATE_HOME: "/tmp/router-vitals-state",
     LOCALAPPDATA: undefined,
     APPDATA: undefined,
     CLAUDE_PLUGIN_DATA: "/tmp/router-vitals-plugin-data"
   }, async () => {
-    assert.equal(getStatePath(), join("/tmp/router-vitals-override", "anyrouter-status-monitor", "state.json"));
+    assert.equal(getStatePath(), join("/tmp/router-vitals-override", PLUGIN_ID, "state.json"));
   });
 });
 
@@ -42,7 +45,7 @@ test("loadState reads Claude plugin data state", async () => {
   const root = await mkdtemp(join(tmpdir(), "router-vitals-state-"));
   const userState = join(root, "user-state");
   const pluginData = join(root, "plugin-data");
-  const pluginStatePath = join(pluginData, "anyrouter-status-monitor", "state.json");
+  const pluginStatePath = join(pluginData, PLUGIN_ID, "state.json");
 
   await mkdir(dirname(pluginStatePath), { recursive: true });
   await writeFile(pluginStatePath, JSON.stringify({
@@ -52,7 +55,7 @@ test("loadState reads Claude plugin data state", async () => {
 
   try {
     await withEnv({
-      ANYROUTER_STATUS_STATE_DIR: undefined,
+      ROUTER_VITALS_STATE_DIR: undefined,
       XDG_STATE_HOME: userState,
       LOCALAPPDATA: undefined,
       APPDATA: undefined,
@@ -68,7 +71,7 @@ test("loadState reads Claude plugin data state", async () => {
 
 test("loadState prunes stale local counters and turn state", async () => {
   const stateDir = await mkdtemp(join(tmpdir(), "router-vitals-state-"));
-  const statePath = join(stateDir, "anyrouter-status-monitor", "state.json");
+  const statePath = join(stateDir, PLUGIN_ID, "state.json");
   const today = getTodayKey();
   const freshMs = Date.now();
   const staleMs = freshMs - 8 * 24 * 60 * 60 * 1000;
@@ -98,7 +101,7 @@ test("loadState prunes stale local counters and turn state", async () => {
       kind: "post_failed",
       reason: "http_error",
       modelClass: "sonnet",
-      targetHost: "anyrouter.top",
+      targetHost: primaryTargetHost,
       postStatusCode: 503
     },
     lastPayload: {
@@ -111,13 +114,13 @@ test("loadState prunes stale local counters and turn state", async () => {
       anonymousId: "anon_abcdefghijklmnop",
       sampleRate: 1,
       targetMatched: true,
-      targetHost: "anyrouter.top"
+      targetHost: primaryTargetHost
     }
   }), "utf8");
 
   try {
     await withEnv({
-      ANYROUTER_STATUS_STATE_DIR: stateDir,
+      ROUTER_VITALS_STATE_DIR: stateDir,
       XDG_STATE_HOME: undefined,
       LOCALAPPDATA: undefined,
       APPDATA: undefined,
@@ -139,7 +142,7 @@ test("loadState prunes stale local counters and turn state", async () => {
         kind: "post_failed",
         reason: "http_error",
         modelClass: "sonnet",
-        targetHost: "anyrouter.top",
+        targetHost: primaryTargetHost,
         postStatusCode: 503
       });
       assert.equal(state.lastPayload, null);

@@ -1,0 +1,29 @@
+{
+  "siteName": "Any Router",
+  "pluginId": "anyrouter-status-monitor",
+  "marketplace": {
+    "name": "router-vitals",
+    "owner": "Victor-Quqi",
+    "repoUrl": "https://github.com/Victor-Quqi/router-vitals"
+  },
+  "endpoints": [
+    {
+      "id": "main",
+      "host": "anyrouter.top",
+      "label": "主站直连"
+    },
+    {
+      "id": "optimized",
+      "host": "a-ocnfniawgw.cn-shanghai.fcapp.run",
+      "label": "大陆优化"
+    }
+  ],
+  "defaultApiBaseUrl": "https://router-vitals-api.v1756251285.workers.dev",
+  "statusPageUrl": "https://router-vitals.pages.dev",
+  "cloudflare": {
+    "workerName": "router-vitals-api",
+    "previewWorkerName": "router-vitals-preview",
+    "d1Name": "router-vitals",
+    "pagesProject": "router-vitals"
+  }
+}

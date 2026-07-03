@@ -1,4 +1,5 @@
 import { PLUGIN_VERSION, type ReportPayload } from "./policy.mjs";
+import { PLUGIN_ID } from "./site-config.mjs";
 import type { LastDecision, PluginState } from "./state.mjs";
 
 export type PostReportResult =
@@ -19,7 +20,7 @@ export async function postReport(apiBaseUrl: string, payload: ReportPayload): Pr
       signal: controller.signal,
       headers: {
         "content-type": "application/json",
-        "user-agent": `anyrouter-status-monitor/${PLUGIN_VERSION}`
+        "user-agent": `${PLUGIN_ID}/${PLUGIN_VERSION}`
       },
       body: JSON.stringify(payload)
     });

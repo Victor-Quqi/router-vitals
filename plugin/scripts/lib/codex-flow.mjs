@@ -6,6 +6,7 @@ import { getTranscriptPath, getTranscriptSize } from "./hook-transcript.mjs";
 import { inspectCodexTurn, readCodexSessionMeta } from "./codex-transcript.mjs";
 import { readCodexConfigSnapshot, resolveCodexTarget } from "./codex-target.mjs";
 import { postReport, recordLastDecision, summarizePostResult } from "./report.mjs";
+import { MARKETPLACE_NAME, PLUGIN_FULL_ID, SITE_NAME } from "./site-config.mjs";
 export async function runCodexHook(eventName, input) {
     if (eventName !== "SessionStart" && eventName !== "UserPromptSubmit" && eventName !== "Stop")
         return;
@@ -62,7 +63,7 @@ export async function runCodexHook(eventName, input) {
         if (shouldRemindPluginUpdate(state, config.latestPluginVersion)) {
             recordPluginUpdateReminder(state, config.latestPluginVersion);
             console.log(JSON.stringify({
-                systemMessage: `Any Router Status Monitor 插件有新版 ${config.latestPluginVersion}。在终端依次运行 codex plugin marketplace upgrade router-vitals 和 codex plugin add anyrouter-status-monitor@router-vitals。更新后新会话按 hook 变化提示信任。`
+                systemMessage: `${SITE_NAME} Status Monitor 插件有新版 ${config.latestPluginVersion}。在终端依次运行 codex plugin marketplace upgrade ${MARKETPLACE_NAME} 和 codex plugin add ${PLUGIN_FULL_ID}。更新后新会话按 hook 变化提示信任。`
             }));
         }
     }

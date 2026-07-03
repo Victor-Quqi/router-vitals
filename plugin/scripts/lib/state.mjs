@@ -1,9 +1,10 @@
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
+import { PLUGIN_ID } from "./site-config.mjs";
 import { LOCAL_DAILY_REPORT_LIMIT, MODEL_CLASSES, PLUGIN_VERSION, createAnonymousId, getTodayKey, isPluginVersionNewer, normalizeTargetHost, validateReportPayload } from "./policy.mjs";
 const STATE_VERSION = 1;
-const STATE_DIR_NAME = "anyrouter-status-monitor";
+const STATE_DIR_NAME = PLUGIN_ID;
 const STATE_FILE_NAME = "state.json";
 const STATUS_CACHE_FILE_NAME = "status-cache.json";
 const CONTRIBUTION_RETENTION_DAYS = 120;
@@ -235,7 +236,7 @@ function isRecord(value) {
     return Boolean(value && typeof value === "object" && !Array.isArray(value));
 }
 function getStateRoot() {
-    return (process.env.ANYROUTER_STATUS_STATE_DIR ||
+    return (process.env.ROUTER_VITALS_STATE_DIR ||
         process.env.CLAUDE_PLUGIN_DATA ||
         process.env.XDG_STATE_HOME ||
         process.env.LOCALAPPDATA ||

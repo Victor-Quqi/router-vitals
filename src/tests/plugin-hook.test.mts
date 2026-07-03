@@ -6,10 +6,16 @@ import { createServer, type Server, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
-import { LOCAL_DAILY_REPORT_LIMIT, getTodayKey } from "../plugin/scripts/lib/policy.mjs";
-const hookPath = resolve("plugin/scripts/hook.mjs");
+import { LOCAL_DAILY_REPORT_LIMIT, TARGET_HOSTS, getTodayKey } from "../plugin/scripts/lib/policy.mjs";
+import { PLUGIN_FULL_ID, PLUGIN_ID } from "../shared/site-config.mjs";
 
-test("plugin hook uploads only for matched AnyRouter sessions", async () => {
+const hookPath = resolve("plugin/scripts/hook.mjs");
+const primaryTargetHost = TARGET_HOSTS[0]!;
+const secondaryTargetHost = TARGET_HOSTS[1]!;
+const primaryTargetBaseUrl = `https://${primaryTargetHost}`;
+const primaryTargetMessagesUrl = `${primaryTargetBaseUrl}/v1/messages`;
+
+test("plugin hook uploads only for matched target sessions", async () => {
   const received: Array<Record<string, any>> = [];
   const server = createServer((req, res) => {
     if (req.method === "GET" && req.url === "/config.json") {
@@ -17,7 +23,7 @@ test("plugin hook uploads only for matched AnyRouter sessions", async () => {
       respondJson(res, {
         reportingEnabled: true,
         apiBaseUrl: base,
-        targetBaseUrlHosts: ["anyrouter.top", "a-ocnfniawgw.cn-shanghai.fcapp.run"],
+        targetBaseUrlHosts: [primaryTargetHost, secondaryTargetHost],
         sampleRateSuccess: 1,
         sampleRateFailure: 1,
         minPluginVersion: "0.1.0",
@@ -46,23 +52,23 @@ test("plugin hook uploads only for matched AnyRouter sessions", async () => {
   try {
     const commonEnv = {
       ...process.env,
-      ANYROUTER_STATUS_STATE_DIR: stateDir,
-      ANYROUTER_STATUS_CONFIG_URL: `http://127.0.0.1:${serverPort(server)}/config.json`
+      ROUTER_VITALS_STATE_DIR: stateDir,
+      ROUTER_VITALS_CONFIG_URL: `http://127.0.0.1:${serverPort(server)}/config.json`
     };
 
     await runHook("SessionStart", { session_id: "session-a", model: "claude-sonnet-4-6" }, {
       ...commonEnv,
-      ANTHROPIC_BASE_URL: "https://anyrouter.top"
+      ANTHROPIC_BASE_URL: primaryTargetBaseUrl
     });
     const sessionATranscript = join(stateDir, "session-a.jsonl");
     await runHook("UserPromptSubmit", { session_id: "session-a" }, {
       ...commonEnv,
-      ANTHROPIC_BASE_URL: "https://anyrouter.top"
+      ANTHROPIC_BASE_URL: primaryTargetBaseUrl
     });
     await writeTranscriptModel(sessionATranscript, "claude-sonnet-4-6");
     await runHook("Stop", { session_id: "session-a", transcript_path: sessionATranscript }, {
       ...commonEnv,
-      ANTHROPIC_BASE_URL: "https://anyrouter.top/v1/messages"
+      ANTHROPIC_BASE_URL: primaryTargetMessagesUrl
     });
 
     assert.equal(received.length, 1);
@@ -73,24 +79,24 @@ test("plugin hook uploads only for matched AnyRouter sessions", async () => {
     assert.equal(payload.assistantStartBucket, "lt_3s");
     assert.equal(payload.errorStatusCode, null);
     assert.equal(payload.errorHint, null);
-    assert.equal(payload.targetHost, "anyrouter.top");
+    assert.equal(payload.targetHost, primaryTargetHost);
     assert.equal("latencyBucket" in payload, false);
     assert.equal("baseUrl" in payload, false);
     assert.equal("session_id" in payload, false);
 
     await runHook("SessionStart", { session_id: "session-c", model: "claude-opus-4-8" }, {
       ...commonEnv,
-      ANTHROPIC_BASE_URL: "https://anyrouter.top"
+      ANTHROPIC_BASE_URL: primaryTargetBaseUrl
     });
     const sessionCTranscript = join(stateDir, "session-c.jsonl");
     await runHook("UserPromptSubmit", { session_id: "session-c" }, {
       ...commonEnv,
-      ANTHROPIC_BASE_URL: "https://anyrouter.top"
+      ANTHROPIC_BASE_URL: primaryTargetBaseUrl
     });
     await writeTranscriptModel(sessionCTranscript, "claude-haiku-4-5-20251001");
     await runHook("Stop", { session_id: "session-c", transcript_path: sessionCTranscript }, {
       ...commonEnv,
-      ANTHROPIC_BASE_URL: "https://anyrouter.top/v1/messages"
+      ANTHROPIC_BASE_URL: primaryTargetMessagesUrl
     });
 
     assert.equal(received.length, 2);
@@ -99,12 +105,12 @@ test("plugin hook uploads only for matched AnyRouter sessions", async () => {
     const sessionDTranscript = join(stateDir, "session-d.jsonl");
     await runHook("UserPromptSubmit", { session_id: "session-d" }, {
       ...commonEnv,
-      ANTHROPIC_BASE_URL: "https://anyrouter.top"
+      ANTHROPIC_BASE_URL: primaryTargetBaseUrl
     });
     await writeTranscriptModel(sessionDTranscript, "claude-haiku-4-5-20251001");
     await runHook("Stop", { session_id: "session-d", transcript_path: sessionDTranscript }, {
       ...commonEnv,
-      ANTHROPIC_BASE_URL: "https://anyrouter.top/v1/messages"
+      ANTHROPIC_BASE_URL: primaryTargetMessagesUrl
     });
 
     assert.equal(received.length, 3);
@@ -114,11 +120,11 @@ test("plugin hook uploads only for matched AnyRouter sessions", async () => {
     await writeTranscriptModel(sessionETranscript, "claude-opus-4-8", "2000-01-01T00:00:00.000Z");
     await runHook("UserPromptSubmit", { session_id: "session-e" }, {
       ...commonEnv,
-      ANTHROPIC_BASE_URL: "https://anyrouter.top"
+      ANTHROPIC_BASE_URL: primaryTargetBaseUrl
     });
     await runHook("StopFailure", { session_id: "session-e", transcript_path: sessionETranscript, message: "server 500" }, {
       ...commonEnv,
-      ANTHROPIC_BASE_URL: "https://anyrouter.top/v1/messages"
+      ANTHROPIC_BASE_URL: primaryTargetMessagesUrl
     });
 
     assert.equal(received.length, 4);
@@ -128,12 +134,12 @@ test("plugin hook uploads only for matched AnyRouter sessions", async () => {
     await writeFile(sessionFTranscript, "", "utf8");
     await runHook("SessionStart", { session_id: "session-f" }, {
       ...commonEnv,
-      ANTHROPIC_BASE_URL: "https://anyrouter.top",
+      ANTHROPIC_BASE_URL: primaryTargetBaseUrl,
       CLAUDE_MODEL: "claude-opus-4-8"
     });
     await runHook("UserPromptSubmit", { session_id: "session-f", transcript_path: sessionFTranscript }, {
       ...commonEnv,
-      ANTHROPIC_BASE_URL: "https://anyrouter.top"
+      ANTHROPIC_BASE_URL: primaryTargetBaseUrl
     });
     await runHook("StopFailure", {
       session_id: "session-f",
@@ -142,7 +148,7 @@ test("plugin hook uploads only for matched AnyRouter sessions", async () => {
       message: "API Error 429: rate limit reached"
     }, {
       ...commonEnv,
-      ANTHROPIC_BASE_URL: "https://anyrouter.top/v1/messages",
+      ANTHROPIC_BASE_URL: primaryTargetMessagesUrl,
       CLAUDE_MODEL: "claude-opus-4-8"
     });
 
@@ -155,12 +161,12 @@ test("plugin hook uploads only for matched AnyRouter sessions", async () => {
     await writeTranscriptRecords(sessionGTranscript, [createModelSwitchCommandRecord()]);
     await runHook("SessionStart", { session_id: "session-g" }, {
       ...commonEnv,
-      ANTHROPIC_BASE_URL: "https://anyrouter.top",
+      ANTHROPIC_BASE_URL: primaryTargetBaseUrl,
       CLAUDE_MODEL: "claude-opus-4-8"
     });
     await runHook("UserPromptSubmit", { session_id: "session-g", transcript_path: sessionGTranscript }, {
       ...commonEnv,
-      ANTHROPIC_BASE_URL: "https://anyrouter.top",
+      ANTHROPIC_BASE_URL: primaryTargetBaseUrl,
       CLAUDE_MODEL: "claude-opus-4-8"
     });
     await runHook("StopFailure", {
@@ -170,7 +176,7 @@ test("plugin hook uploads only for matched AnyRouter sessions", async () => {
       message: "API Error 429: rate limit reached"
     }, {
       ...commonEnv,
-      ANTHROPIC_BASE_URL: "https://anyrouter.top/v1/messages",
+      ANTHROPIC_BASE_URL: primaryTargetMessagesUrl,
       CLAUDE_MODEL: "claude-opus-4-8"
     });
 
@@ -184,12 +190,12 @@ test("plugin hook uploads only for matched AnyRouter sessions", async () => {
     ]);
     await runHook("SessionStart", { session_id: "session-h" }, {
       ...commonEnv,
-      ANTHROPIC_BASE_URL: "https://anyrouter.top",
+      ANTHROPIC_BASE_URL: primaryTargetBaseUrl,
       CLAUDE_MODEL: "claude-opus-4-8"
     });
     await runHook("UserPromptSubmit", { session_id: "session-h", transcript_path: sessionHTranscript }, {
       ...commonEnv,
-      ANTHROPIC_BASE_URL: "https://anyrouter.top",
+      ANTHROPIC_BASE_URL: primaryTargetBaseUrl,
       CLAUDE_MODEL: "claude-opus-4-8"
     });
     await runHook("StopFailure", {
@@ -199,7 +205,7 @@ test("plugin hook uploads only for matched AnyRouter sessions", async () => {
       message: "API Error 429: rate limit reached"
     }, {
       ...commonEnv,
-      ANTHROPIC_BASE_URL: "https://anyrouter.top/v1/messages",
+      ANTHROPIC_BASE_URL: primaryTargetMessagesUrl,
       CLAUDE_MODEL: "claude-opus-4-8"
     });
 
@@ -213,12 +219,12 @@ test("plugin hook uploads only for matched AnyRouter sessions", async () => {
     ]);
     await runHook("SessionStart", { session_id: "session-i" }, {
       ...commonEnv,
-      ANTHROPIC_BASE_URL: "https://anyrouter.top",
+      ANTHROPIC_BASE_URL: primaryTargetBaseUrl,
       CLAUDE_MODEL: "claude-sonnet-4-6"
     });
     await runHook("UserPromptSubmit", { session_id: "session-i", transcript_path: sessionITranscript }, {
       ...commonEnv,
-      ANTHROPIC_BASE_URL: "https://anyrouter.top",
+      ANTHROPIC_BASE_URL: primaryTargetBaseUrl,
       CLAUDE_MODEL: "claude-sonnet-4-6"
     });
     await runHook("StopFailure", {
@@ -228,7 +234,7 @@ test("plugin hook uploads only for matched AnyRouter sessions", async () => {
       message: "API Error 429: rate limit reached"
     }, {
       ...commonEnv,
-      ANTHROPIC_BASE_URL: "https://anyrouter.top/v1/messages",
+      ANTHROPIC_BASE_URL: primaryTargetMessagesUrl,
       CLAUDE_MODEL: "claude-sonnet-4-6"
     });
 
@@ -242,12 +248,12 @@ test("plugin hook uploads only for matched AnyRouter sessions", async () => {
     ]);
     await runHook("SessionStart", { session_id: "session-j" }, {
       ...commonEnv,
-      ANTHROPIC_BASE_URL: "https://anyrouter.top",
+      ANTHROPIC_BASE_URL: primaryTargetBaseUrl,
       CLAUDE_MODEL: "claude-opus-4-8"
     });
     await runHook("UserPromptSubmit", { session_id: "session-j", transcript_path: sessionJTranscript }, {
       ...commonEnv,
-      ANTHROPIC_BASE_URL: "https://anyrouter.top",
+      ANTHROPIC_BASE_URL: primaryTargetBaseUrl,
       CLAUDE_MODEL: "claude-opus-4-8"
     });
     await runHook("StopFailure", {
@@ -257,7 +263,7 @@ test("plugin hook uploads only for matched AnyRouter sessions", async () => {
       message: "API Error 429: rate limit reached"
     }, {
       ...commonEnv,
-      ANTHROPIC_BASE_URL: "https://anyrouter.top/v1/messages",
+      ANTHROPIC_BASE_URL: primaryTargetMessagesUrl,
       CLAUDE_MODEL: "claude-opus-4-8"
     });
 
@@ -271,12 +277,12 @@ test("plugin hook uploads only for matched AnyRouter sessions", async () => {
     ]);
     await runHook("SessionStart", { session_id: "session-k" }, {
       ...commonEnv,
-      ANTHROPIC_BASE_URL: "https://anyrouter.top",
+      ANTHROPIC_BASE_URL: primaryTargetBaseUrl,
       CLAUDE_MODEL: "claude-opus-4-8"
     });
     await runHook("UserPromptSubmit", { session_id: "session-k", transcript_path: sessionKTranscript }, {
       ...commonEnv,
-      ANTHROPIC_BASE_URL: "https://anyrouter.top",
+      ANTHROPIC_BASE_URL: primaryTargetBaseUrl,
       CLAUDE_MODEL: "claude-opus-4-8"
     });
     await runHook("StopFailure", {
@@ -286,7 +292,7 @@ test("plugin hook uploads only for matched AnyRouter sessions", async () => {
       message: "API Error 429: rate limit reached"
     }, {
       ...commonEnv,
-      ANTHROPIC_BASE_URL: "https://anyrouter.top/v1/messages",
+      ANTHROPIC_BASE_URL: primaryTargetMessagesUrl,
       CLAUDE_MODEL: "claude-opus-4-8"
     });
 
@@ -306,7 +312,7 @@ test("plugin hook uploads only for matched AnyRouter sessions", async () => {
 
     await runHook("SessionEnd", { session_id: "session-a" }, {
       ...commonEnv,
-      ANTHROPIC_BASE_URL: "https://anyrouter.top"
+      ANTHROPIC_BASE_URL: primaryTargetBaseUrl
     });
   } finally {
     server.close();
@@ -321,7 +327,7 @@ test("plugin hook debug log records model resolution evidence", async () => {
       respondJson(res, {
         reportingEnabled: true,
         apiBaseUrl: base,
-        targetBaseUrlHosts: ["anyrouter.top", "a-ocnfniawgw.cn-shanghai.fcapp.run"],
+        targetBaseUrlHosts: [primaryTargetHost, secondaryTargetHost],
         sampleRateSuccess: 1,
         sampleRateFailure: 1,
         minPluginVersion: "0.1.0",
@@ -345,10 +351,10 @@ test("plugin hook debug log records model resolution evidence", async () => {
   try {
     const commonEnv = {
       ...process.env,
-      ANYROUTER_STATUS_DEBUG_HOOK: "1",
-      ANYROUTER_STATUS_STATE_DIR: stateDir,
-      ANYROUTER_STATUS_CONFIG_URL: `http://127.0.0.1:${serverPort(server)}/config.json`,
-      ANTHROPIC_BASE_URL: "https://anyrouter.top",
+      ROUTER_VITALS_DEBUG_HOOK: "1",
+      ROUTER_VITALS_STATE_DIR: stateDir,
+      ROUTER_VITALS_CONFIG_URL: `http://127.0.0.1:${serverPort(server)}/config.json`,
+      ANTHROPIC_BASE_URL: primaryTargetBaseUrl,
       CLAUDE_MODEL: "claude-opus-4-8"
     };
     const transcript = join(stateDir, "session-debug.jsonl");
@@ -369,7 +375,7 @@ test("plugin hook debug log records model resolution evidence", async () => {
       message: "API Error 429: rate limit reached"
     }, commonEnv);
 
-    const debugPath = join(stateDir, "anyrouter-status-monitor", "debug-hook.jsonl");
+    const debugPath = join(stateDir, PLUGIN_ID, "debug-hook.jsonl");
     const debugRecords = (await readFile(debugPath, "utf8"))
       .trim()
       .split("\n")
@@ -405,7 +411,7 @@ test("plugin hook uses session model only for the first prompt when transcript i
       respondJson(res, {
         reportingEnabled: true,
         apiBaseUrl: base,
-        targetBaseUrlHosts: ["anyrouter.top", "a-ocnfniawgw.cn-shanghai.fcapp.run"],
+        targetBaseUrlHosts: [primaryTargetHost, secondaryTargetHost],
         sampleRateSuccess: 1,
         sampleRateFailure: 1,
         minPluginVersion: "0.1.0",
@@ -434,9 +440,9 @@ test("plugin hook uses session model only for the first prompt when transcript i
   try {
     const commonEnv = {
       ...process.env,
-      ANYROUTER_STATUS_STATE_DIR: stateDir,
-      ANYROUTER_STATUS_CONFIG_URL: `http://127.0.0.1:${serverPort(server)}/config.json`,
-      ANTHROPIC_BASE_URL: "https://anyrouter.top"
+      ROUTER_VITALS_STATE_DIR: stateDir,
+      ROUTER_VITALS_CONFIG_URL: `http://127.0.0.1:${serverPort(server)}/config.json`,
+      ANTHROPIC_BASE_URL: primaryTargetBaseUrl
     };
     const transcript = join(stateDir, "session-unavailable-transcript.jsonl");
 
@@ -479,7 +485,7 @@ test("plugin hook emits low-frequency update reminders", async () => {
       respondJson(res, {
         reportingEnabled: true,
         apiBaseUrl: base,
-        targetBaseUrlHosts: ["anyrouter.top", "a-ocnfniawgw.cn-shanghai.fcapp.run"],
+        targetBaseUrlHosts: [primaryTargetHost, secondaryTargetHost],
         sampleRateSuccess: 1,
         sampleRateFailure: 1,
         minPluginVersion: "0.1.0",
@@ -504,22 +510,22 @@ test("plugin hook emits low-frequency update reminders", async () => {
   try {
     const commonEnv = {
       ...process.env,
-      ANYROUTER_STATUS_STATE_DIR: stateDir,
-      ANYROUTER_STATUS_CONFIG_URL: `http://127.0.0.1:${serverPort(server)}/config.json`,
-      ANTHROPIC_BASE_URL: "https://anyrouter.top"
+      ROUTER_VITALS_STATE_DIR: stateDir,
+      ROUTER_VITALS_CONFIG_URL: `http://127.0.0.1:${serverPort(server)}/config.json`,
+      ANTHROPIC_BASE_URL: primaryTargetBaseUrl
     };
 
     await runHook("UserPromptSubmit", { session_id: "session-update-a" }, commonEnv);
     const first = await runHook("Stop", { session_id: "session-update-a" }, commonEnv);
     const firstOutput = JSON.parse(first);
     assert.match(firstOutput.systemMessage, /插件有新版 9\.9\.9/);
-    assert.match(firstOutput.systemMessage, /\/plugin update anyrouter-status-monitor@router-vitals/);
+    assert.match(firstOutput.systemMessage, new RegExp(`/plugin update ${escapeRegExp(PLUGIN_FULL_ID)}`));
 
     await runHook("UserPromptSubmit", { session_id: "session-update-b" }, commonEnv);
     const second = await runHook("Stop", { session_id: "session-update-b" }, commonEnv);
     assert.equal(second.trim(), "");
 
-    const statePath = join(stateDir, "anyrouter-status-monitor", "state.json");
+    const statePath = join(stateDir, PLUGIN_ID, "state.json");
     const state = JSON.parse(await readFile(statePath, "utf8"));
     assert.deepEqual(Object.keys(state.updateReminder), ["latestPluginVersion", "remindedAtMs"]);
     assert.equal(state.updateReminder.latestPluginVersion, "9.9.9");
@@ -537,7 +543,7 @@ test("plugin hook skips uploads after the local daily contribution limit", async
       respondJson(res, {
         reportingEnabled: true,
         apiBaseUrl: base,
-        targetBaseUrlHosts: ["anyrouter.top", "a-ocnfniawgw.cn-shanghai.fcapp.run"],
+        targetBaseUrlHosts: [primaryTargetHost, secondaryTargetHost],
         sampleRateSuccess: 1,
         sampleRateFailure: 1,
         minPluginVersion: "0.1.0",
@@ -558,7 +564,7 @@ test("plugin hook skips uploads after the local daily contribution limit", async
 
   await listen(server);
   const stateDir = await mkdtemp(join(tmpdir(), "router-vitals-"));
-  const statePath = join(stateDir, "anyrouter-status-monitor", "state.json");
+  const statePath = join(stateDir, PLUGIN_ID, "state.json");
   const today = getTodayKey();
 
   await mkdir(dirname(statePath), { recursive: true });
@@ -570,9 +576,9 @@ test("plugin hook skips uploads after the local daily contribution limit", async
   try {
     const commonEnv = {
       ...process.env,
-      ANYROUTER_STATUS_STATE_DIR: stateDir,
-      ANYROUTER_STATUS_CONFIG_URL: `http://127.0.0.1:${serverPort(server)}/config.json`,
-      ANTHROPIC_BASE_URL: "https://anyrouter.top"
+      ROUTER_VITALS_STATE_DIR: stateDir,
+      ROUTER_VITALS_CONFIG_URL: `http://127.0.0.1:${serverPort(server)}/config.json`,
+      ANTHROPIC_BASE_URL: primaryTargetBaseUrl
     };
 
     await runHook("UserPromptSubmit", { session_id: "session-limit" }, commonEnv);
@@ -582,7 +588,7 @@ test("plugin hook skips uploads after the local daily contribution limit", async
     const state = JSON.parse(await readFile(statePath, "utf8"));
     assert.equal(state.lastDecision.kind, "skipped");
     assert.equal(state.lastDecision.reason, "local_daily_limit");
-    assert.equal(state.lastDecision.targetHost, "anyrouter.top");
+    assert.equal(state.lastDecision.targetHost, primaryTargetHost);
   } finally {
     server.close();
     await rm(stateDir, { recursive: true, force: true });
@@ -597,7 +603,7 @@ test("plugin hook records structured report failures", async () => {
       respondJson(res, {
         reportingEnabled: true,
         apiBaseUrl: base,
-        targetBaseUrlHosts: ["anyrouter.top", "a-ocnfniawgw.cn-shanghai.fcapp.run"],
+        targetBaseUrlHosts: [primaryTargetHost, secondaryTargetHost],
         sampleRateSuccess: 1,
         sampleRateFailure: 1,
         minPluginVersion: "0.1.0",
@@ -619,14 +625,14 @@ test("plugin hook records structured report failures", async () => {
 
   await listen(server);
   const stateDir = await mkdtemp(join(tmpdir(), "router-vitals-post-failure-"));
-  const statePath = join(stateDir, "anyrouter-status-monitor", "state.json");
+  const statePath = join(stateDir, PLUGIN_ID, "state.json");
 
   try {
     const commonEnv = {
       ...process.env,
-      ANYROUTER_STATUS_STATE_DIR: stateDir,
-      ANYROUTER_STATUS_CONFIG_URL: `http://127.0.0.1:${serverPort(server)}/config.json`,
-      ANTHROPIC_BASE_URL: "https://anyrouter.top"
+      ROUTER_VITALS_STATE_DIR: stateDir,
+      ROUTER_VITALS_CONFIG_URL: `http://127.0.0.1:${serverPort(server)}/config.json`,
+      ANTHROPIC_BASE_URL: primaryTargetBaseUrl
     };
 
     await runHook("UserPromptSubmit", { session_id: "session-post-failure" }, commonEnv);
@@ -640,7 +646,7 @@ test("plugin hook records structured report failures", async () => {
     assert.equal(state.lastDecision.kind, "post_failed");
     assert.equal(state.lastDecision.reason, "http_error");
     assert.equal(state.lastDecision.postStatusCode, 503);
-    assert.equal(state.lastDecision.targetHost, "anyrouter.top");
+    assert.equal(state.lastDecision.targetHost, primaryTargetHost);
   } finally {
     server.close();
     await rm(stateDir, { recursive: true, force: true });
@@ -749,4 +755,8 @@ function serverPort(server: Server): number {
   const address = server.address() as AddressInfo | null;
   if (!address) throw new Error("server is not listening");
   return address.port;
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }

@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Any Router 状态</title>
+    <title data-site-sync="title">Any Router 状态</title>
     <link rel="icon" href="./favicon.svg" type="image/svg+xml">
     <script>
       (() => {
@@ -34,12 +34,12 @@
             </svg>
           </span>
           <div>
-            <h1>Any Router 状态</h1>
-            <p>Claude Code / Codex 社区轮次观测</p>
+            <h1 id="siteTitle">Any Router 状态</h1>
+            <p id="siteSubtitle">Claude Code / Codex 社区轮次观测</p>
           </div>
         </div>
         <div class="topActions">
-          <a class="githubLink" href="https://github.com/Victor-Quqi/router-vitals" target="_blank" rel="noreferrer" aria-label="GitHub">
+          <a class="githubLink" data-site-sync="github" href="https://github.com/Victor-Quqi/router-vitals" target="_blank" rel="noreferrer" aria-label="GitHub">
             <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
               <path d="M12 2C6.48 2 2 6.59 2 12.25c0 4.53 2.87 8.37 6.84 9.73.5.1.68-.22.68-.5v-1.91c-2.78.62-3.37-1.22-3.37-1.22-.45-1.19-1.11-1.5-1.11-1.5-.91-.64.07-.63.07-.63 1 .07 1.53 1.06 1.53 1.06.9 1.57 2.36 1.12 2.93.86.09-.67.35-1.12.63-1.38-2.22-.26-4.55-1.14-4.55-5.07 0-1.12.39-2.03 1.03-2.75-.1-.26-.45-1.31.1-2.72 0 0 .84-.28 2.75 1.05A9.3 9.3 0 0 1 12 6.92c.85 0 1.7.12 2.5.35 1.9-1.33 2.74-1.05 2.74-1.05.55 1.41.2 2.46.1 2.72.64.72 1.03 1.63 1.03 2.75 0 3.94-2.34 4.8-4.56 5.06.36.32.68.95.68 1.92v2.85c0 .28.18.6.69.5A10.17 10.17 0 0 0 22 12.25C22 6.59 17.52 2 12 2Z" />
             </svg>
@@ -57,10 +57,8 @@
               <path d="M6.5 13h3M8 10.5V13" />
             </svg>
           </button>
-          <div class="endpointTabs" role="tablist" aria-label="端点">
+          <div class="endpointTabs" id="endpointTabs" role="tablist" aria-label="端点">
             <button class="active" data-target-host="all" type="button">全部端点</button>
-            <button data-target-host="main" type="button">主站直连</button>
-            <button data-target-host="optimized" type="button">大陆优化</button>
           </div>
           <label class="autoRefresh" id="autoRefreshControl">
             <input id="autoRefreshToggle" type="checkbox">
@@ -147,7 +145,7 @@
       </section>
 
       <footer>
-        数据来自自愿<a href="https://github.com/Victor-Quqi/router-vitals" target="_blank" rel="noreferrer">安装插件</a>的 Claude Code / Codex 用户；页面只展示聚合后的轮次观测结果，不代表官方 SLA 或单次 API 请求指标。
+        数据来自自愿<a data-site-sync="install-link" href="https://github.com/Victor-Quqi/router-vitals" target="_blank" rel="noreferrer">安装插件</a>的 Claude Code / Codex 用户；页面只展示聚合后的轮次观测结果，不代表官方 SLA 或单次 API 请求指标。
       </footer>
     </main>
     <script src="./config.js" type="module"></script>

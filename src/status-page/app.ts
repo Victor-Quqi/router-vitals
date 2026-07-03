@@ -1,10 +1,13 @@
-const API_BASE = window.ANYROUTER_STATUS_API_BASE || window.location.origin;
+import { SITE_CONFIG } from "../shared/site-config.mjs";
+
+const API_BASE = window.ROUTER_VITALS_API_BASE || window.location.origin;
 
 type ServiceState = "available" | "unstable" | "down" | "insufficient_data";
 type ModelClass = "haiku" | "sonnet" | "opus" | "fable" | "gpt-5.5" | "unknown";
 type BucketState = "empty" | "success" | "mixed" | "failure";
 type RefreshOptions = { bypassCache?: boolean };
-type TargetHostFilter = "all" | "main" | "optimized";
+type EndpointId = (typeof SITE_CONFIG.endpoints)[number]["id"];
+type TargetHostFilter = "all" | EndpointId;
 type ThemeMode = "system" | "light" | "dark";
 type AssistantStartBucket = "lt_3s" | "3_10s" | "10_30s" | "30_60s" | "gt_60s" | "unknown";
 
@@ -164,8 +167,10 @@ const assistantStartLabels: Record<AssistantStartBucket, string> = {
   unknown: "--"
 };
 
-const errorModelStorageKey = "router-vitals-error-model";
-const targetHostStorageKey = "router-vitals-target-host";
+const storageKeyPrefix = SITE_CONFIG.marketplace.name;
+const errorModelStorageKey = `${storageKeyPrefix}-error-model`;
+const targetHostStorageKey = `${storageKeyPrefix}-target-host`;
+const targetHostParams = new Map<string, string>(SITE_CONFIG.endpoints.map((endpoint) => [endpoint.id, endpoint.host]));
 let activeWindow = "60m";
 let activeErrorModel: ModelClass = readErrorModel();
 let activeTargetHost: TargetHostFilter = readTargetHostFilter();
@@ -174,7 +179,7 @@ let selectedTrendBucket: SelectedTrendBucket | null = null;
 const openErrorKeys = new Set<string>();
 const autoRefreshWindows = new Set(["60m", "24h"]);
 const autoRefreshMs = 30000;
-const themeStorageKey = "router-vitals-theme";
+const themeStorageKey = `${storageKeyPrefix}-theme`;
 const themeModes: readonly ThemeMode[] = ["system", "light", "dark"];
 const themeLabels: Record<ThemeMode, string> = {
   system: "主题：跟随系统",
@@ -185,11 +190,6 @@ let autoRefreshTimer: number | undefined;
 let autoRefreshEnabled = false;
 let loadSequence = 0;
 let manualRefreshTimer: number | undefined;
-
-const targetHostParams: Record<Exclude<TargetHostFilter, "all">, string> = {
-  main: "anyrouter.top",
-  optimized: "a-ocnfniawgw.cn-shanghai.fcapp.run"
-};
 
 const refreshButton = getElement("refreshButton") as HTMLButtonElement;
 const themeButton = getElement("themeButton") as HTMLButtonElement;
@@ -231,6 +231,8 @@ refreshButton.addEventListener("click", () => {
   void loadStatus({ bypassCache: true });
 });
 
+renderEndpointTabs();
+
 for (const element of document.querySelectorAll("[data-target-host]")) {
   const button = element as HTMLButtonElement;
   button.addEventListener("click", () => {
@@ -259,7 +261,8 @@ async function loadStatus(options: RefreshOptions = {}): Promise<void> {
   refreshButton.disabled = true;
   try {
     const params = new URLSearchParams({ window: requestedWindow });
-    if (activeTargetHost !== "all") params.set("targetHost", targetHostParams[activeTargetHost]);
+    const targetHost = activeTargetHost === "all" ? null : targetHostParams.get(activeTargetHost);
+    if (targetHost) params.set("targetHost", targetHost);
     if (options.bypassCache) params.set("refresh", "1");
     const response = await fetch(`${API_BASE.replace(/\/+$/, "")}/v1/status?${params}`, {
       cache: options.bypassCache ? "no-store" : "default",
@@ -369,6 +372,17 @@ function syncTargetHostTabs(): void {
     item.classList.toggle("active", selected);
     item.setAttribute("aria-selected", selected ? "true" : "false");
   });
+}
+
+function renderEndpointTabs(): void {
+  const root = getElement("endpointTabs");
+  for (const endpoint of SITE_CONFIG.endpoints) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.dataset.targetHost = endpoint.id;
+    button.textContent = endpoint.label;
+    root.append(button);
+  }
 }
 
 function applyTheme(mode: ThemeMode): void {
@@ -674,7 +688,7 @@ function renderStateDetail(data: StatusData, state: ServiceState, scope: Display
   if (state !== "insufficient_data") return;
 
   const link = document.createElement("a");
-  link.href = "https://github.com/Victor-Quqi/router-vitals#%E5%AE%89%E8%A3%85";
+  link.href = `${SITE_CONFIG.marketplace.repoUrl}#%E5%AE%89%E8%A3%85`;
   link.target = "_blank";
   link.rel = "noreferrer";
   link.textContent = "安装插件贡献观测";
@@ -863,7 +877,7 @@ function normalizeModelClass(value: unknown): ModelClass {
 }
 
 function normalizeTargetHostFilter(value: unknown): TargetHostFilter {
-  if (value === "main" || value === "optimized") return value;
+  if (typeof value === "string" && targetHostParams.has(value)) return value as TargetHostFilter;
   return "all";
 }
 

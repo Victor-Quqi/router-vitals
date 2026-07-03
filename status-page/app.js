@@ -1,4 +1,5 @@
-const API_BASE = window.ANYROUTER_STATUS_API_BASE || window.location.origin;
+import { SITE_CONFIG } from "../shared/site-config.mjs";
+const API_BASE = window.ROUTER_VITALS_API_BASE || window.location.origin;
 const labels = {
     available: "可用",
     unstable: "不稳定",
@@ -55,8 +56,10 @@ const assistantStartLabels = {
     gt_60s: ">60s",
     unknown: "--"
 };
-const errorModelStorageKey = "router-vitals-error-model";
-const targetHostStorageKey = "router-vitals-target-host";
+const storageKeyPrefix = SITE_CONFIG.marketplace.name;
+const errorModelStorageKey = `${storageKeyPrefix}-error-model`;
+const targetHostStorageKey = `${storageKeyPrefix}-target-host`;
+const targetHostParams = new Map(SITE_CONFIG.endpoints.map((endpoint) => [endpoint.id, endpoint.host]));
 let activeWindow = "60m";
 let activeErrorModel = readErrorModel();
 let activeTargetHost = readTargetHostFilter();
@@ -65,7 +68,7 @@ let selectedTrendBucket = null;
 const openErrorKeys = new Set();
 const autoRefreshWindows = new Set(["60m", "24h"]);
 const autoRefreshMs = 30000;
-const themeStorageKey = "router-vitals-theme";
+const themeStorageKey = `${storageKeyPrefix}-theme`;
 const themeModes = ["system", "light", "dark"];
 const themeLabels = {
     system: "主题：跟随系统",
@@ -76,10 +79,6 @@ let autoRefreshTimer;
 let autoRefreshEnabled = false;
 let loadSequence = 0;
 let manualRefreshTimer;
-const targetHostParams = {
-    main: "anyrouter.top",
-    optimized: "a-ocnfniawgw.cn-shanghai.fcapp.run"
-};
 const refreshButton = getElement("refreshButton");
 const themeButton = getElement("themeButton");
 const autoRefreshControl = getElement("autoRefreshControl");
@@ -116,6 +115,7 @@ refreshButton.addEventListener("click", () => {
     playManualRefreshSpin();
     void loadStatus({ bypassCache: true });
 });
+renderEndpointTabs();
 for (const element of document.querySelectorAll("[data-target-host]")) {
     const button = element;
     button.addEventListener("click", () => {
@@ -141,8 +141,9 @@ async function loadStatus(options = {}) {
     refreshButton.disabled = true;
     try {
         const params = new URLSearchParams({ window: requestedWindow });
-        if (activeTargetHost !== "all")
-            params.set("targetHost", targetHostParams[activeTargetHost]);
+        const targetHost = activeTargetHost === "all" ? null : targetHostParams.get(activeTargetHost);
+        if (targetHost)
+            params.set("targetHost", targetHost);
         if (options.bypassCache)
             params.set("refresh", "1");
         const response = await fetch(`${API_BASE.replace(/\/+$/, "")}/v1/status?${params}`, {
@@ -262,6 +263,16 @@ function syncTargetHostTabs() {
         item.classList.toggle("active", selected);
         item.setAttribute("aria-selected", selected ? "true" : "false");
     });
+}
+function renderEndpointTabs() {
+    const root = getElement("endpointTabs");
+    for (const endpoint of SITE_CONFIG.endpoints) {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.dataset.targetHost = endpoint.id;
+        button.textContent = endpoint.label;
+        root.append(button);
+    }
 }
 function applyTheme(mode) {
     const resolved = mode === "system" ? (systemThemeQuery.matches ? "light" : "dark") : mode;
@@ -527,7 +538,7 @@ function renderStateDetail(data, state, scope) {
     if (state !== "insufficient_data")
         return;
     const link = document.createElement("a");
-    link.href = "https://github.com/Victor-Quqi/router-vitals#%E5%AE%89%E8%A3%85";
+    link.href = `${SITE_CONFIG.marketplace.repoUrl}#%E5%AE%89%E8%A3%85`;
     link.target = "_blank";
     link.rel = "noreferrer";
     link.textContent = "安装插件贡献观测";
@@ -712,7 +723,7 @@ function normalizeModelClass(value) {
     return "unknown";
 }
 function normalizeTargetHostFilter(value) {
-    if (value === "main" || value === "optimized")
+    if (typeof value === "string" && targetHostParams.has(value))
         return value;
     return "all";
 }
@@ -881,4 +892,3 @@ function positionTrendTooltip(clientX, clientY) {
     trendTooltip.style.left = `${x}px`;
     trendTooltip.style.top = `${y}px`;
 }
-export {};

@@ -43,7 +43,7 @@ codex plugin add anyrouter-status-monitor@router-vitals
 
 装完启动 Codex 会话时，按 hook 信任提示批准本插件 hooks 即开始工作；也可在会话里执行 `/hooks` 手动管理信任。
 
-不想参与贡献，设环境变量 `ANYROUTER_STATUS_DISABLED=1` 即可。
+不想参与贡献，设环境变量 `ROUTER_VITALS_DISABLED=1` 即可。
 
 ### 在状态栏显示状态（推荐，仅 Claude Code）
 
@@ -62,4 +62,4 @@ node "<installPath>/scripts/setup-statusline.mjs"
 ## 想了解更多
 
 - [上报了什么、怎么保护隐私](docs/reporting.md)
-- 自己部署一套：[Cloudflare 配置](docs/cloudflare-setup.md) · [CI/CD](docs/ci-cd.md)
+- 自己部署一套：[Fork 指南](docs/fork-guide.md) · [Cloudflare 配置](docs/cloudflare-setup.md) · [CI/CD](docs/ci-cd.md)

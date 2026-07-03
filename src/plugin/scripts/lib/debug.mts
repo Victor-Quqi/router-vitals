@@ -13,7 +13,7 @@ export interface HookDebugRecord {
 }
 
 export function isHookDebugEnabled(): boolean {
-  return process.env.ANYROUTER_STATUS_DEBUG_HOOK === "1";
+  return process.env.ROUTER_VITALS_DEBUG_HOOK === "1";
 }
 
 export function getHookDebugLogPath(): string {
