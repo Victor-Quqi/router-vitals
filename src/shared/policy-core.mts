@@ -1,4 +1,4 @@
-export const PLUGIN_VERSION = "0.2.3";
+export const PLUGIN_VERSION = "0.2.4";
 
 export const TARGET_HOSTS = Object.freeze([
   "anyrouter.top",
@@ -76,9 +76,9 @@ export const STATUS_WINDOW_SPECS = Object.freeze({
 
 export const STATUS_STATE_THRESHOLDS = Object.freeze({
   insufficient_data: "sampleCount < 5",
-  down: "availability < 50%",
-  unstable: "50% <= availability < 90%",
-  available: "availability >= 90%"
+  down: "availability < 30%",
+  unstable: "30% <= availability < 80%",
+  available: "availability >= 80%"
 } as const);
 
 export const REPORT_FIELDS = Object.freeze([

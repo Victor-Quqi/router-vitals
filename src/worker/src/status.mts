@@ -531,8 +531,8 @@ function getErrorDetail(details: Map<ErrorType, ErrorDetailAccumulator>, type: E
 
 function getState({ total, availability }: { total: number; availability: number | null }): ServiceState {
   if (total < 5 || availability === null) return "insufficient_data";
-  if (availability < 0.5) return "down";
-  if (availability < 0.9) return "unstable";
+  if (availability < 0.3) return "down";
+  if (availability < 0.8) return "unstable";
   return "available";
 }
 

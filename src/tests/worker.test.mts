@@ -283,16 +283,22 @@ test("status aggregation detects unstable high error windows", () => {
   const status = buildStatusFromRows([
     {
       total_samples: 20,
-      success_samples: 17,
-      failure_samples: 3,
-      assistant_start_3_10s: 17,
-      err_server_error: 3
+      success_samples: 15,
+      failure_samples: 5,
+      assistant_start_3_10s: 15,
+      err_server_error: 5
     }
   ], "15m");
 
   assert.equal(status.state, "unstable");
   assert.equal(status.assistantStart.medianBucket, "3_10s");
   assert.equal(status.errors[0]!.type, "server_error");
+});
+
+test("status aggregation uses relaxed availability thresholds", () => {
+  assert.equal(buildStatusFromRows([{ total_samples: 10, success_samples: 2, failure_samples: 8 }], "15m").state, "down");
+  assert.equal(buildStatusFromRows([{ total_samples: 10, success_samples: 3, failure_samples: 7 }], "15m").state, "unstable");
+  assert.equal(buildStatusFromRows([{ total_samples: 10, success_samples: 8, failure_samples: 2 }], "15m").state, "available");
 });
 
 test("status aggregation attaches error status codes and hints", () => {

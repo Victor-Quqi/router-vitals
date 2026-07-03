@@ -651,9 +651,9 @@ function getDisplayState(data, scope) {
     const sampleCount = scope.sampleCount ?? 0;
     if (sampleCount < 5 || typeof scope.availability !== "number")
         return "insufficient_data";
-    if (scope.availability >= 0.9)
+    if (scope.availability >= 0.8)
         return "available";
-    if (scope.availability >= 0.5)
+    if (scope.availability >= 0.3)
         return "unstable";
     return "down";
 }

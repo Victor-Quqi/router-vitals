@@ -333,9 +333,9 @@ function getErrorDetail(details, type) {
 function getState({ total, availability }) {
     if (total < 5 || availability === null)
         return "insufficient_data";
-    if (availability < 0.5)
+    if (availability < 0.3)
         return "down";
-    if (availability < 0.9)
+    if (availability < 0.8)
         return "unstable";
     return "available";
 }
