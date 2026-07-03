@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
-import { readFile } from "node:fs/promises";
-import { resolve } from "node:path";
+import { readdir, readFile } from "node:fs/promises";
+import { join, resolve } from "node:path";
 import process from "node:process";
 
 const wranglerConfig = "worker/wrangler.preview.toml";
@@ -15,7 +15,9 @@ const seedPreviewData = process.env.STATUS_PREVIEW_SEED !== "0";
 
 if (seedPreviewData) {
   await runWrangler(["d1", "execute", d1Name, "--local", "--config", wranglerConfig, "--file", "worker/preview/reset.sql"]);
-  await runWrangler(["d1", "execute", d1Name, "--local", "--config", wranglerConfig, "--file", "worker/migrations/0001_initial.sql"]);
+  for (const migration of await listMigrationFiles()) {
+    await runWrangler(["d1", "execute", d1Name, "--local", "--config", wranglerConfig, "--file", migration]);
+  }
   await runWrangler(["d1", "execute", d1Name, "--local", "--config", wranglerConfig, "--file", "worker/preview/seed.sql"]);
 } else {
   await runWrangler(["d1", "migrations", "apply", d1Name, "--local", "--config", wranglerConfig]);
@@ -82,6 +84,15 @@ function buildWranglerEnv(): NodeJS.ProcessEnv {
   }
   env.XDG_CONFIG_HOME = resolve(".wrangler", "config");
   return env;
+}
+
+async function listMigrationFiles(): Promise<string[]> {
+  const migrationDir = "worker/migrations";
+  const names = await readdir(migrationDir);
+  return names
+    .filter((name) => name.endsWith(".sql"))
+    .sort((left, right) => left.localeCompare(right))
+    .map((name) => join(migrationDir, name).replace(/\\/g, "/"));
 }
 
 function readD1Name(config: { cloudflare?: { d1Name?: unknown } }): string {
