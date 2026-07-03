@@ -352,7 +352,22 @@ function renderModelTable(models, timeline) {
         trendCell.append(trend, buildTrendAxis(model.buckets || []));
         row.append(name, availability, sampleCount, failureCount, trendCell);
         root.append(row);
+        alignTrendCellScroll(trendCell);
     }
+}
+function alignTrendCellScroll(trendCell) {
+    requestAnimationFrame(() => {
+        const maxScrollLeft = trendCell.scrollWidth - trendCell.clientWidth;
+        if (maxScrollLeft <= 0)
+            return;
+        const selected = trendCell.querySelector(".trendBlock.selected");
+        if (!selected) {
+            trendCell.scrollLeft = maxScrollLeft;
+            return;
+        }
+        const target = selected.offsetLeft - (trendCell.clientWidth - selected.offsetWidth) / 2;
+        trendCell.scrollLeft = Math.min(Math.max(0, target), maxScrollLeft);
+    });
 }
 function buildEmptyModels(timeline) {
     if (!timeline?.bucketCount)
