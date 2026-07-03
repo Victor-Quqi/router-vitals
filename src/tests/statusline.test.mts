@@ -80,7 +80,7 @@ test("statusLine shows recent local report failures", async () => {
       return;
     }
 
-    if (req.method === "GET" && req.url === "/v1/status?window=60m") {
+    if (req.method === "GET" && req.url === "/v1/status?window=60m&client=claude-code") {
       respondJson(res, { state: "available", label: "可用" });
       return;
     }
@@ -142,7 +142,7 @@ test("statusLine caches remote status between invocations", async () => {
       return;
     }
 
-    if (req.method === "GET" && req.url === "/v1/status?window=60m") {
+    if (req.method === "GET" && req.url === "/v1/status?window=60m&client=claude-code") {
       statusRequests += 1;
       respondJson(res, { state: "up", label: "正常" });
       return;

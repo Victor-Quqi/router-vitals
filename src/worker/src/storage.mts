@@ -2,6 +2,7 @@ import {
   SERVER_DAILY_REPORT_HARD_LIMIT,
   SERVER_DAILY_REPORT_SOFT_LIMIT,
   STATUS_ASSISTANT_START_COLUMNS,
+  type Client,
   type ErrorType,
   type AssistantStartBucket,
   type ReportPayload,
@@ -21,6 +22,7 @@ export interface SqlDatabase {
 }
 
 export type StatusTargetHost = TargetHost | null;
+export type StatusClient = Client | null;
 export type DailyReportDecision = "accept" | "sample" | "drop";
 
 export interface ReportRecord {
@@ -37,13 +39,14 @@ export interface RetentionOptions {
 export interface ReportStore {
   reserveDailyReportSlot(anonymousId: string, nowMs: number): Promise<DailyReportDecision>;
   recordReport(record: ReportRecord): Promise<void>;
-  queryAggregates(sinceMinute: number, targetHost: StatusTargetHost): Promise<{ results?: AggregateRow[] }>;
-  queryModelAggregates(sinceMinute: number, targetHost: StatusTargetHost): Promise<{ results?: ModelAggregateRow[] }>;
+  queryAggregates(sinceMinute: number, targetHost: StatusTargetHost, client: StatusClient): Promise<{ results?: AggregateRow[] }>;
+  queryModelAggregates(sinceMinute: number, targetHost: StatusTargetHost, client: StatusClient): Promise<{ results?: ModelAggregateRow[] }>;
   queryModelErrorDetails(
     sinceMinute: number,
     nowMinute: number,
     bucketMinutes: number,
-    targetHost: StatusTargetHost
+    targetHost: StatusTargetHost,
+    client: StatusClient
   ): Promise<{ results?: ModelErrorDetailRow[] }>;
   purgeExpiredData(nowMs: number, options?: RetentionOptions): Promise<void>;
 }
@@ -71,19 +74,20 @@ export function createSqlReportStore(db: SqlDatabase): ReportStore {
     recordReport(record: ReportRecord): Promise<void> {
       return recordReport(db, record);
     },
-    queryAggregates(sinceMinute: number, targetHost: StatusTargetHost): Promise<{ results?: AggregateRow[] }> {
-      return queryAggregates(db, sinceMinute, targetHost);
+    queryAggregates(sinceMinute: number, targetHost: StatusTargetHost, client: StatusClient): Promise<{ results?: AggregateRow[] }> {
+      return queryAggregates(db, sinceMinute, targetHost, client);
     },
-    queryModelAggregates(sinceMinute: number, targetHost: StatusTargetHost): Promise<{ results?: ModelAggregateRow[] }> {
-      return queryModelAggregates(db, sinceMinute, targetHost);
+    queryModelAggregates(sinceMinute: number, targetHost: StatusTargetHost, client: StatusClient): Promise<{ results?: ModelAggregateRow[] }> {
+      return queryModelAggregates(db, sinceMinute, targetHost, client);
     },
     queryModelErrorDetails(
       sinceMinute: number,
       nowMinute: number,
       bucketMinutes: number,
-      targetHost: StatusTargetHost
+      targetHost: StatusTargetHost,
+      client: StatusClient
     ): Promise<{ results?: ModelErrorDetailRow[] }> {
-      return queryModelErrorDetails(db, sinceMinute, nowMinute, bucketMinutes, targetHost);
+      return queryModelErrorDetails(db, sinceMinute, nowMinute, bucketMinutes, targetHost, client);
     },
     purgeExpiredData(nowMs: number, options: RetentionOptions = {}): Promise<void> {
       return purgeExpiredData(db, nowMs, options);
@@ -201,7 +205,12 @@ function createTargetModelErrorObservationStatement(
   );
 }
 
-async function queryAggregates(db: SqlDatabase, sinceMinute: number, targetHost: StatusTargetHost): Promise<{ results?: AggregateRow[] }> {
+async function queryAggregates(
+  db: SqlDatabase,
+  sinceMinute: number,
+  targetHost: StatusTargetHost,
+  client: StatusClient
+): Promise<{ results?: AggregateRow[] }> {
   const selectColumns = `
     minute,
     SUM(total_samples) AS total_samples,
@@ -222,32 +231,26 @@ async function queryAggregates(db: SqlDatabase, sinceMinute: number, targetHost:
     SUM(err_unknown) AS err_unknown
   `;
 
-  if (!targetHost) {
-    return db
-      .prepare(`
-        SELECT ${selectColumns}
-        FROM target_minute_aggregates
-        WHERE minute >= ?
-        GROUP BY minute
-        ORDER BY minute ASC
-      `)
-      .bind(sinceMinute)
-      .all<AggregateRow>();
-  }
+  const filter = buildStatusFilter({ targetHost, client, sinceMinute });
 
   return db
     .prepare(`
       SELECT ${selectColumns}
       FROM target_minute_aggregates
-      WHERE target_host = ? AND minute >= ?
+      WHERE ${filter.where}
       GROUP BY minute
       ORDER BY minute ASC
     `)
-    .bind(targetHost, sinceMinute)
+    .bind(...filter.values)
     .all<AggregateRow>();
 }
 
-async function queryModelAggregates(db: SqlDatabase, sinceMinute: number, targetHost: StatusTargetHost): Promise<{ results?: ModelAggregateRow[] }> {
+async function queryModelAggregates(
+  db: SqlDatabase,
+  sinceMinute: number,
+  targetHost: StatusTargetHost,
+  client: StatusClient
+): Promise<{ results?: ModelAggregateRow[] }> {
   const selectColumns = `
     minute,
     model_class,
@@ -262,28 +265,17 @@ async function queryModelAggregates(db: SqlDatabase, sinceMinute: number, target
     SUM(assistant_start_unknown) AS assistant_start_unknown
   `;
 
-  if (!targetHost) {
-    return db
-      .prepare(`
-        SELECT ${selectColumns}
-        FROM target_model_minute_aggregates
-        WHERE minute >= ?
-        GROUP BY minute, model_class
-        ORDER BY minute ASC, model_class ASC
-      `)
-      .bind(sinceMinute)
-      .all<ModelAggregateRow>();
-  }
+  const filter = buildStatusFilter({ targetHost, client, sinceMinute });
 
   return db
     .prepare(`
       SELECT ${selectColumns}
       FROM target_model_minute_aggregates
-      WHERE target_host = ? AND minute >= ?
+      WHERE ${filter.where}
       GROUP BY minute, model_class
       ORDER BY minute ASC, model_class ASC
     `)
-    .bind(targetHost, sinceMinute)
+    .bind(...filter.values)
     .all<ModelAggregateRow>();
 }
 
@@ -292,29 +284,10 @@ async function queryModelErrorDetails(
   sinceMinute: number,
   nowMinute: number,
   bucketMinutes: number,
-  targetHost: StatusTargetHost
+  targetHost: StatusTargetHost,
+  client: StatusClient
 ): Promise<{ results?: ModelErrorDetailRow[] }> {
-  if (!targetHost) {
-    return db
-      .prepare(`
-        SELECT bucket_index, model_class, error_type, status_code, error_hint, SUM(count) AS count
-        FROM (
-          SELECT
-            CAST((minute - ?) / ? AS INTEGER) AS bucket_index,
-            model_class,
-            error_type,
-            status_code,
-            error_hint,
-            count
-          FROM target_model_error_observations
-          WHERE minute >= ? AND minute <= ?
-        )
-        GROUP BY bucket_index, model_class, error_type, status_code, error_hint
-        ORDER BY bucket_index ASC, model_class ASC, count DESC
-      `)
-      .bind(sinceMinute, bucketMinutes, sinceMinute, nowMinute)
-      .all<ModelErrorDetailRow>();
-  }
+  const filter = buildStatusFilter({ targetHost, client, sinceMinute, nowMinute });
 
   return db
     .prepare(`
@@ -328,13 +301,43 @@ async function queryModelErrorDetails(
           error_hint,
           count
         FROM target_model_error_observations
-        WHERE target_host = ? AND minute >= ? AND minute <= ?
+        WHERE ${filter.where}
       )
       GROUP BY bucket_index, model_class, error_type, status_code, error_hint
       ORDER BY bucket_index ASC, model_class ASC, count DESC
     `)
-    .bind(sinceMinute, bucketMinutes, targetHost, sinceMinute, nowMinute)
+    .bind(sinceMinute, bucketMinutes, ...filter.values)
     .all<ModelErrorDetailRow>();
+}
+
+function buildStatusFilter({
+  targetHost,
+  client,
+  sinceMinute,
+  nowMinute
+}: {
+  targetHost: StatusTargetHost;
+  client: StatusClient;
+  sinceMinute: number;
+  nowMinute?: number;
+}): { where: string; values: unknown[] } {
+  const clauses: string[] = [];
+  const values: unknown[] = [];
+  if (targetHost) {
+    clauses.push("target_host = ?");
+    values.push(targetHost);
+  }
+  if (client) {
+    clauses.push("client = ?");
+    values.push(client);
+  }
+  clauses.push("minute >= ?");
+  values.push(sinceMinute);
+  if (nowMinute !== undefined) {
+    clauses.push("minute <= ?");
+    values.push(nowMinute);
+  }
+  return { where: clauses.join(" AND "), values };
 }
 
 async function purgeExpiredData(db: SqlDatabase, nowMs: number, options: RetentionOptions): Promise<void> {

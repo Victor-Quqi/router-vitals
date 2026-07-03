@@ -37,12 +37,15 @@ export async function loadStatusCache() {
             return null;
         if (typeof parsed.apiBaseUrl !== "string")
             return null;
+        if (typeof parsed.cacheScope !== "string")
+            return null;
         if (typeof parsed.fetchedAtMs !== "number" || !Number.isFinite(parsed.fetchedAtMs))
             return null;
         if (parsed.status !== null && !isRecord(parsed.status))
             return null;
         return {
             apiBaseUrl: parsed.apiBaseUrl,
+            cacheScope: parsed.cacheScope,
             fetchedAtMs: parsed.fetchedAtMs,
             status: parsed.status
         };

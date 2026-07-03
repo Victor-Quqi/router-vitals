@@ -218,6 +218,24 @@ test("status endpoint can filter by target host", async () => {
   assert.equal(db.calls[0]!.values[0], "anyrouter.top");
 });
 
+test("status endpoint can filter by client", async () => {
+  const db = statusDb();
+  const response = await handleRequest(new Request("https://api.example.test/v1/status?window=15m&client=claude-code&refresh=1"), { DB: db });
+  assert.equal(response.status, 200);
+  assert.equal(db.calls.length, 3);
+  assert.match(db.calls[0]!.query, /client = \?/);
+  assert.match(db.calls[1]!.query, /client = \?/);
+  assert.match(db.calls[2]!.query, /client = \?/);
+  assert.equal(db.calls[0]!.values[0], "claude-code");
+});
+
+test("status endpoint rejects unknown client filters", async () => {
+  const response = await handleRequest(new Request("https://api.example.test/v1/status?window=15m&client=claude"), { DB: statusDb() });
+  assert.equal(response.status, 400);
+  const body = await response.json();
+  assert.equal(body.error, "invalid_client");
+});
+
 test("status endpoint rejects unknown target host filters", async () => {
   const response = await handleRequest(new Request("https://api.example.test/v1/status?window=15m&targetHost=api.anthropic.com"), { DB: statusDb() });
   assert.equal(response.status, 400);

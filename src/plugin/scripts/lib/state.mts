@@ -71,6 +71,7 @@ export interface PluginState {
 
 export interface StatusCache {
   apiBaseUrl: string;
+  cacheScope: string;
   fetchedAtMs: number;
   status: Record<string, unknown> | null;
 }
@@ -104,10 +105,12 @@ export async function loadStatusCache(): Promise<StatusCache | null> {
     const parsed = JSON.parse(raw);
     if (!isRecord(parsed)) return null;
     if (typeof parsed.apiBaseUrl !== "string") return null;
+    if (typeof parsed.cacheScope !== "string") return null;
     if (typeof parsed.fetchedAtMs !== "number" || !Number.isFinite(parsed.fetchedAtMs)) return null;
     if (parsed.status !== null && !isRecord(parsed.status)) return null;
     return {
       apiBaseUrl: parsed.apiBaseUrl,
+      cacheScope: parsed.cacheScope,
       fetchedAtMs: parsed.fetchedAtMs,
       status: parsed.status
     };

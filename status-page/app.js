@@ -43,7 +43,7 @@ const modelLabels = {
     opus: "Opus",
     sonnet: "Sonnet",
     haiku: "Haiku",
-    "gpt-5.5": "GPT-5.5",
+    "gpt-5.5": "GPT",
     unknown: "Unknown"
 };
 const defaultModelClasses = ["fable", "opus", "sonnet", "haiku", "gpt-5.5"];

@@ -1,4 +1,4 @@
-import { DEFAULT_REMOTE_CONFIG, SERVER_DAILY_REPORT_SAMPLE_RATE, normalizeTargetHost, validateReportPayload } from "../../shared/policy.mjs";
+import { DEFAULT_REMOTE_CONFIG, SERVER_DAILY_REPORT_SAMPLE_RATE, normalizeClient, normalizeTargetHost, validateReportPayload } from "../../shared/policy.mjs";
 import { createPlatformResponseBodyCache } from "./runtime-cache.mjs";
 import { createSqlReportStore } from "./storage.mjs";
 import { buildStatusFromRows, getStatusWindowSpec, parseStatusWindow } from "./status.mjs";
@@ -92,9 +92,13 @@ export async function handleStatus(url, env, runtime = createRuntimeServices()) 
     if (targetHostResult === undefined)
         return json({ error: "invalid_target_host" }, 400);
     const targetHost = targetHostResult;
+    const clientResult = parseStatusClient(url.searchParams.get("client"));
+    if (clientResult === undefined)
+        return json({ error: "invalid_client" }, 400);
+    const client = clientResult;
     const nowMs = Date.now();
     const cacheTtlMs = getStatusCacheTtlMs(windowValue);
-    const cacheKey = `status:${windowValue}:${targetHost || "all"}`;
+    const cacheKey = `status:${windowValue}:${targetHost || "all"}:${client || "all"}`;
     const bypassCache = url.searchParams.get("refresh") === "1";
     const statusCache = runtime.statusCache === undefined ? createPlatformResponseBodyCache() : runtime.statusCache;
     const cached = bypassCache ? null : await statusCache?.get(cacheKey);
@@ -103,9 +107,9 @@ export async function handleStatus(url, env, runtime = createRuntimeServices()) 
     const nowMinute = Math.floor(nowMs / 60000);
     const sinceMinute = nowMinute - minutes + 1;
     const [result, modelResult, modelErrorDetailResult] = await Promise.all([
-        store.queryAggregates(sinceMinute, targetHost),
-        store.queryModelAggregates(sinceMinute, targetHost),
-        store.queryModelErrorDetails(sinceMinute, nowMinute, spec.bucketMinutes, targetHost)
+        store.queryAggregates(sinceMinute, targetHost, client),
+        store.queryModelAggregates(sinceMinute, targetHost, client),
+        store.queryModelErrorDetails(sinceMinute, nowMinute, spec.bucketMinutes, targetHost, client)
     ]);
     const body = JSON.stringify(buildStatusFromRows(result.results || [], windowValue, modelResult.results || [], nowMinute, modelErrorDetailResult.results || []));
     await statusCache?.put(cacheKey, body, cacheTtlMs);
@@ -120,6 +124,11 @@ function parseStatusTargetHost(value) {
     if (!value || value === "all")
         return null;
     return normalizeTargetHost(value) ?? undefined;
+}
+function parseStatusClient(value) {
+    if (!value || value === "all")
+        return null;
+    return normalizeClient(value) ?? undefined;
 }
 function getStatusCacheTtlMs(windowValue) {
     if (windowValue === "24h")

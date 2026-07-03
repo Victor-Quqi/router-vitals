@@ -19,14 +19,14 @@ export function createSqlReportStore(db) {
         recordReport(record) {
             return recordReport(db, record);
         },
-        queryAggregates(sinceMinute, targetHost) {
-            return queryAggregates(db, sinceMinute, targetHost);
+        queryAggregates(sinceMinute, targetHost, client) {
+            return queryAggregates(db, sinceMinute, targetHost, client);
         },
-        queryModelAggregates(sinceMinute, targetHost) {
-            return queryModelAggregates(db, sinceMinute, targetHost);
+        queryModelAggregates(sinceMinute, targetHost, client) {
+            return queryModelAggregates(db, sinceMinute, targetHost, client);
         },
-        queryModelErrorDetails(sinceMinute, nowMinute, bucketMinutes, targetHost) {
-            return queryModelErrorDetails(db, sinceMinute, nowMinute, bucketMinutes, targetHost);
+        queryModelErrorDetails(sinceMinute, nowMinute, bucketMinutes, targetHost, client) {
+            return queryModelErrorDetails(db, sinceMinute, nowMinute, bucketMinutes, targetHost, client);
         },
         purgeExpiredData(nowMs, options = {}) {
             return purgeExpiredData(db, nowMs, options);
@@ -92,7 +92,7 @@ function createTargetModelErrorObservationStatement(db, payload, nowMs, minute, 
       updated_at = ?
   `).bind(targetHost, payload.client, minute, payload.modelClass, payload.errorType, statusKey, statusCode, hintKey, errorHint, nowMs, nowMs);
 }
-async function queryAggregates(db, sinceMinute, targetHost) {
+async function queryAggregates(db, sinceMinute, targetHost, client) {
     const selectColumns = `
     minute,
     SUM(total_samples) AS total_samples,
@@ -112,30 +112,19 @@ async function queryAggregates(db, sinceMinute, targetHost) {
     SUM(err_timeout) AS err_timeout,
     SUM(err_unknown) AS err_unknown
   `;
-    if (!targetHost) {
-        return db
-            .prepare(`
-        SELECT ${selectColumns}
-        FROM target_minute_aggregates
-        WHERE minute >= ?
-        GROUP BY minute
-        ORDER BY minute ASC
-      `)
-            .bind(sinceMinute)
-            .all();
-    }
+    const filter = buildStatusFilter({ targetHost, client, sinceMinute });
     return db
         .prepare(`
       SELECT ${selectColumns}
       FROM target_minute_aggregates
-      WHERE target_host = ? AND minute >= ?
+      WHERE ${filter.where}
       GROUP BY minute
       ORDER BY minute ASC
     `)
-        .bind(targetHost, sinceMinute)
+        .bind(...filter.values)
         .all();
 }
-async function queryModelAggregates(db, sinceMinute, targetHost) {
+async function queryModelAggregates(db, sinceMinute, targetHost, client) {
     const selectColumns = `
     minute,
     model_class,
@@ -149,51 +138,20 @@ async function queryModelAggregates(db, sinceMinute, targetHost) {
     SUM(assistant_start_gt_60s) AS assistant_start_gt_60s,
     SUM(assistant_start_unknown) AS assistant_start_unknown
   `;
-    if (!targetHost) {
-        return db
-            .prepare(`
-        SELECT ${selectColumns}
-        FROM target_model_minute_aggregates
-        WHERE minute >= ?
-        GROUP BY minute, model_class
-        ORDER BY minute ASC, model_class ASC
-      `)
-            .bind(sinceMinute)
-            .all();
-    }
+    const filter = buildStatusFilter({ targetHost, client, sinceMinute });
     return db
         .prepare(`
       SELECT ${selectColumns}
       FROM target_model_minute_aggregates
-      WHERE target_host = ? AND minute >= ?
+      WHERE ${filter.where}
       GROUP BY minute, model_class
       ORDER BY minute ASC, model_class ASC
     `)
-        .bind(targetHost, sinceMinute)
+        .bind(...filter.values)
         .all();
 }
-async function queryModelErrorDetails(db, sinceMinute, nowMinute, bucketMinutes, targetHost) {
-    if (!targetHost) {
-        return db
-            .prepare(`
-        SELECT bucket_index, model_class, error_type, status_code, error_hint, SUM(count) AS count
-        FROM (
-          SELECT
-            CAST((minute - ?) / ? AS INTEGER) AS bucket_index,
-            model_class,
-            error_type,
-            status_code,
-            error_hint,
-            count
-          FROM target_model_error_observations
-          WHERE minute >= ? AND minute <= ?
-        )
-        GROUP BY bucket_index, model_class, error_type, status_code, error_hint
-        ORDER BY bucket_index ASC, model_class ASC, count DESC
-      `)
-            .bind(sinceMinute, bucketMinutes, sinceMinute, nowMinute)
-            .all();
-    }
+async function queryModelErrorDetails(db, sinceMinute, nowMinute, bucketMinutes, targetHost, client) {
+    const filter = buildStatusFilter({ targetHost, client, sinceMinute, nowMinute });
     return db
         .prepare(`
       SELECT bucket_index, model_class, error_type, status_code, error_hint, SUM(count) AS count
@@ -206,13 +164,32 @@ async function queryModelErrorDetails(db, sinceMinute, nowMinute, bucketMinutes,
           error_hint,
           count
         FROM target_model_error_observations
-        WHERE target_host = ? AND minute >= ? AND minute <= ?
+        WHERE ${filter.where}
       )
       GROUP BY bucket_index, model_class, error_type, status_code, error_hint
       ORDER BY bucket_index ASC, model_class ASC, count DESC
     `)
-        .bind(sinceMinute, bucketMinutes, targetHost, sinceMinute, nowMinute)
+        .bind(sinceMinute, bucketMinutes, ...filter.values)
         .all();
+}
+function buildStatusFilter({ targetHost, client, sinceMinute, nowMinute }) {
+    const clauses = [];
+    const values = [];
+    if (targetHost) {
+        clauses.push("target_host = ?");
+        values.push(targetHost);
+    }
+    if (client) {
+        clauses.push("client = ?");
+        values.push(client);
+    }
+    clauses.push("minute >= ?");
+    values.push(sinceMinute);
+    if (nowMinute !== undefined) {
+        clauses.push("minute <= ?");
+        values.push(nowMinute);
+    }
+    return { where: clauses.join(" AND "), values };
 }
 async function purgeExpiredData(db, nowMs, options) {
     const retentionCutoff = nowMs - MAX_RETENTION_DAYS * 24 * 60 * 60 * 1000;

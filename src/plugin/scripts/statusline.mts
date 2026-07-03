@@ -4,6 +4,8 @@ import { LOCAL_DAILY_REPORT_LIMIT, isPluginVersionNewer, matchTargetBaseUrl } fr
 import { getTodayContributions, loadState, loadStatusCache, saveStatusCache, type LastDecision } from "./lib/state.mjs";
 
 const STATUS_CACHE_TTL_MS = 60 * 1000;
+const STATUS_CACHE_SCOPE = "60m:claude-code";
+const STATUS_QUERY = "window=60m&client=claude-code";
 
 interface StatusSummary {
   state?: string;
@@ -48,13 +50,14 @@ async function main() {
 async function getCachedStatus(apiBaseUrl: string): Promise<StatusSummary | null> {
   const nowMs = Date.now();
   const cached = await loadStatusCache();
-  if (cached?.apiBaseUrl === apiBaseUrl && cached.fetchedAtMs + STATUS_CACHE_TTL_MS > nowMs) {
+  if (cached?.apiBaseUrl === apiBaseUrl && cached.cacheScope === STATUS_CACHE_SCOPE && cached.fetchedAtMs + STATUS_CACHE_TTL_MS > nowMs) {
     return cached.status as StatusSummary | null;
   }
 
   const status = await fetchStatus(apiBaseUrl);
   await saveStatusCache({
     apiBaseUrl,
+    cacheScope: STATUS_CACHE_SCOPE,
     fetchedAtMs: nowMs,
     status: status ? { ...status } : null
   });
@@ -65,7 +68,7 @@ async function fetchStatus(apiBaseUrl: string): Promise<StatusSummary | null> {
   try {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 1200);
-    const response = await fetch(`${apiBaseUrl.replace(/\/+$/, "")}/v1/status?window=60m`, {
+    const response = await fetch(`${apiBaseUrl.replace(/\/+$/, "")}/v1/status?${STATUS_QUERY}`, {
       signal: controller.signal,
       headers: { accept: "application/json" }
     });

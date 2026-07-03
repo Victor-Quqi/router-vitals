@@ -3,6 +3,8 @@ import { loadRemoteConfig } from "./lib/config.mjs";
 import { LOCAL_DAILY_REPORT_LIMIT, isPluginVersionNewer, matchTargetBaseUrl } from "./lib/policy.mjs";
 import { getTodayContributions, loadState, loadStatusCache, saveStatusCache } from "./lib/state.mjs";
 const STATUS_CACHE_TTL_MS = 60 * 1000;
+const STATUS_CACHE_SCOPE = "60m:claude-code";
+const STATUS_QUERY = "window=60m&client=claude-code";
 main().catch(() => {
     console.log("Any Router 近 60m 状态: 状态暂缺");
 });
@@ -36,12 +38,13 @@ async function main() {
 async function getCachedStatus(apiBaseUrl) {
     const nowMs = Date.now();
     const cached = await loadStatusCache();
-    if (cached?.apiBaseUrl === apiBaseUrl && cached.fetchedAtMs + STATUS_CACHE_TTL_MS > nowMs) {
+    if (cached?.apiBaseUrl === apiBaseUrl && cached.cacheScope === STATUS_CACHE_SCOPE && cached.fetchedAtMs + STATUS_CACHE_TTL_MS > nowMs) {
         return cached.status;
     }
     const status = await fetchStatus(apiBaseUrl);
     await saveStatusCache({
         apiBaseUrl,
+        cacheScope: STATUS_CACHE_SCOPE,
         fetchedAtMs: nowMs,
         status: status ? { ...status } : null
     });
@@ -51,7 +54,7 @@ async function fetchStatus(apiBaseUrl) {
     try {
         const controller = new AbortController();
         const timeout = setTimeout(() => controller.abort(), 1200);
-        const response = await fetch(`${apiBaseUrl.replace(/\/+$/, "")}/v1/status?window=60m`, {
+        const response = await fetch(`${apiBaseUrl.replace(/\/+$/, "")}/v1/status?${STATUS_QUERY}`, {
             signal: controller.signal,
             headers: { accept: "application/json" }
         });

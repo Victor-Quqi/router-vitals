@@ -1,6 +1,7 @@
 import {
   DEFAULT_REMOTE_CONFIG,
   SERVER_DAILY_REPORT_SAMPLE_RATE,
+  normalizeClient,
   normalizeTargetHost,
   validateReportPayload,
   type ReportPayload
@@ -10,6 +11,7 @@ import {
   createSqlReportStore,
   type ReportStore,
   type SqlDatabase,
+  type StatusClient,
   type StatusTargetHost
 } from "./storage.mjs";
 import {
@@ -140,10 +142,13 @@ export async function handleStatus(
   const targetHostResult = parseStatusTargetHost(url.searchParams.get("targetHost"));
   if (targetHostResult === undefined) return json({ error: "invalid_target_host" }, 400);
   const targetHost = targetHostResult;
+  const clientResult = parseStatusClient(url.searchParams.get("client"));
+  if (clientResult === undefined) return json({ error: "invalid_client" }, 400);
+  const client = clientResult;
 
   const nowMs = Date.now();
   const cacheTtlMs = getStatusCacheTtlMs(windowValue);
-  const cacheKey = `status:${windowValue}:${targetHost || "all"}`;
+  const cacheKey = `status:${windowValue}:${targetHost || "all"}:${client || "all"}`;
   const bypassCache = url.searchParams.get("refresh") === "1";
   const statusCache = runtime.statusCache === undefined ? createPlatformResponseBodyCache() : runtime.statusCache;
   const cached = bypassCache ? null : await statusCache?.get(cacheKey);
@@ -152,9 +157,9 @@ export async function handleStatus(
   const nowMinute = Math.floor(nowMs / 60000);
   const sinceMinute = nowMinute - minutes + 1;
   const [result, modelResult, modelErrorDetailResult] = await Promise.all([
-    store.queryAggregates(sinceMinute, targetHost),
-    store.queryModelAggregates(sinceMinute, targetHost),
-    store.queryModelErrorDetails(sinceMinute, nowMinute, spec.bucketMinutes, targetHost)
+    store.queryAggregates(sinceMinute, targetHost, client),
+    store.queryModelAggregates(sinceMinute, targetHost, client),
+    store.queryModelErrorDetails(sinceMinute, nowMinute, spec.bucketMinutes, targetHost, client)
   ]);
 
   const body = JSON.stringify(buildStatusFromRows(
@@ -177,6 +182,11 @@ function getReportStore(env: WorkerEnv, runtime: RuntimeServices): ReportStore |
 function parseStatusTargetHost(value: string | null): StatusTargetHost | undefined {
   if (!value || value === "all") return null;
   return normalizeTargetHost(value) ?? undefined;
+}
+
+function parseStatusClient(value: string | null): StatusClient | undefined {
+  if (!value || value === "all") return null;
+  return normalizeClient(value) ?? undefined;
 }
 
 function getStatusCacheTtlMs(windowValue: string): number {

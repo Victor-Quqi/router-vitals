@@ -150,7 +150,7 @@ const modelLabels: Record<ModelClass, string> = {
   opus: "Opus",
   sonnet: "Sonnet",
   haiku: "Haiku",
-  "gpt-5.5": "GPT-5.5",
+  "gpt-5.5": "GPT",
   unknown: "Unknown"
 };
 const defaultModelClasses: readonly ModelClass[] = ["fable", "opus", "sonnet", "haiku", "gpt-5.5"];
