@@ -117,16 +117,16 @@ function createTargetAggregateStatement(
 
   return db.prepare(`
     INSERT INTO target_minute_aggregates (
-      target_host, minute, total_samples, success_samples, failure_samples, ${assistantStartColumn}, ${errorColumn}, updated_at
-    ) VALUES (?, ?, 1, ?, ?, ?, 1, ?)
-    ON CONFLICT(target_host, minute) DO UPDATE SET
+      target_host, client, minute, total_samples, success_samples, failure_samples, ${assistantStartColumn}, ${errorColumn}, updated_at
+    ) VALUES (?, ?, ?, 1, ?, ?, ?, 1, ?)
+    ON CONFLICT(target_host, minute, client) DO UPDATE SET
       total_samples = total_samples + 1,
       success_samples = success_samples + ?,
       failure_samples = failure_samples + ?,
       ${assistantStartColumn} = ${assistantStartColumn} + ?,
       ${errorColumn} = ${errorColumn} + 1,
       updated_at = ?
-  `).bind(targetHost, minute, successDelta, failureDelta, assistantStartDelta, nowMs, successDelta, failureDelta, assistantStartDelta, nowMs);
+  `).bind(targetHost, payload.client, minute, successDelta, failureDelta, assistantStartDelta, nowMs, successDelta, failureDelta, assistantStartDelta, nowMs);
 }
 
 function createTargetModelAggregateStatement(
@@ -143,9 +143,9 @@ function createTargetModelAggregateStatement(
 
   return db.prepare(`
     INSERT INTO target_model_minute_aggregates (
-      target_host, minute, model_class, total_samples, success_samples, failure_samples, ${assistantStartColumn}, updated_at
-    ) VALUES (?, ?, ?, 1, ?, ?, ?, ?)
-    ON CONFLICT(target_host, minute, model_class) DO UPDATE SET
+      target_host, client, minute, model_class, total_samples, success_samples, failure_samples, ${assistantStartColumn}, updated_at
+    ) VALUES (?, ?, ?, ?, 1, ?, ?, ?, ?)
+    ON CONFLICT(target_host, minute, model_class, client) DO UPDATE SET
       total_samples = total_samples + 1,
       success_samples = success_samples + ?,
       failure_samples = failure_samples + ?,
@@ -153,6 +153,7 @@ function createTargetModelAggregateStatement(
       updated_at = ?
   `).bind(
     targetHost,
+    payload.client,
     minute,
     payload.modelClass,
     successDelta,
@@ -180,13 +181,14 @@ function createTargetModelErrorObservationStatement(
 
   return db.prepare(`
     INSERT INTO target_model_error_observations (
-      target_host, minute, model_class, error_type, status_key, status_code, hint_key, error_hint, count, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?)
-    ON CONFLICT(target_host, minute, model_class, error_type, status_key, hint_key) DO UPDATE SET
+      target_host, client, minute, model_class, error_type, status_key, status_code, hint_key, error_hint, count, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)
+    ON CONFLICT(target_host, minute, model_class, client, error_type, status_key, hint_key) DO UPDATE SET
       count = count + 1,
       updated_at = ?
   `).bind(
     targetHost,
+    payload.client,
     minute,
     payload.modelClass,
     payload.errorType,
@@ -200,27 +202,30 @@ function createTargetModelErrorObservationStatement(
 }
 
 async function queryAggregates(db: SqlDatabase, sinceMinute: number, targetHost: StatusTargetHost): Promise<{ results?: AggregateRow[] }> {
+  const selectColumns = `
+    minute,
+    SUM(total_samples) AS total_samples,
+    SUM(success_samples) AS success_samples,
+    SUM(failure_samples) AS failure_samples,
+    SUM(assistant_start_lt_3s) AS assistant_start_lt_3s,
+    SUM(assistant_start_3_10s) AS assistant_start_3_10s,
+    SUM(assistant_start_10_30s) AS assistant_start_10_30s,
+    SUM(assistant_start_30_60s) AS assistant_start_30_60s,
+    SUM(assistant_start_gt_60s) AS assistant_start_gt_60s,
+    SUM(assistant_start_unknown) AS assistant_start_unknown,
+    SUM(err_none) AS err_none,
+    SUM(err_server_error) AS err_server_error,
+    SUM(err_rate_limited) AS err_rate_limited,
+    SUM(err_network_error) AS err_network_error,
+    SUM(err_auth_error) AS err_auth_error,
+    SUM(err_timeout) AS err_timeout,
+    SUM(err_unknown) AS err_unknown
+  `;
+
   if (!targetHost) {
     return db
       .prepare(`
-        SELECT
-          minute,
-          SUM(total_samples) AS total_samples,
-          SUM(success_samples) AS success_samples,
-          SUM(failure_samples) AS failure_samples,
-          SUM(assistant_start_lt_3s) AS assistant_start_lt_3s,
-          SUM(assistant_start_3_10s) AS assistant_start_3_10s,
-          SUM(assistant_start_10_30s) AS assistant_start_10_30s,
-          SUM(assistant_start_30_60s) AS assistant_start_30_60s,
-          SUM(assistant_start_gt_60s) AS assistant_start_gt_60s,
-          SUM(assistant_start_unknown) AS assistant_start_unknown,
-          SUM(err_none) AS err_none,
-          SUM(err_server_error) AS err_server_error,
-          SUM(err_rate_limited) AS err_rate_limited,
-          SUM(err_network_error) AS err_network_error,
-          SUM(err_auth_error) AS err_auth_error,
-          SUM(err_timeout) AS err_timeout,
-          SUM(err_unknown) AS err_unknown
+        SELECT ${selectColumns}
         FROM target_minute_aggregates
         WHERE minute >= ?
         GROUP BY minute
@@ -231,27 +236,36 @@ async function queryAggregates(db: SqlDatabase, sinceMinute: number, targetHost:
   }
 
   return db
-    .prepare("SELECT * FROM target_minute_aggregates WHERE target_host = ? AND minute >= ? ORDER BY minute ASC")
+    .prepare(`
+      SELECT ${selectColumns}
+      FROM target_minute_aggregates
+      WHERE target_host = ? AND minute >= ?
+      GROUP BY minute
+      ORDER BY minute ASC
+    `)
     .bind(targetHost, sinceMinute)
     .all<AggregateRow>();
 }
 
 async function queryModelAggregates(db: SqlDatabase, sinceMinute: number, targetHost: StatusTargetHost): Promise<{ results?: ModelAggregateRow[] }> {
+  const selectColumns = `
+    minute,
+    model_class,
+    SUM(total_samples) AS total_samples,
+    SUM(success_samples) AS success_samples,
+    SUM(failure_samples) AS failure_samples,
+    SUM(assistant_start_lt_3s) AS assistant_start_lt_3s,
+    SUM(assistant_start_3_10s) AS assistant_start_3_10s,
+    SUM(assistant_start_10_30s) AS assistant_start_10_30s,
+    SUM(assistant_start_30_60s) AS assistant_start_30_60s,
+    SUM(assistant_start_gt_60s) AS assistant_start_gt_60s,
+    SUM(assistant_start_unknown) AS assistant_start_unknown
+  `;
+
   if (!targetHost) {
     return db
       .prepare(`
-        SELECT
-          minute,
-          model_class,
-          SUM(total_samples) AS total_samples,
-          SUM(success_samples) AS success_samples,
-          SUM(failure_samples) AS failure_samples,
-          SUM(assistant_start_lt_3s) AS assistant_start_lt_3s,
-          SUM(assistant_start_3_10s) AS assistant_start_3_10s,
-          SUM(assistant_start_10_30s) AS assistant_start_10_30s,
-          SUM(assistant_start_30_60s) AS assistant_start_30_60s,
-          SUM(assistant_start_gt_60s) AS assistant_start_gt_60s,
-          SUM(assistant_start_unknown) AS assistant_start_unknown
+        SELECT ${selectColumns}
         FROM target_model_minute_aggregates
         WHERE minute >= ?
         GROUP BY minute, model_class
@@ -263,20 +277,10 @@ async function queryModelAggregates(db: SqlDatabase, sinceMinute: number, target
 
   return db
     .prepare(`
-      SELECT
-        minute,
-        model_class,
-        total_samples,
-        success_samples,
-        failure_samples,
-        assistant_start_lt_3s,
-        assistant_start_3_10s,
-        assistant_start_10_30s,
-        assistant_start_30_60s,
-        assistant_start_gt_60s,
-        assistant_start_unknown
+      SELECT ${selectColumns}
       FROM target_model_minute_aggregates
       WHERE target_host = ? AND minute >= ?
+      GROUP BY minute, model_class
       ORDER BY minute ASC, model_class ASC
     `)
     .bind(targetHost, sinceMinute)

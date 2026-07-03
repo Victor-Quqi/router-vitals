@@ -2,7 +2,7 @@
 
 [English](README.en.md)
 
-一个 Claude Code 插件，用来监测 Any Router 当前状态。
+一个 Claude Code / Codex 插件，用来监测 Any Router 当前状态。
 
 单账号反复探测容易触发上游风控、限流甚至封号，而且只代表那一个账号。本插件在每轮结束后匿名上报这轮成功还是失败，汇总成社区状态。
 
@@ -15,6 +15,8 @@
 感谢 [LINUX DO](https://linux.do/) 社区的支持。
 
 ## 安装
+
+### Claude Code
 
 在 Claude Code 里运行：
 
@@ -30,9 +32,20 @@ claude plugin marketplace add Victor-Quqi/router-vitals
 claude plugin install anyrouter-status-monitor@router-vitals
 ```
 
-装完插件 hooks 就开始工作了。不想参与贡献，设环境变量 `ANYROUTER_STATUS_DISABLED=1` 即可。
+装完插件 hooks 就开始工作了。
 
-### 在状态栏显示状态（推荐）
+### Codex
+
+```bash
+codex plugin marketplace add Victor-Quqi/router-vitals
+codex plugin add anyrouter-status-monitor@router-vitals
+```
+
+装完在 Codex 会话里执行 `/hooks`，信任本插件的 hooks 即开始工作；插件更新后需重新信任一次。
+
+不想参与贡献，设环境变量 `ANYROUTER_STATUS_DISABLED=1` 即可。
+
+### 在状态栏显示状态（推荐，仅 Claude Code）
 
 先找到插件安装路径：
 

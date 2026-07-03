@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import worker, { handleReport, handleRequest } from "../worker/src/index.mjs";
 import { createMemoryResponseBodyCache } from "../worker/src/runtime-cache.mjs";
 import { buildStatusFromRows } from "../worker/src/status.mjs";
-import { PLUGIN_VERSION, SERVER_DAILY_REPORT_HARD_LIMIT, SERVER_DAILY_REPORT_SAMPLE_RATE, SERVER_DAILY_REPORT_SOFT_LIMIT } from "../shared/policy.mjs";
+import { PLUGIN_VERSION, SERVER_DAILY_REPORT_HARD_LIMIT, SERVER_DAILY_REPORT_SAMPLE_RATE, SERVER_DAILY_REPORT_SOFT_LIMIT, STATUS_MODEL_ORDER } from "../shared/policy.mjs";
 
 test("worker rejects unknown report fields before touching D1", async () => {
   const request = new Request("https://api.example.test/v1/report", {
@@ -52,6 +52,34 @@ test("worker rejects reports without target host before touching D1", async () =
   const body = await response.json();
   assert.equal(body.error, "invalid_payload");
   assert.match(body.details.join("\n"), /missing field: targetHost/);
+});
+
+test("worker rejects non-canonical client values before touching D1", async () => {
+  const request = new Request("https://api.example.test/v1/report", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      ok: true,
+      errorType: "none",
+      errorStatusCode: null,
+      errorHint: null,
+      client: " Codex ",
+      modelClass: "sonnet",
+      assistantStartBucket: "lt_3s",
+      timeBucket: 30000000,
+      pluginVersion: "0.1.0",
+      anonymousId: "anon_clientStrictabcdefghijkl",
+      sampleRate: 1,
+      targetMatched: true,
+      targetHost: "anyrouter.top"
+    })
+  });
+
+  const response = await handleReport(request, { DB: failingDb() });
+  assert.equal(response.status, 400);
+  const body = await response.json();
+  assert.equal(body.error, "invalid_payload");
+  assert.match(body.details.join("\n"), /invalid client/);
 });
 
 test("worker samples reports over the anonymous daily soft limit", async () => {
@@ -129,10 +157,10 @@ test("worker counts assistant start buckets only for successful reports", async 
 
   const successTarget = findInsertCall(successCalls, "target_minute_aggregates");
   const successModel = findInsertCall(successCalls, "target_model_minute_aggregates");
-  assert.equal(successTarget.values[4], 1);
-  assert.equal(successTarget.values[8], 1);
-  assert.equal(successModel.values[5], 1);
-  assert.equal(successModel.values[9], 1);
+  assert.equal(successTarget.values[5], 1);
+  assert.equal(successTarget.values[9], 1);
+  assert.equal(successModel.values[6], 1);
+  assert.equal(successModel.values[10], 1);
 
   const failureCalls: RecordedQuery[] = [];
   const failure = await handleReport(reportRequest("anon_latencyFailureabcdefghijkl", false), { DB: recordingDb(failureCalls) });
@@ -140,10 +168,10 @@ test("worker counts assistant start buckets only for successful reports", async 
 
   const failureTarget = findInsertCall(failureCalls, "target_minute_aggregates");
   const failureModel = findInsertCall(failureCalls, "target_model_minute_aggregates");
-  assert.equal(failureTarget.values[4], 0);
-  assert.equal(failureTarget.values[8], 0);
-  assert.equal(failureModel.values[5], 0);
-  assert.equal(failureModel.values[9], 0);
+  assert.equal(failureTarget.values[5], 0);
+  assert.equal(failureTarget.values[9], 0);
+  assert.equal(failureModel.values[6], 0);
+  assert.equal(failureModel.values[10], 0);
 });
 
 test("config endpoint exposes fixed AnyRouter hosts", async () => {
@@ -388,7 +416,7 @@ test("status aggregation builds model trend buckets", () => {
 
   assert.equal(status.timeline!.bucketCount, 18);
   assert.equal(status.timeline!.bucketMinutes, 5);
-  assert.equal(status.models.length, 5);
+  assert.equal(status.models.length, STATUS_MODEL_ORDER.length);
   assert.equal(status.models[0]!.modelClass, "fable");
   assert.equal(status.models[0]!.buckets.at(-1)!.state, "empty");
   assert.equal(status.models[1]!.modelClass, "opus");
@@ -403,7 +431,9 @@ test("status aggregation builds model trend buckets", () => {
   assert.equal(status.modelErrors.sonnet[0]!.type, "server_error");
   assert.equal(status.models[3]!.modelClass, "haiku");
   assert.equal(status.models[3]!.buckets.at(-1)!.state, "empty");
-  assert.equal(status.models[4]!.modelClass, "unknown");
+  assert.equal(status.models[4]!.modelClass, "gpt-5.5");
+  assert.equal(status.models[4]!.buckets.at(-1)!.state, "empty");
+  assert.equal(status.models[5]!.modelClass, "unknown");
 });
 
 function failingDb() {
@@ -483,6 +513,7 @@ function reportRequest(anonymousId: string, ok = true): Request {
       errorType: ok ? "none" : "server_error",
       errorStatusCode: ok ? null : 503,
       errorHint: ok ? null : "Service overloaded",
+      client: "claude-code",
       modelClass: "sonnet",
       assistantStartBucket: "lt_3s",
       timeBucket: 30000000,

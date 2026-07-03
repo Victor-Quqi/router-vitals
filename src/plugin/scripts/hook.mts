@@ -49,8 +49,11 @@ import {
   type ModelResolution,
   type PromptModelSource
 } from "./lib/hook-model-resolution.mjs";
+import { postReport, recordLastDecision as recordDecision, summarizePostResult, type PostReportResult } from "./lib/report.mjs";
+import { runCodexHook } from "./lib/codex-flow.mjs";
 
 const eventName = process.argv[2] || "";
+const isCodexClient = process.argv.slice(3).includes("--client=codex");
 
 interface PromptStartDebug {
   targetMatched: boolean;
@@ -88,16 +91,16 @@ type CompletionSkipReason =
   | "sampled_out"
   | "payload_invalid";
 
-type PostReportResult =
-  | { ok: true; statusCode: number }
-  | { ok: false; reason: "timeout" | "http_error" | "network_error"; statusCode?: number };
-
 main().catch(() => {
   process.exit(0);
 });
 
 async function main() {
   const input = await readHookInput();
+  if (isCodexClient) {
+    await runCodexHook(eventName, input);
+    return;
+  }
   const state = await loadState();
   const sessionKey = hashLocalSessionId(input.session_id);
   await writeHookDebug(sessionKey, "received", {
@@ -223,7 +226,7 @@ async function reportCompletion({
   };
 
   const skip = (reason: CompletionSkipReason, details: Partial<LastDecision> = {}): CompletionDebug => {
-    recordLastDecision(state, eventName, {
+    recordDecision(state, eventName, {
       kind: "skipped",
       reason,
       ...(pending?.modelClass ? { modelClass: pending.modelClass } : {}),
@@ -266,6 +269,7 @@ async function reportCompletion({
     errorType: ok ? "none" : classifyError(input),
     errorStatusCode: ok ? null : extractErrorStatusCode(input),
     errorHint: ok ? null : createErrorHint(input),
+    client: "claude-code",
     modelClass,
     assistantStartBucket: bucketAssistantStart(assistantStartDelayMs),
     timeBucket: createTimeBucket(),
@@ -284,7 +288,7 @@ async function reportCompletion({
   debug.posted = postResult.ok;
   debug.postResult = summarizePostResult(postResult);
   if (postResult.ok) {
-    recordLastDecision(state, eventName, {
+    recordDecision(state, eventName, {
       kind: "reported",
       reason: null,
       modelClass,
@@ -294,7 +298,7 @@ async function reportCompletion({
     state.lastReportAt = new Date().toISOString();
     incrementContribution(state);
   } else {
-    recordLastDecision(state, eventName, {
+    recordDecision(state, eventName, {
       kind: "post_failed",
       reason: postResult.reason,
       modelClass,
@@ -313,53 +317,6 @@ function createPluginUpdateReminderMessage(state: PluginState, config: RemoteCon
 
 function writeHookSystemMessage(systemMessage: string): void {
   console.log(JSON.stringify({ systemMessage }));
-}
-
-async function postReport(apiBaseUrl: string, payload: ReportPayload): Promise<PostReportResult> {
-  let timedOut = false;
-  let timeout: ReturnType<typeof setTimeout> | null = null;
-  try {
-    const controller = new AbortController();
-    timeout = setTimeout(() => {
-      timedOut = true;
-      controller.abort();
-    }, 3000);
-    const response = await fetch(`${apiBaseUrl.replace(/\/+$/, "")}/v1/report`, {
-      method: "POST",
-      signal: controller.signal,
-      headers: {
-        "content-type": "application/json",
-        "user-agent": `anyrouter-status-monitor/${PLUGIN_VERSION}`
-      },
-      body: JSON.stringify(payload)
-    });
-    if (response.ok) return { ok: true, statusCode: response.status };
-    return { ok: false, reason: "http_error", statusCode: response.status };
-  } catch {
-    return { ok: false, reason: timedOut ? "timeout" : "network_error" };
-  } finally {
-    if (timeout) clearTimeout(timeout);
-  }
-}
-
-function recordLastDecision(
-  state: PluginState,
-  eventName: CompletionEventName,
-  decision: Omit<LastDecision, "at" | "eventName">
-): void {
-  state.lastDecision = {
-    at: new Date().toISOString(),
-    eventName,
-    ...decision
-  };
-}
-
-function summarizePostResult(result: PostReportResult): Record<string, unknown> {
-  return {
-    ok: result.ok,
-    ...(result.ok ? { statusCode: result.statusCode } : { reason: result.reason }),
-    ...(!result.ok && result.statusCode ? { statusCode: result.statusCode } : {})
-  };
 }
 
 function getTurnStartedAtMs(turns: Array<TurnState | undefined>): number | null {

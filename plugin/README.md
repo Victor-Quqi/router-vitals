@@ -1,10 +1,10 @@
 # Any Router Status Monitor Plugin
 
-Claude Code 插件包。上报规则、payload schema 和脱敏边界以 [docs/reporting.md](../docs/reporting.md) 和 `scripts/lib/policy-core.mjs` 为准。
+Claude Code / Codex 插件包。上报规则、payload schema 和脱敏边界以 [docs/reporting.md](../docs/reporting.md) 和 `scripts/lib/policy-core.mjs` 为准；Codex 机制细节见 [docs/codex-monitoring.md](../docs/codex-monitoring.md)。
 
 状态页：https://router-vitals.pages.dev/
 
-## 本地命令
+## 本地命令（statusLine 仅 Claude Code）
 
 预览最近一次提交的 payload：
 

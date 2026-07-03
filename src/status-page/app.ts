@@ -1,7 +1,7 @@
 const API_BASE = window.ANYROUTER_STATUS_API_BASE || window.location.origin;
 
 type ServiceState = "available" | "unstable" | "down" | "insufficient_data";
-type ModelClass = "haiku" | "sonnet" | "opus" | "fable" | "unknown";
+type ModelClass = "haiku" | "sonnet" | "opus" | "fable" | "gpt-5.5" | "unknown";
 type BucketState = "empty" | "success" | "mixed" | "failure";
 type RefreshOptions = { bypassCache?: boolean };
 type TargetHostFilter = "all" | "main" | "optimized";
@@ -150,9 +150,10 @@ const modelLabels: Record<ModelClass, string> = {
   opus: "Opus",
   sonnet: "Sonnet",
   haiku: "Haiku",
+  "gpt-5.5": "GPT-5.5",
   unknown: "Unknown"
 };
-const defaultModelClasses: readonly ModelClass[] = ["fable", "opus", "sonnet", "haiku"];
+const defaultModelClasses: readonly ModelClass[] = ["fable", "opus", "sonnet", "haiku", "gpt-5.5"];
 
 const assistantStartLabels: Record<AssistantStartBucket, string> = {
   lt_3s: "<3s",
@@ -857,7 +858,7 @@ function normalizeServiceState(value: unknown): ServiceState {
 }
 
 function normalizeModelClass(value: unknown): ModelClass {
-  if (value === "fable" || value === "opus" || value === "sonnet" || value === "haiku" || value === "unknown") return value;
+  if (value === "fable" || value === "opus" || value === "sonnet" || value === "haiku" || value === "gpt-5.5" || value === "unknown") return value;
   return "unknown";
 }
 

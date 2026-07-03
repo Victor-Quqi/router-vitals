@@ -177,8 +177,8 @@ export function buildStatusFromRows(
     meta: {
       unit: "turn",
       availabilityFormula: "successCount / sampleCount",
-      assistantStartDefinition: "Time from Claude Code UserPromptSubmit to the first assistant transcript record for successful turns.",
-      sampleCountDefinition: "Completed Claude Code user turns observed by the plugin in this window.",
+      assistantStartDefinition: "Time from prompt submit to the first assistant evidence for successful turns; Codex turns use the client-measured time to first token.",
+      sampleCountDefinition: "Completed user turns (Claude Code or Codex) observed by the plugin in this window.",
       trendBucketRule: "empty=no samples; success=only successful turns; mixed=successful and failed turns; failure=only failed turns.",
       stateThresholds: { ...STATUS_STATE_THRESHOLDS }
     }

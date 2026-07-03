@@ -6,12 +6,19 @@ import { getDailyAnonymousId, hasReachedDailyReportLimit, incrementContribution,
 import { summarizeHookInput, summarizePayload, summarizeTurnState } from "./lib/hook-debug-summary.mjs";
 import { getTranscriptSize, inspectTranscript } from "./lib/hook-transcript.mjs";
 import { resolveModelClass, resolvePromptStartModelClass } from "./lib/hook-model-resolution.mjs";
+import { postReport, recordLastDecision as recordDecision, summarizePostResult } from "./lib/report.mjs";
+import { runCodexHook } from "./lib/codex-flow.mjs";
 const eventName = process.argv[2] || "";
+const isCodexClient = process.argv.slice(3).includes("--client=codex");
 main().catch(() => {
     process.exit(0);
 });
 async function main() {
     const input = await readHookInput();
+    if (isCodexClient) {
+        await runCodexHook(eventName, input);
+        return;
+    }
     const state = await loadState();
     const sessionKey = hashLocalSessionId(input.session_id);
     await writeHookDebug(sessionKey, "received", {
@@ -120,7 +127,7 @@ async function reportCompletion({ eventName, input, state, config, sessionKey })
         skipped: null
     };
     const skip = (reason, details = {}) => {
-        recordLastDecision(state, eventName, {
+        recordDecision(state, eventName, {
             kind: "skipped",
             reason,
             ...(pending?.modelClass ? { modelClass: pending.modelClass } : {}),
@@ -166,6 +173,7 @@ async function reportCompletion({ eventName, input, state, config, sessionKey })
         errorType: ok ? "none" : classifyError(input),
         errorStatusCode: ok ? null : extractErrorStatusCode(input),
         errorHint: ok ? null : createErrorHint(input),
+        client: "claude-code",
         modelClass,
         assistantStartBucket: bucketAssistantStart(assistantStartDelayMs),
         timeBucket: createTimeBucket(),
@@ -183,7 +191,7 @@ async function reportCompletion({ eventName, input, state, config, sessionKey })
     debug.posted = postResult.ok;
     debug.postResult = summarizePostResult(postResult);
     if (postResult.ok) {
-        recordLastDecision(state, eventName, {
+        recordDecision(state, eventName, {
             kind: "reported",
             reason: null,
             modelClass,
@@ -194,7 +202,7 @@ async function reportCompletion({ eventName, input, state, config, sessionKey })
         incrementContribution(state);
     }
     else {
-        recordLastDecision(state, eventName, {
+        recordDecision(state, eventName, {
             kind: "post_failed",
             reason: postResult.reason,
             modelClass,
@@ -212,50 +220,6 @@ function createPluginUpdateReminderMessage(state, config) {
 }
 function writeHookSystemMessage(systemMessage) {
     console.log(JSON.stringify({ systemMessage }));
-}
-async function postReport(apiBaseUrl, payload) {
-    let timedOut = false;
-    let timeout = null;
-    try {
-        const controller = new AbortController();
-        timeout = setTimeout(() => {
-            timedOut = true;
-            controller.abort();
-        }, 3000);
-        const response = await fetch(`${apiBaseUrl.replace(/\/+$/, "")}/v1/report`, {
-            method: "POST",
-            signal: controller.signal,
-            headers: {
-                "content-type": "application/json",
-                "user-agent": `anyrouter-status-monitor/${PLUGIN_VERSION}`
-            },
-            body: JSON.stringify(payload)
-        });
-        if (response.ok)
-            return { ok: true, statusCode: response.status };
-        return { ok: false, reason: "http_error", statusCode: response.status };
-    }
-    catch {
-        return { ok: false, reason: timedOut ? "timeout" : "network_error" };
-    }
-    finally {
-        if (timeout)
-            clearTimeout(timeout);
-    }
-}
-function recordLastDecision(state, eventName, decision) {
-    state.lastDecision = {
-        at: new Date().toISOString(),
-        eventName,
-        ...decision
-    };
-}
-function summarizePostResult(result) {
-    return {
-        ok: result.ok,
-        ...(result.ok ? { statusCode: result.statusCode } : { reason: result.reason }),
-        ...(!result.ok && result.statusCode ? { statusCode: result.statusCode } : {})
-    };
 }
 function getTurnStartedAtMs(turns) {
     for (const turn of turns) {

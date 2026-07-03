@@ -1,4 +1,4 @@
-export const PLUGIN_VERSION = "0.1.32";
+export const PLUGIN_VERSION = "0.2.0";
 
 export const TARGET_HOSTS = Object.freeze([
   "anyrouter.top",
@@ -22,8 +22,20 @@ export const ERROR_TYPES = Object.freeze([
   "unknown"
 ] as const);
 
-export const MODEL_CLASSES = Object.freeze(["haiku", "sonnet", "opus", "fable", "unknown"] as const);
-export const STATUS_MODEL_ORDER = Object.freeze(["fable", "opus", "sonnet", "haiku", "unknown"] as const);
+export const MODEL_CLASSES = Object.freeze(["haiku", "sonnet", "opus", "fable", "gpt-5.5", "unknown"] as const);
+export const STATUS_MODEL_ORDER = Object.freeze(["fable", "opus", "sonnet", "haiku", "gpt-5.5", "unknown"] as const);
+
+export const CLIENTS = Object.freeze(["claude-code", "codex"] as const);
+
+// Ordered keyword table: first substring hit wins. Extend by adding a row;
+// more specific keywords must come before their prefixes.
+export const MODEL_CLASS_MATCHERS = Object.freeze([
+  Object.freeze({ keyword: "gpt-5.5", modelClass: "gpt-5.5" }),
+  Object.freeze({ keyword: "fable", modelClass: "fable" }),
+  Object.freeze({ keyword: "haiku", modelClass: "haiku" }),
+  Object.freeze({ keyword: "sonnet", modelClass: "sonnet" }),
+  Object.freeze({ keyword: "opus", modelClass: "opus" })
+] as const satisfies ReadonlyArray<{ keyword: string; modelClass: string }>);
 
 export const ASSISTANT_START_BUCKETS = Object.freeze([
   "lt_3s",
@@ -74,6 +86,7 @@ export const REPORT_FIELDS = Object.freeze([
   "errorType",
   "errorStatusCode",
   "errorHint",
+  "client",
   "modelClass",
   "assistantStartBucket",
   "timeBucket",
@@ -87,6 +100,7 @@ export const REPORT_FIELDS = Object.freeze([
 const REQUIRED_REPORT_FIELDS = Object.freeze([
   "ok",
   "errorType",
+  "client",
   "modelClass",
   "assistantStartBucket",
   "timeBucket",
@@ -101,6 +115,7 @@ export const STATUS_WINDOWS = Object.freeze(Object.keys(STATUS_WINDOW_SPECS) as 
 
 export type ErrorType = (typeof ERROR_TYPES)[number];
 export type ModelClass = (typeof MODEL_CLASSES)[number];
+export type Client = (typeof CLIENTS)[number];
 export type AssistantStartBucket = (typeof ASSISTANT_START_BUCKETS)[number];
 export type TargetHost = (typeof TARGET_HOSTS)[number];
 export type ReportField = (typeof REPORT_FIELDS)[number];
@@ -111,6 +126,7 @@ export interface ReportPayload {
   errorType: ErrorType;
   errorStatusCode?: number | null;
   errorHint?: string | null;
+  client: Client;
   modelClass: ModelClass;
   assistantStartBucket: AssistantStartBucket;
   timeBucket: number;
@@ -245,11 +261,15 @@ export function classifyModel(input: LooseInput | null | undefined, { includeEnv
 }
 
 function classifyModelText(raw: string): ModelClass {
-  if (raw.includes("fable")) return "fable";
-  if (raw.includes("haiku")) return "haiku";
-  if (raw.includes("sonnet")) return "sonnet";
-  if (raw.includes("opus")) return "opus";
+  for (const matcher of MODEL_CLASS_MATCHERS) {
+    if (raw.includes(matcher.keyword)) return matcher.modelClass as ModelClass;
+  }
   return "unknown";
+}
+
+export function normalizeClient(value: unknown): Client | null {
+  if (typeof value !== "string") return null;
+  return (CLIENTS as readonly string[]).includes(value) ? value as Client : null;
 }
 
 export function classifyError(input: LooseInput | null | undefined): ErrorType {
@@ -412,6 +432,7 @@ export function validateReportPayload(payload: unknown): { ok: boolean; errors: 
   }
   if (report.ok === true && report.errorStatusCode != null) errors.push("successful reports must use errorStatusCode=null");
   if (report.ok === true && report.errorHint != null) errors.push("successful reports must use errorHint=null");
+  if (normalizeClient(report.client) === null) errors.push("invalid client");
   if (!MODEL_CLASSES.includes(report.modelClass as ModelClass)) errors.push("invalid modelClass");
   if (!ASSISTANT_START_BUCKETS.includes(report.assistantStartBucket as AssistantStartBucket)) {
     errors.push("invalid assistantStartBucket");

@@ -193,6 +193,7 @@ test("report payload accepts optional sanitized error details", () => {
     errorType: "rate_limited",
     errorStatusCode: 429,
     errorHint: "API Error 429: Rate limit reached",
+    client: "claude-code",
     modelClass: "sonnet",
     assistantStartBucket: "3_10s",
     timeBucket: 30000000,
@@ -205,4 +206,10 @@ test("report payload accepts optional sanitized error details", () => {
 
   assert.equal(validateReportPayload(payload).ok, true);
   assert.equal(validateReportPayload({ ...payload, targetHost: "api.anthropic.com" }).ok, false);
+  assert.equal(validateReportPayload({ ...payload, client: "codex" }).ok, true);
+  assert.equal(validateReportPayload({ ...payload, client: "curl" }).ok, false);
+  assert.equal(validateReportPayload({ ...payload, client: " Codex " }).ok, false);
+  assert.equal(validateReportPayload({ ...payload, client: "CODEX" }).ok, false);
+  const { client: _client, ...withoutClient } = payload;
+  assert.equal(validateReportPayload(withoutClient).ok, false);
 });

@@ -137,12 +137,13 @@ function normalizeUpdateReminder(value) {
         remindedAtMs: value.remindedAtMs
     };
 }
+const LAST_DECISION_EVENT_NAMES = ["Stop", "StopFailure", "UserPromptSubmit", "SessionStart"];
 function normalizeLastDecision(value) {
     if (!isRecord(value))
         return null;
     if (typeof value.at !== "string" || Number.isNaN(Date.parse(value.at)))
         return null;
-    if (value.eventName !== "Stop" && value.eventName !== "StopFailure")
+    if (!LAST_DECISION_EVENT_NAMES.includes(value.eventName))
         return null;
     if (value.kind !== "reported" && value.kind !== "skipped" && value.kind !== "post_failed")
         return null;
@@ -197,6 +198,8 @@ function normalizeTurnState(value) {
         result.updatedAtMs = value.updatedAtMs;
     if (typeof value.targetMatched === "boolean")
         result.targetMatched = value.targetMatched;
+    if (typeof value.turnId === "string" && value.turnId !== "" && value.turnId.length <= 128)
+        result.turnId = value.turnId;
     if (typeof value.modelClass === "string" && MODEL_CLASSES.includes(value.modelClass)) {
         result.modelClass = value.modelClass;
     }

@@ -32,6 +32,7 @@ export interface TurnState {
   startedAtMs?: number;
   transcriptStartOffset?: number;
   targetMatched?: boolean;
+  turnId?: string;
   modelClass?: ModelClass;
   promptCount?: number;
   updatedAtMs?: number;
@@ -44,9 +45,11 @@ export interface UpdateReminderState {
 
 export type LastDecisionKind = "reported" | "skipped" | "post_failed";
 
+export type LastDecisionEventName = "Stop" | "StopFailure" | "UserPromptSubmit" | "SessionStart";
+
 export interface LastDecision {
   at: string;
-  eventName: "Stop" | "StopFailure";
+  eventName: LastDecisionEventName;
   kind: LastDecisionKind;
   reason: string | null;
   modelClass?: ModelClass;
@@ -203,16 +206,18 @@ function normalizeUpdateReminder(value: unknown): UpdateReminderState | null {
   };
 }
 
+const LAST_DECISION_EVENT_NAMES: readonly LastDecisionEventName[] = ["Stop", "StopFailure", "UserPromptSubmit", "SessionStart"];
+
 function normalizeLastDecision(value: unknown): LastDecision | null {
   if (!isRecord(value)) return null;
   if (typeof value.at !== "string" || Number.isNaN(Date.parse(value.at))) return null;
-  if (value.eventName !== "Stop" && value.eventName !== "StopFailure") return null;
+  if (!LAST_DECISION_EVENT_NAMES.includes(value.eventName as LastDecisionEventName)) return null;
   if (value.kind !== "reported" && value.kind !== "skipped" && value.kind !== "post_failed") return null;
   if (value.reason !== null && !isReasonCode(value.reason)) return null;
 
   const result: LastDecision = {
     at: value.at,
-    eventName: value.eventName,
+    eventName: value.eventName as LastDecisionEventName,
     kind: value.kind,
     reason: value.reason
   };
@@ -258,6 +263,7 @@ function normalizeTurnState(value: unknown): TurnState | null {
   }
   if (typeof value.updatedAtMs === "number" && Number.isFinite(value.updatedAtMs)) result.updatedAtMs = value.updatedAtMs;
   if (typeof value.targetMatched === "boolean") result.targetMatched = value.targetMatched;
+  if (typeof value.turnId === "string" && value.turnId !== "" && value.turnId.length <= 128) result.turnId = value.turnId;
   if (typeof value.modelClass === "string" && MODEL_CLASSES.includes(value.modelClass as ModelClass)) {
     result.modelClass = value.modelClass as ModelClass;
   }

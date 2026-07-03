@@ -1,14 +1,14 @@
 # Reporting & Privacy
 
-The plugin works at Claude Code user-turn granularity: `UserPromptSubmit` records the start of a turn, and `Stop` / `StopFailure` records the result. The status page also counts turns — one turn maps to one observation event.
+The plugin works at user-turn granularity with an independent path per client: a turn is marked when it starts and judged when it ends. Failed Codex turns are back-filled by the session's next interaction. The status page also counts turns — one turn maps to one observation event.
 
-> The plugin uses `ANTHROPIC_BASE_URL` only to tell whether you're connected to Any Router; it never modifies, forwards, or proxies the requests Claude Code sends upstream. From Any Router's point of view, the requests it receives are identical whether or not this plugin is installed — no extra fingerprint. The plugin's own outbound requests (reporting, config, status) go only to the status Worker, never through Any Router.
+> The plugin only makes local checks; it never modifies, forwards, or proxies the requests you send upstream. On Claude Code it uses `ANTHROPIC_BASE_URL` to tell whether you're connected to Any Router; on Codex it reads the provider name from this session's metadata and resolves that provider's `base_url` from your local Codex config (only those two items are extracted — secret fields such as `env_key` are never read). From Any Router's point of view, the requests it receives are identical whether or not this plugin is installed — no extra fingerprint. The plugin's own outbound requests (reporting, config, status) go only to the status Worker, never through Any Router.
 
 ## When an event is submitted
 
 All of these must hold:
 
-- `ANTHROPIC_BASE_URL` matches an Any Router target host at both turn start and turn end.
+- The base URL host the client actually uses matches an Any Router target host at both turn start and turn end.
 - `ANYROUTER_STATUS_DISABLED=1` is not set locally.
 - Remote reporting config is enabled.
 - The turn passes success/failure sampling.
@@ -19,19 +19,21 @@ Any Router targets:
 - Main endpoint
 - Mainland-optimized endpoint
 
-These cases are skipped: empty or invalid `ANTHROPIC_BASE_URL`, non-target hosts, target matched at turn start but changed before turn end, missing `UserPromptSubmit`, or sampling miss. If the report API is temporarily unavailable, the turn is not counted as a contribution and the plugin records the most recent local report failure reason.
+These cases are skipped: empty or invalid base URL, non-target hosts, target matched at turn start but changed before turn end, missing turn start, sampling miss; on Codex also user-interrupted turns, turns with no evidence, and sessions whose provider cannot be reliably determined (undeterminable means no report). If the report API is temporarily unavailable, the turn is not counted as a contribution and the plugin records the most recent local report failure reason.
 
 ## What is reported
 
-Submitted: success/failure, error class, HTTP status code, sanitized and truncated error hint, model class, assistant-start bucket, minute-level time bucket, plugin version, anonymous ID, sample rate, target match marker, and target host class.
+Submitted: success/failure, error class, HTTP status code, sanitized and truncated error hint, client class (claude-code / codex), model class, assistant-start bucket, minute-level time bucket, plugin version, anonymous ID, sample rate, target match marker, and target host class.
 
 Not submitted: actual URL, prompt, response, tokens, cookies, keys, account identifiers, `session_id`, file paths, full logs, and precise timestamps.
 
-To avoid carrying a stale model after switching models inside a Claude Code session, the plugin reads the local transcript file from the hook input and extracts only the metadata needed for model classification and assistant-start timing: model fields from this turn's assistant records, the model name from successful local `/model` command output before the prompt, and the first assistant record timestamp. It never submits transcript paths or content. The status page's assistant-start P50 only counts turns that eventually succeed. This bucket is not low-level API TTFT and includes user-visible waiting such as Claude Code automatic retries.
+To avoid carrying a stale model after switching models inside a Claude Code session, the plugin reads the local transcript file from the hook input and extracts only the metadata needed for model classification and assistant-start timing: model fields from this turn's assistant records, the model name from successful local `/model` command output before the prompt, and the first assistant record timestamp. It never submits transcript paths or content. Codex likewise only extracts metadata from this session's records (outcome, error summary, model name, response timing). The status page's assistant-start P50 only counts turns that eventually succeed. This bucket is not low-level API TTFT; the Claude Code reading includes user-visible waiting such as automatic retries, while the Codex reading uses the client's own time-to-first-token measurement — the two definitions differ.
+
+Codex also requires reviewing and trusting non-managed hooks before they run: after installing, run `/hooks` inside a Codex session and trust this plugin's hooks; re-trust after plugin updates. Implementation details of turn detection and settlement live in [codex-monitoring.md](codex-monitoring.md) (Chinese).
 
 ## Turning reporting off
 
-Set `ANYROUTER_STATUS_DISABLED=1` and the machine stops reporting.
+Set `ANYROUTER_STATUS_DISABLED=1` and the machine stops reporting (both clients).
 
 ## Self-hosting / debugging overrides
 

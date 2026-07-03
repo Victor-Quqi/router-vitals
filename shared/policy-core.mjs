@@ -1,4 +1,4 @@
-export const PLUGIN_VERSION = "0.1.32";
+export const PLUGIN_VERSION = "0.2.0";
 export const TARGET_HOSTS = Object.freeze([
     "anyrouter.top",
     "a-ocnfniawgw.cn-shanghai.fcapp.run"
@@ -18,8 +18,18 @@ export const ERROR_TYPES = Object.freeze([
     "timeout",
     "unknown"
 ]);
-export const MODEL_CLASSES = Object.freeze(["haiku", "sonnet", "opus", "fable", "unknown"]);
-export const STATUS_MODEL_ORDER = Object.freeze(["fable", "opus", "sonnet", "haiku", "unknown"]);
+export const MODEL_CLASSES = Object.freeze(["haiku", "sonnet", "opus", "fable", "gpt-5.5", "unknown"]);
+export const STATUS_MODEL_ORDER = Object.freeze(["fable", "opus", "sonnet", "haiku", "gpt-5.5", "unknown"]);
+export const CLIENTS = Object.freeze(["claude-code", "codex"]);
+// Ordered keyword table: first substring hit wins. Extend by adding a row;
+// more specific keywords must come before their prefixes.
+export const MODEL_CLASS_MATCHERS = Object.freeze([
+    Object.freeze({ keyword: "gpt-5.5", modelClass: "gpt-5.5" }),
+    Object.freeze({ keyword: "fable", modelClass: "fable" }),
+    Object.freeze({ keyword: "haiku", modelClass: "haiku" }),
+    Object.freeze({ keyword: "sonnet", modelClass: "sonnet" }),
+    Object.freeze({ keyword: "opus", modelClass: "opus" })
+]);
 export const ASSISTANT_START_BUCKETS = Object.freeze([
     "lt_3s",
     "3_10s",
@@ -64,6 +74,7 @@ export const REPORT_FIELDS = Object.freeze([
     "errorType",
     "errorStatusCode",
     "errorHint",
+    "client",
     "modelClass",
     "assistantStartBucket",
     "timeBucket",
@@ -76,6 +87,7 @@ export const REPORT_FIELDS = Object.freeze([
 const REQUIRED_REPORT_FIELDS = Object.freeze([
     "ok",
     "errorType",
+    "client",
     "modelClass",
     "assistantStartBucket",
     "timeBucket",
@@ -195,15 +207,16 @@ export function classifyModel(input, { includeEnv = true } = {}) {
         .toLowerCase());
 }
 function classifyModelText(raw) {
-    if (raw.includes("fable"))
-        return "fable";
-    if (raw.includes("haiku"))
-        return "haiku";
-    if (raw.includes("sonnet"))
-        return "sonnet";
-    if (raw.includes("opus"))
-        return "opus";
+    for (const matcher of MODEL_CLASS_MATCHERS) {
+        if (raw.includes(matcher.keyword))
+            return matcher.modelClass;
+    }
     return "unknown";
+}
+export function normalizeClient(value) {
+    if (typeof value !== "string")
+        return null;
+    return CLIENTS.includes(value) ? value : null;
 }
 export function classifyError(input) {
     const raw = collectErrorParts(input).join(" ").toLowerCase();
@@ -370,6 +383,8 @@ export function validateReportPayload(payload) {
         errors.push("successful reports must use errorStatusCode=null");
     if (report.ok === true && report.errorHint != null)
         errors.push("successful reports must use errorHint=null");
+    if (normalizeClient(report.client) === null)
+        errors.push("invalid client");
     if (!MODEL_CLASSES.includes(report.modelClass))
         errors.push("invalid modelClass");
     if (!ASSISTANT_START_BUCKETS.includes(report.assistantStartBucket)) {

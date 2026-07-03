@@ -2,7 +2,7 @@
 
 [中文](README.md)
 
-A Claude Code plugin for monitoring the current Any Router status.
+A Claude Code / Codex plugin for monitoring the current Any Router status.
 
 Repeated probes from one account tend to trip upstream risk controls, rate limits, or bans, and only reflect that one account. This plugin anonymously reports whether each Claude Code turn succeeded or failed, then aggregates those reports into a community status signal.
 
@@ -15,6 +15,8 @@ Status page: https://router-vitals.pages.dev/
 Thanks to the [LINUX DO](https://linux.do/) community for the support.
 
 ## Install
+
+### Claude Code
 
 Run inside Claude Code:
 
@@ -30,9 +32,20 @@ claude plugin marketplace add Victor-Quqi/router-vitals
 claude plugin install anyrouter-status-monitor@router-vitals
 ```
 
-Once installed, the hooks start working. Don't want to contribute? Set `ANYROUTER_STATUS_DISABLED=1`.
+Once installed, the hooks start working.
 
-### Show status in the status line (recommended)
+### Codex
+
+```bash
+codex plugin marketplace add Victor-Quqi/router-vitals
+codex plugin add anyrouter-status-monitor@router-vitals
+```
+
+Then run `/hooks` inside a Codex session and trust this plugin's hooks; re-trust after plugin updates.
+
+Don't want to contribute? Set `ANYROUTER_STATUS_DISABLED=1`.
+
+### Show status in the status line (recommended, Claude Code only)
 
 First find where the plugin is installed:
 

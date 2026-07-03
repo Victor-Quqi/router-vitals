@@ -43,9 +43,10 @@ const modelLabels = {
     opus: "Opus",
     sonnet: "Sonnet",
     haiku: "Haiku",
+    "gpt-5.5": "GPT-5.5",
     unknown: "Unknown"
 };
-const defaultModelClasses = ["fable", "opus", "sonnet", "haiku"];
+const defaultModelClasses = ["fable", "opus", "sonnet", "haiku", "gpt-5.5"];
 const assistantStartLabels = {
     lt_3s: "<3s",
     "3_10s": "3-10s",
@@ -706,7 +707,7 @@ function normalizeServiceState(value) {
     return "insufficient_data";
 }
 function normalizeModelClass(value) {
-    if (value === "fable" || value === "opus" || value === "sonnet" || value === "haiku" || value === "unknown")
+    if (value === "fable" || value === "opus" || value === "sonnet" || value === "haiku" || value === "gpt-5.5" || value === "unknown")
         return value;
     return "unknown";
 }
