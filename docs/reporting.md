@@ -41,7 +41,7 @@ Codex 还要求非托管 hooks 审查信任后才运行：装完插件在 Codex 
 
 - `ANYROUTER_STATUS_API_BASE_URL`：上报 API base URL。
 - `ANYROUTER_STATUS_CONFIG_URL`：远程配置 JSON URL。
-- `ANYROUTER_STATUS_STATE_DIR`：本地状态根目录覆盖。插件环境默认使用 Claude Code 插件数据目录。
+- `ANYROUTER_STATUS_STATE_DIR`：本地状态根目录覆盖；未设置时使用客户端提供的插件数据目录或系统状态目录。
 - `ANYROUTER_STATUS_DEBUG_HOOK=1`：写本地 hook 诊断日志 `debug-hook.jsonl`，用于排查 session 事件、hook 输入摘要、pending/session 状态、上报决策、错误和 transcript 证据。
 
 诊断某个 Claude Code session：
@@ -66,7 +66,7 @@ node plugin/scripts/preview.mjs
 node plugin/scripts/statusline.mjs
 ```
 
-statusLine 只是展示层，hooks 照常独立运行。这里不做定时轮询；`近 60m 状态` 本地缓存 60 秒。有新版时 statusLine 优先显示更新提示；没配 statusLine 时，hooks 会低频发 Claude Code 系统消息。最近一次本机上报失败时，statusLine 会显示短提示，详细原因用诊断脚本查看。
+statusLine 只是展示层，hooks 照常独立运行。这里不做定时轮询；`近 60m 状态` 本地缓存 60 秒。有新版时 Claude Code 优先通过 statusLine 显示更新提示，未配置 statusLine 时由 hook 低频发系统消息；Codex 通过 Stop hook 的 systemMessage 提醒。最近一次本机上报失败时，statusLine 会显示短提示，详细原因用诊断脚本查看。
 
 `setup-statusline.mjs` 会在 Claude home 写入稳定入口 `router-vitals-statusline.mjs`，并把 Claude Code `settings.json` 的 `statusLine` 指到这个入口。插件更新后，稳定入口会优先调用最新安装版本。
 
@@ -76,6 +76,13 @@ statusLine 只是展示层，hooks 照常独立运行。这里不做定时轮询
 claude plugin update anyrouter-status-monitor@router-vitals
 ```
 
-如果当前 Claude Code 会话正在运行，更新后在会话里执行 `/reload-plugins`。
+Codex：
+
+```bash
+codex plugin marketplace upgrade router-vitals
+codex plugin add anyrouter-status-monitor@router-vitals
+```
+
+如果当前 Claude Code 会话正在运行，更新后在会话里执行 `/reload-plugins`。Codex 更新后在会话里执行 `/hooks`，重新信任本插件 hooks。
 
 Claude Code 当前只接受一个 `statusLine` 命令。`setup-statusline.mjs` 检测到已有非本插件 statusLine 时，交互终端会询问是否直接替换；非交互环境默认不覆盖。若要同时显示多个状态源，请自行编写 wrapper，或使用第三方 statusLine 聚合工具。

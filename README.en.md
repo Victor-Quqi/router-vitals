@@ -4,7 +4,7 @@
 
 A Claude Code / Codex plugin for monitoring the current Any Router status.
 
-Repeated probes from one account tend to trip upstream risk controls, rate limits, or bans, and only reflect that one account. This plugin anonymously reports whether each Claude Code turn succeeded or failed, then aggregates those reports into a community status signal.
+Repeated probes from one account tend to trip upstream risk controls, rate limits, or bans, and only reflect that one account. This plugin anonymously reports whether each supported client turn succeeded or failed, then aggregates those reports into a community status signal.
 
 Install it and you're done. The plugin never touches the requests you send upstream, so it leaves no extra fingerprint on Any Router.
 

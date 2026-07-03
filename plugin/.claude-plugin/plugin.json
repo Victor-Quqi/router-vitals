@@ -1,12 +1,12 @@
 {
   "name": "anyrouter-status-monitor",
   "displayName": "Any Router Status Monitor",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Anonymous community status monitor for Any Router Claude Code and Codex usage.",
   "author": {
     "name": "router-vitals"
   },
   "homepage": "https://github.com/Victor-Quqi/router-vitals",
   "repository": "https://github.com/Victor-Quqi/router-vitals",
-  "keywords": ["claude-code", "status", "anyrouter"]
+  "keywords": ["claude-code", "codex", "status", "anyrouter"]
 }

@@ -4,7 +4,7 @@
   "private": true,
   "license": "MIT",
   "type": "module",
-  "description": "Anonymous community status monitor for AnyRouter Claude Code usage.",
+  "description": "Anonymous community status monitor for AnyRouter Claude Code and Codex usage.",
   "packageManager": "pnpm@11.6.0",
   "scripts": {
     "clean:build": "node -e \"require('node:fs').rmSync('.tsbuild/out',{recursive:true,force:true})\"",
