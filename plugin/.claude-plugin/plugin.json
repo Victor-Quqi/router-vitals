@@ -1,7 +1,7 @@
 {
   "name": "anyrouter-status-monitor",
   "displayName": "Any Router Status Monitor",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "Anonymous community status monitor for Any Router Claude Code and Codex usage.",
   "author": {
     "name": "router-vitals"

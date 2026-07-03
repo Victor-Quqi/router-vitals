@@ -4,12 +4,12 @@
 
 ## 扩展点
 
-插件通过 Codex 的插件系统分发（`plugin/.codex-plugin/plugin.json`），hooks 由 manifest 指向 `plugin/hooks/codex-hooks.json`，注册 `SessionStart` / `UserPromptSubmit` / `Stop` 三个事件，命令统一走 `node "${CLAUDE_PLUGIN_ROOT}/scripts/hook.mjs" <Event> --client=codex`。
+插件通过 Codex 的插件系统分发（`plugin/.codex-plugin/plugin.json`），hooks 由 manifest 指向 `plugin/hooks/codex-hooks.json`，注册 `SessionStart` / `UserPromptSubmit` / `Stop` 三个事件，命令统一走 `node "${PLUGIN_ROOT}/scripts/hook.mjs" <Event> --client=codex`。
 
 在 codex-cli 0.142.5（Windows）上实测确认：
 
 - hooks 在交互 TUI 和 `codex exec` 下都会触发；hook 进程继承 Codex 进程环境。
-- hook 命令字符串不做任何 env 展开（`${VAR}`、`$VAR`、`%VAR%` 均不生效，`commandWindows` 同样），但插件捆绑 hooks 中的 `${CLAUDE_PLUGIN_ROOT}` / `${PLUGIN_ROOT}` 由 Codex 自行替换，Windows 下同样生效。
+- hook 命令字符串不做任何 env 展开（`${VAR}`、`$VAR`、`%VAR%` 均不生效，`commandWindows` 同样），但插件捆绑 hooks 中的 `${PLUGIN_ROOT}` 由 Codex 自行替换，Windows 下同样生效。
 - 插件 hook 进程带 `CLAUDE_PLUGIN_ROOT` / `CLAUDE_PLUGIN_DATA`（兼容 Claude 插件），`state.mts` 的状态目录选择逻辑因此对两个客户端通用，且状态天然按客户端隔离。
 - hook stdin 公共字段：`session_id`、`transcript_path`（指向 rollout）、`cwd`、`hook_event_name`、`model`、`permission_mode`；`UserPromptSubmit` / `Stop` 额外带 `turn_id`。
 - 市场布局是仓库根 `.agents/plugins/marketplace.json`，`codex plugin marketplace add <repo>` + `codex plugin add anyrouter-status-monitor@router-vitals` 即完成安装；插件按版本缓存在 `$CODEX_HOME/plugins/cache/` 下运行。
