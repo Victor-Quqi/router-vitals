@@ -24,7 +24,8 @@
   --mark-bg: #fff8f0;
   --mark-border: #ffd9cf;
   --mark-color: #073f4a;
-  --control-width: 520px;
+  --control-width: 580px;
+  --model-tab-min-width: 86px;
 }
 
 :root[data-theme="light"] {
@@ -386,7 +387,7 @@ article span {
 }
 
 .modelTabs {
-  grid-template-columns: repeat(var(--tab-count, 3), minmax(86px, 1fr));
+  grid-template-columns: repeat(var(--tab-count, 3), minmax(var(--model-tab-min-width), 1fr));
   width: var(--control-width);
   max-width: 100%;
 }
@@ -979,7 +980,7 @@ footer a:focus-visible {
   color: var(--muted);
 }
 
-@media (max-width: 780px) {
+@media (max-width: 900px) {
   .shell {
     width: min(100% - 24px, 1180px);
     padding: 14px 0 28px;
@@ -1089,11 +1090,13 @@ footer a:focus-visible {
   }
 
   .windowTabs {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-columns: repeat(2, minmax(72px, 1fr));
   }
 
   .modelTabs {
-    grid-template-columns: repeat(var(--tab-count, 3), minmax(0, 1fr));
+    grid-template-columns: repeat(2, minmax(var(--model-tab-min-width), 1fr));
+    width: 100%;
+    max-width: none;
   }
 
   .autoRefresh,
@@ -1224,12 +1227,6 @@ footer a:focus-visible {
     padding: 0 2px 8px;
   }
 
-}
-
-@media (max-width: 420px) {
-  .modelTabs.fourTabs {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
 }
 
 @media (max-width: 340px) {
