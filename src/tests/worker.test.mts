@@ -384,6 +384,7 @@ test("status aggregation ignores assistant start buckets on failure-only rows", 
   assert.equal(status.assistantStart.medianBucket, null);
   assert.equal(sonnet!.buckets.at(-1)!.state, "failure");
   assert.equal(sonnet!.buckets.at(-1)!.assistantStart, null);
+  assert.equal(sonnet!.assistantStart, null);
 });
 
 test("status aggregation builds model trend buckets", () => {
@@ -450,7 +451,10 @@ test("status aggregation builds model trend buckets", () => {
   assert.equal(status.models[1]!.buckets.at(-1)!.state, "failure");
   assert.equal(status.models[1]!.buckets.at(-1)!.errors[0]!.type, "server_error");
   assert.equal(status.models[1]!.buckets.at(-1)!.assistantStart, null);
+  assert.equal(status.models[1]!.assistantStart, null);
   assert.equal(status.models[2]!.modelClass, "sonnet");
+  assert.equal(status.models[2]!.assistantStart?.known, 4);
+  assert.equal(status.models[2]!.assistantStart?.medianBucket, "lt_3s");
   assert.equal(status.models[2]!.buckets.at(-2)!.assistantStart?.medianBucket, "lt_3s");
   assert.equal(status.models[2]!.buckets.at(-2)!.state, "success");
   assert.equal(status.models[2]!.buckets.at(-1)!.state, "mixed");

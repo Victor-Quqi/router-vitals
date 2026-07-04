@@ -25,7 +25,6 @@
   --mark-border: #ffd9cf;
   --mark-color: #073f4a;
   --control-width: 580px;
-  --model-tab-min-width: 86px;
 }
 
 :root[data-theme="light"] {
@@ -341,7 +340,7 @@ article span {
   color: var(--link-hover);
 }
 
-.clearScopeButton {
+.scopeCrumb {
   padding: 0;
   border: 0;
   background: transparent;
@@ -354,13 +353,13 @@ article span {
   cursor: pointer;
 }
 
-.clearScopeButton:hover,
-.clearScopeButton:focus-visible {
+.scopeCrumb:hover,
+.scopeCrumb:focus-visible {
   color: var(--link-hover);
   outline: none;
 }
 
-.clearScopeButton:focus-visible {
+.scopeCrumb:focus-visible {
   border-radius: 3px;
   box-shadow: 0 0 0 3px var(--focus-ring);
 }
@@ -387,7 +386,7 @@ article span {
 }
 
 .modelTabs {
-  grid-template-columns: repeat(var(--tab-count, 3), minmax(var(--model-tab-min-width), 1fr));
+  grid-template-columns: repeat(var(--tab-count, 3), minmax(0, 1fr));
   width: var(--control-width);
   max-width: 100%;
 }
@@ -403,6 +402,14 @@ article span {
   font-size: 14px;
   cursor: pointer;
   transition: background 140ms ease, color 140ms ease, box-shadow 140ms ease;
+}
+
+.modelTabs button {
+  min-width: 0;
+  padding: 0 6px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .windowTabs button.active,
@@ -821,9 +828,44 @@ article em {
   font-size: 13px;
 }
 
-.modelRow strong {
+.modelName {
+  justify-self: start;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
   font-size: 15px;
+  font-weight: 600;
   letter-spacing: 0;
+  text-align: left;
+  text-underline-offset: 3px;
+  cursor: pointer;
+  transition: color 140ms ease;
+}
+
+.modelName:hover,
+.modelName:focus-visible {
+  color: var(--link-hover);
+  text-decoration: underline;
+  text-decoration-color: rgb(139 148 158 / 48%);
+  outline: none;
+}
+
+.modelName:focus-visible {
+  border-radius: 4px;
+  box-shadow: 0 0 0 3px var(--focus-ring);
+}
+
+.modelRow.modelSelected .modelName {
+  color: var(--link-hover);
+  text-decoration: underline;
+  text-decoration-color: rgb(47 129 247 / 48%);
+}
+
+.modelTable.hasModelScope .modelRow:not(.modelHead, .modelSelected) {
+  opacity: 0.5;
+  transition: opacity 140ms ease;
 }
 
 .trendStrip {
@@ -1094,7 +1136,7 @@ footer a:focus-visible {
   }
 
   .modelTabs {
-    grid-template-columns: repeat(2, minmax(var(--model-tab-min-width), 1fr));
+    grid-template-columns: repeat(3, minmax(0, 1fr));
     width: 100%;
     max-width: none;
   }
@@ -1169,7 +1211,7 @@ footer a:focus-visible {
     border-top: 0;
   }
 
-  .modelRow strong {
+  .modelName {
     grid-column: 1 / -1;
   }
 

@@ -97,6 +97,7 @@ function getModelTimeline(models, modelClass, spec, startMinute, nowMinute) {
         failureCount: 0,
         availability: null,
         state: "insufficient_data",
+        assistantStart: null,
         buckets: Array.from({ length: spec.bucketCount }, (_, index) => {
             const bucketStart = startMinute + index * spec.bucketMinutes;
             const bucketEnd = Math.min(bucketStart + spec.bucketMinutes - 1, nowMinute);
@@ -126,13 +127,28 @@ function getAssistantStartCounts(values, modelClass, bucketIndex) {
     return counts;
 }
 function attachModelAssistantStarts(models, values) {
+    const modelTotals = new Map();
     for (const [key, counts] of values) {
         const [modelClassValue, bucketIndexValue] = key.split(":");
-        const bucket = models.get(normalizeModelClass(modelClassValue))?.buckets[Number(bucketIndexValue)];
+        const modelClass = normalizeModelClass(modelClassValue);
+        const bucket = models.get(modelClass)?.buckets[Number(bucketIndexValue)];
         if (!bucket)
             continue;
         const summary = buildAssistantStartSummary(counts);
         bucket.assistantStart = summary.total > 0 ? summary : null;
+        let totals = modelTotals.get(modelClass);
+        if (!totals) {
+            totals = createAssistantStartCounts();
+            modelTotals.set(modelClass, totals);
+        }
+        addAssistantStartCounts(totals, counts);
+    }
+    for (const [modelClass, counts] of modelTotals) {
+        const model = models.get(modelClass);
+        if (!model)
+            continue;
+        const summary = buildAssistantStartSummary(counts);
+        model.assistantStart = summary.total > 0 ? summary : null;
     }
 }
 function attachBucketErrors(models, rows) {

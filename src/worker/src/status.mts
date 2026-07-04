@@ -75,6 +75,7 @@ export interface ModelTimeline {
   failureCount: number;
   availability: number | null;
   state: ServiceState;
+  assistantStart: AssistantStartSummary | null;
   buckets: TimelineBucket[];
 }
 
@@ -260,6 +261,7 @@ function getModelTimeline(
     failureCount: 0,
     availability: null,
     state: "insufficient_data",
+    assistantStart: null,
     buckets: Array.from({ length: spec.bucketCount }, (_, index) => {
       const bucketStart = startMinute + index * spec.bucketMinutes;
       const bucketEnd = Math.min(bucketStart + spec.bucketMinutes - 1, nowMinute);
@@ -298,12 +300,29 @@ function attachModelAssistantStarts(
   models: Map<ModelClass, ModelTimeline>,
   values: Map<string, Record<AssistantStartBucket, number>>
 ): void {
+  const modelTotals = new Map<ModelClass, Record<AssistantStartBucket, number>>();
+
   for (const [key, counts] of values) {
     const [modelClassValue, bucketIndexValue] = key.split(":");
-    const bucket = models.get(normalizeModelClass(modelClassValue))?.buckets[Number(bucketIndexValue)];
+    const modelClass = normalizeModelClass(modelClassValue);
+    const bucket = models.get(modelClass)?.buckets[Number(bucketIndexValue)];
     if (!bucket) continue;
     const summary = buildAssistantStartSummary(counts);
     bucket.assistantStart = summary.total > 0 ? summary : null;
+
+    let totals = modelTotals.get(modelClass);
+    if (!totals) {
+      totals = createAssistantStartCounts();
+      modelTotals.set(modelClass, totals);
+    }
+    addAssistantStartCounts(totals, counts);
+  }
+
+  for (const [modelClass, counts] of modelTotals) {
+    const model = models.get(modelClass);
+    if (!model) continue;
+    const summary = buildAssistantStartSummary(counts);
+    model.assistantStart = summary.total > 0 ? summary : null;
   }
 }
 

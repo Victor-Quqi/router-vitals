@@ -36,6 +36,7 @@ interface ModelStatus {
   successCount?: number;
   failureCount?: number;
   availability?: number | null;
+  assistantStart?: AssistantStartSummary | null;
   buckets?: TrendBucket[];
 }
 
@@ -94,8 +95,10 @@ interface SelectedTrendBucket {
   errors: ErrorStatus[];
 }
 
+type ScopeKind = "window" | "model" | "bucket";
+
 interface DisplayScope {
-  selected: boolean;
+  kind: ScopeKind;
   modelClass?: ModelClass | undefined;
   startAt?: string | undefined;
   endAt?: string | undefined;
@@ -168,11 +171,11 @@ const assistantStartLabels: Record<AssistantStartBucket, string> = {
 };
 
 const storageKeyPrefix = SITE_CONFIG.marketplace.name;
-const errorModelStorageKey = `${storageKeyPrefix}-error-model`;
+const modelScopeStorageKey = `${storageKeyPrefix}-model-scope`;
 const targetHostStorageKey = `${storageKeyPrefix}-target-host`;
 const targetHostParams = new Map<string, string>(SITE_CONFIG.endpoints.map((endpoint) => [endpoint.id, endpoint.host]));
 let activeWindow = "60m";
-let activeErrorModel: ModelClass = readErrorModel();
+let selectedModel: ModelClass | null = readModelScope();
 let activeTargetHost: TargetHostFilter = readTargetHostFilter();
 let latestStatusData: StatusData | null = null;
 let selectedTrendBucket: SelectedTrendBucket | null = null;
@@ -252,7 +255,7 @@ autoRefreshToggle.addEventListener("change", () => {
 
 syncRefreshControls();
 syncTargetHostTabs();
-syncErrorModelTabs();
+syncModelScopeTabs();
 void loadStatus();
 
 async function loadStatus(options: RefreshOptions = {}): Promise<void> {
@@ -330,20 +333,19 @@ function saveThemeMode(mode: ThemeMode): void {
   }
 }
 
-function readErrorModel(): ModelClass {
+function readModelScope(): ModelClass | null {
   try {
-    const value = localStorage.getItem(errorModelStorageKey);
-    const modelClass = normalizeModelClass(value);
-    if (modelClass !== "unknown") return modelClass;
+    const modelClass = normalizeModelClass(localStorage.getItem(modelScopeStorageKey));
+    return modelClass === "unknown" ? null : modelClass;
   } catch {
-    return "fable";
+    return null;
   }
-  return "fable";
 }
 
-function saveErrorModel(modelClass: ModelClass): void {
+function saveModelScope(modelClass: ModelClass | null): void {
   try {
-    if (modelClass !== "unknown") localStorage.setItem(errorModelStorageKey, modelClass);
+    if (modelClass && modelClass !== "unknown") localStorage.setItem(modelScopeStorageKey, modelClass);
+    else localStorage.removeItem(modelScopeStorageKey);
   } catch {
     return;
   }
@@ -396,6 +398,7 @@ function applyTheme(mode: ThemeMode): void {
 
 function render(data: StatusData): void {
   latestStatusData = data;
+  syncSelectedModelScope(data);
   syncSelectedTrendBucket(data);
   const scope = getDisplayScope(data);
   const state = getDisplayState(data, scope);
@@ -412,13 +415,14 @@ function render(data: StatusData): void {
   const stateNode = getElement("state");
   stateNode.className = `state ${state}`;
   renderModelTable(data.models || [], data.timeline);
-  renderErrorsForModel(data);
+  renderErrorsForScope(data);
 }
 
 function renderModelTable(models: ModelStatus[], timeline?: TimelineMeta | null): void {
   const root = getElement("modelTable");
   root.replaceChildren();
   root.style.setProperty("--bucket-count", String(timeline?.bucketCount || 1));
+  root.classList.toggle("hasModelScope", Boolean(selectedModel));
   const rows = getVisibleModelRows(models, timeline);
 
   const header = document.createElement("div");
@@ -442,9 +446,17 @@ function renderModelTable(models: ModelStatus[], timeline?: TimelineMeta | null)
     const row = document.createElement("div");
     row.className = "modelRow";
     const modelClass = normalizeModelClass(model.modelClass);
+    const modelSelected = selectedModel === modelClass;
+    row.classList.toggle("modelSelected", modelSelected);
 
-    const name = document.createElement("strong");
-    name.textContent = modelLabels[modelClass] || model.modelClass || "unknown";
+    const label = modelLabels[modelClass] || model.modelClass || "unknown";
+    const name = document.createElement("button");
+    name.type = "button";
+    name.className = "modelName";
+    name.textContent = label;
+    name.setAttribute("aria-pressed", modelSelected ? "true" : "false");
+    name.setAttribute("aria-label", modelSelected ? `取消选择 ${label}，返回全部模型` : `查看 ${label} 在当前窗口的指标和错误`);
+    name.addEventListener("click", () => selectModelScope(modelClass));
 
     const availability = document.createElement("span");
     availability.textContent = formatPercent(model.availability);
@@ -548,13 +560,12 @@ function minuteToIso(minute: number): string {
   return new Date(minute * 60000).toISOString();
 }
 
-function renderErrorsForModel(data: StatusData): void {
-  syncErrorModelTabs(data);
-  const model = findModelStatus(data, activeErrorModel);
-  if (selectedTrendBucket?.modelClass === activeErrorModel) {
+function renderErrorsForScope(data: StatusData): void {
+  syncModelScopeTabs(data);
+  if (selectedTrendBucket) {
     setText(
       "failureCount",
-      `${modelLabels[activeErrorModel]} · ${formatRange(selectedTrendBucket.startAt, selectedTrendBucket.endAt)} · 失败轮次 ${selectedTrendBucket.failureCount}`
+      `${modelLabels[selectedTrendBucket.modelClass]} · ${formatRange(selectedTrendBucket.startAt, selectedTrendBucket.endAt)} · 失败轮次 ${selectedTrendBucket.failureCount}`
     );
     renderErrors(
       selectedTrendBucket.errors,
@@ -563,9 +574,15 @@ function renderErrorsForModel(data: StatusData): void {
     return;
   }
 
-  const errors = data.modelErrors?.[activeErrorModel] || [];
-  setText("failureCount", `${formatWindowLabel(data.window)} · 失败轮次 ${model?.failureCount ?? 0}`);
-  renderErrors(errors, "当前窗口没有主要错误类型");
+  if (selectedModel) {
+    const model = findModelStatus(data, selectedModel);
+    setText("failureCount", `${modelLabels[selectedModel]} · ${formatWindowLabel(data.window)} · 失败轮次 ${model?.failureCount ?? 0}`);
+    renderErrors(data.modelErrors?.[selectedModel] || [], "当前窗口没有主要错误类型");
+    return;
+  }
+
+  setText("failureCount", `${formatWindowLabel(data.window)} · 失败轮次 ${data.failureCount ?? 0}`);
+  renderErrors(data.errors || [], "当前窗口没有主要错误类型");
 }
 
 function renderErrors(errors: ErrorStatus[], emptyText = "当前窗口没有主要错误类型"): void {
@@ -687,7 +704,7 @@ function renderUnavailable(detail = "API 暂时没有返回可用数据"): void 
   setText("assistantStartDetail", "--");
   getElement("state").className = "state insufficient_data";
   renderModelTable([], null);
-  syncErrorModelTabs();
+  syncModelScopeTabs();
   renderErrors([]);
 }
 
@@ -697,28 +714,41 @@ function setText(id: string, value: string): void {
 
 function renderStateDetail(data: StatusData, state: ServiceState, scope: DisplayScope): void {
   const root = getElement("stateDetail");
-  root.replaceChildren(document.createTextNode(formatStateDetail(data, scope)));
-  if (scope.selected) {
-    root.append(document.createTextNode(" · "), buildClearScopeButton());
+  root.replaceChildren();
+
+  if (scope.kind === "window") {
+    root.append(document.createTextNode(formatWindowStateDetail(data)));
+    if (state !== "insufficient_data") return;
+
+    const link = document.createElement("a");
+    link.href = `${SITE_CONFIG.marketplace.repoUrl}#%E5%AE%89%E8%A3%85`;
+    link.target = "_blank";
+    link.rel = "noreferrer";
+    link.textContent = "安装插件贡献观测";
+    root.append(document.createTextNode(" · "), link);
     return;
   }
-  if (state !== "insufficient_data") return;
 
-  const link = document.createElement("a");
-  link.href = `${SITE_CONFIG.marketplace.repoUrl}#%E5%AE%89%E8%A3%85`;
-  link.target = "_blank";
-  link.rel = "noreferrer";
-  link.textContent = "安装插件贡献观测";
-  root.append(document.createTextNode(" · "), link);
+  const modelLabel = modelLabels[scope.modelClass ?? "unknown"];
+  root.append(document.createTextNode(`${formatWindowLabel(data.window)} · `));
+  root.append(buildScopeCrumb("全部", "返回全部模型概览", clearModelScope));
+  if (scope.kind === "bucket" && scope.startAt && scope.endAt) {
+    root.append(document.createTextNode(" › "));
+    root.append(buildScopeCrumb(modelLabel, `返回 ${modelLabel} 窗口概览`, clearBucketScope));
+    root.append(document.createTextNode(` › ${formatRange(scope.startAt, scope.endAt)}`));
+  } else {
+    root.append(document.createTextNode(` › ${modelLabel}`));
+  }
+  root.append(document.createTextNode(` · ${formatScopeStats(scope)}`));
 }
 
-function buildClearScopeButton(): HTMLButtonElement {
+function buildScopeCrumb(text: string, ariaLabel: string, onClick: () => void): HTMLButtonElement {
   const button = document.createElement("button");
   button.type = "button";
-  button.className = "clearScopeButton";
-  button.textContent = "清除";
-  button.setAttribute("aria-label", "清除时间段选择");
-  button.addEventListener("click", clearTrendSelection);
+  button.className = "scopeCrumb";
+  button.textContent = text;
+  button.setAttribute("aria-label", ariaLabel);
+  button.addEventListener("click", onClick);
   return button;
 }
 
@@ -788,18 +818,7 @@ function formatUpdatedAt(value?: string): string {
   }).format(date)}`;
 }
 
-function formatStateDetail(data: StatusData, scope: DisplayScope): string {
-  if (scope.selected && scope.modelClass && scope.startAt && scope.endAt) {
-    const prefix = `${modelLabels[scope.modelClass]} · ${formatRange(scope.startAt, scope.endAt)} · `;
-    const sampleCount = typeof scope.sampleCount === "number" ? scope.sampleCount : 0;
-    const successCount = typeof scope.successCount === "number" ? scope.successCount : 0;
-    if (sampleCount < 5) return `${prefix}${sampleCount} 条轮次`;
-    if (typeof scope.availability === "number") {
-      return `${prefix}成功轮次 ${successCount}/${sampleCount}，成功率 ${formatPercent(scope.availability)}`;
-    }
-    return `${prefix}社区轮次观测`;
-  }
-
+function formatWindowStateDetail(data: StatusData): string {
   const windowText = formatWindowLabel(data.window);
   const sampleCount = Number.isInteger(data.sampleCount) ? data.sampleCount : 0;
   if (data.state === "insufficient_data") return `${windowText} · ${sampleCount} 条轮次`;
@@ -809,14 +828,36 @@ function formatStateDetail(data: StatusData, scope: DisplayScope): string {
   return `${windowText}社区轮次观测`;
 }
 
+function formatScopeStats(scope: DisplayScope): string {
+  const sampleCount = typeof scope.sampleCount === "number" ? scope.sampleCount : 0;
+  const successCount = typeof scope.successCount === "number" ? scope.successCount : 0;
+  if (sampleCount < 5) return `${sampleCount} 条轮次`;
+  if (typeof scope.availability === "number") {
+    return `成功轮次 ${successCount}/${sampleCount}，成功率 ${formatPercent(scope.availability)}`;
+  }
+  return "社区轮次观测";
+}
+
 function formatWindowLabel(value?: string): string {
   return windowLabels[value || ""] || windowLabels[activeWindow] || activeWindow;
 }
 
 function getDisplayScope(data: StatusData): DisplayScope {
-  if (selectedTrendBucket) return { selected: true, ...selectedTrendBucket };
+  if (selectedTrendBucket) return { kind: "bucket", ...selectedTrendBucket };
+  if (selectedModel) {
+    const model = findModelStatus(data, selectedModel);
+    return {
+      kind: "model",
+      modelClass: selectedModel,
+      sampleCount: model?.sampleCount ?? 0,
+      successCount: model?.successCount ?? 0,
+      failureCount: model?.failureCount ?? 0,
+      availability: model?.availability ?? null,
+      assistantStart: model?.assistantStart ?? null
+    };
+  }
   return {
-    selected: false,
+    kind: "window",
     sampleCount: data.sampleCount,
     successCount: data.successCount,
     failureCount: data.failureCount,
@@ -826,7 +867,7 @@ function getDisplayScope(data: StatusData): DisplayScope {
 }
 
 function getDisplayState(data: StatusData, scope: DisplayScope): ServiceState {
-  if (!scope.selected) return normalizeServiceState(data.state);
+  if (scope.kind === "window") return normalizeServiceState(data.state);
   const sampleCount = scope.sampleCount ?? 0;
   if (sampleCount < 5 || typeof scope.availability !== "number") return "insufficient_data";
   if (scope.availability >= 0.8) return "available";
@@ -931,6 +972,10 @@ function bindTrendSelection(element: HTMLElement, modelClass: ModelClass, bucket
 }
 
 function selectTrendBucket(modelClass: ModelClass, bucket: TrendBucket): void {
+  if (isSelectedTrendBucket(modelClass, bucket)) {
+    clearBucketScope();
+    return;
+  }
   const counts = getBucketCounts(bucket);
   selectedTrendBucket = {
     modelClass,
@@ -944,17 +989,47 @@ function selectTrendBucket(modelClass: ModelClass, bucket: TrendBucket): void {
     assistantStart: bucket.assistantStart || null,
     errors: bucket.errors || []
   };
-  activeErrorModel = modelClass;
-  saveErrorModel(modelClass);
-  if (latestStatusData) render(latestStatusData);
-  else syncErrorModelTabs();
+  selectedModel = modelClass;
+  saveModelScope(modelClass);
+  rerenderScope();
 }
 
-function clearTrendSelection(): void {
+function selectModelScope(modelClass: ModelClass): void {
+  if (selectedModel === modelClass && !selectedTrendBucket) {
+    clearModelScope();
+    return;
+  }
+  selectedModel = modelClass;
+  selectedTrendBucket = null;
+  saveModelScope(modelClass);
+  rerenderScope();
+}
+
+function clearModelScope(): void {
+  if (!selectedModel && !selectedTrendBucket) return;
+  selectedModel = null;
+  selectedTrendBucket = null;
+  saveModelScope(null);
+  rerenderScope();
+}
+
+function clearBucketScope(): void {
   if (!selectedTrendBucket) return;
   selectedTrendBucket = null;
+  rerenderScope();
+}
+
+function rerenderScope(): void {
   if (latestStatusData) render(latestStatusData);
-  else syncErrorModelTabs();
+  else syncModelScopeTabs();
+}
+
+function syncSelectedModelScope(data: StatusData): void {
+  if (!selectedModel) return;
+  if (getVisibleModelClasses(data).includes(selectedModel)) return;
+  selectedModel = null;
+  selectedTrendBucket = null;
+  saveModelScope(null);
 }
 
 function syncSelectedTrendBucket(data: StatusData): void {
@@ -990,36 +1065,29 @@ function isSelectedTrendBucket(modelClass: ModelClass, bucket: TrendBucket): boo
     selectedTrendBucket.endAt === bucket.endAt;
 }
 
-function syncErrorModelTabs(data?: StatusData): void {
+function syncModelScopeTabs(data?: StatusData): void {
   const modelClasses = data ? getVisibleModelClasses(data) : [...defaultModelClasses];
-  if (!modelClasses.includes(activeErrorModel)) {
-    activeErrorModel = modelClasses[0] ?? "fable";
-    saveErrorModel(activeErrorModel);
-    selectedTrendBucket = null;
-  }
-
-  const root = getElement("errorModelTabs");
-  root.style.setProperty("--tab-count", String(modelClasses.length));
-  root.classList.toggle("fourTabs", modelClasses.length >= 4);
+  const root = getElement("modelScopeTabs");
+  root.style.setProperty("--tab-count", String(modelClasses.length + 1));
   root.replaceChildren();
 
+  appendModelScopeTab(root, "全部", !selectedModel, clearModelScope);
   for (const modelClass of modelClasses) {
-    const button = document.createElement("button");
-    const selected = modelClass === activeErrorModel;
-    button.type = "button";
-    button.dataset.errorModel = modelClass;
-    button.textContent = modelLabels[modelClass];
-    button.classList.toggle("active", selected);
-    button.setAttribute("aria-selected", selected ? "true" : "false");
-    button.addEventListener("click", () => {
-      activeErrorModel = modelClass;
-      saveErrorModel(modelClass);
-      selectedTrendBucket = null;
-      if (latestStatusData) render(latestStatusData);
-      else syncErrorModelTabs();
+    appendModelScopeTab(root, modelLabels[modelClass], selectedModel === modelClass, () => {
+      if (selectedModel === modelClass && !selectedTrendBucket) return;
+      selectModelScope(modelClass);
     });
-    root.append(button);
   }
+}
+
+function appendModelScopeTab(root: HTMLElement, label: string, selected: boolean, onClick: () => void): void {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.textContent = label;
+  button.classList.toggle("active", selected);
+  button.setAttribute("aria-selected", selected ? "true" : "false");
+  button.addEventListener("click", onClick);
+  root.append(button);
 }
 
 function buildTrendAxis(buckets: TrendBucket[]): HTMLElement {
