@@ -478,6 +478,150 @@ test("plugin hook uses session model only for the first prompt when transcript i
   }
 });
 
+test("plugin hook restores known model across same-transcript session resume", async () => {
+  const received: Array<Record<string, any>> = [];
+  const server = createServer((req, res) => {
+    if (req.method === "GET" && req.url === "/config.json") {
+      const base = `http://127.0.0.1:${serverPort(server)}`;
+      respondJson(res, {
+        reportingEnabled: true,
+        apiBaseUrl: base,
+        targetBaseUrlHosts: [primaryTargetHost, secondaryTargetHost],
+        sampleRateSuccess: 1,
+        sampleRateFailure: 1,
+        minPluginVersion: "0.1.0",
+        statusWindows: ["5m", "15m", "60m"]
+      });
+      return;
+    }
+
+    if (req.method === "POST" && req.url === "/v1/report") {
+      const chunks: Buffer[] = [];
+      req.on("data", (chunk) => chunks.push(chunk));
+      req.on("end", () => {
+        received.push(JSON.parse(Buffer.concat(chunks).toString("utf8")));
+        respondJson(res, { ok: true });
+      });
+      return;
+    }
+
+    res.writeHead(404);
+    res.end();
+  });
+
+  await listen(server);
+  const stateDir = await mkdtemp(join(tmpdir(), "router-vitals-resume-model-"));
+
+  try {
+    const commonEnv = {
+      ...process.env,
+      ROUTER_VITALS_STATE_DIR: stateDir,
+      ROUTER_VITALS_CONFIG_URL: `http://127.0.0.1:${serverPort(server)}/config.json`,
+      ANTHROPIC_BASE_URL: primaryTargetBaseUrl
+    };
+    const sessionId = "session-resume-model";
+    const transcript = join(stateDir, "session-resume-model.jsonl");
+    const records = [createUserTextRecord("before resume")];
+
+    await writeTranscriptRecords(transcript, records);
+    await runHook("SessionStart", { session_id: sessionId, transcript_path: transcript, model: "claude-fable-5[1m]" }, commonEnv);
+    await runHook("SessionEnd", { session_id: sessionId, transcript_path: transcript }, commonEnv);
+    await runHook("SessionStart", { session_id: sessionId, transcript_path: transcript }, commonEnv);
+    await runHook("UserPromptSubmit", { session_id: sessionId, transcript_path: transcript }, commonEnv);
+
+    records.push(createSyntheticAssistantErrorRecord(429));
+    await writeTranscriptRecords(transcript, records);
+    await runHook("StopFailure", {
+      session_id: sessionId,
+      transcript_path: transcript,
+      status_code: 429,
+      message: "rate_limit"
+    }, commonEnv);
+
+    assert.equal(received.length, 1);
+    assert.equal(received[0]!.modelClass, "fable");
+    assert.equal(received[0]!.errorType, "rate_limited");
+  } finally {
+    server.close();
+    await rm(stateDir, { recursive: true, force: true });
+  }
+});
+
+test("plugin hook clears stale model after an unparsed model switch", async () => {
+  const received: Array<Record<string, any>> = [];
+  const server = createServer((req, res) => {
+    if (req.method === "GET" && req.url === "/config.json") {
+      const base = `http://127.0.0.1:${serverPort(server)}`;
+      respondJson(res, {
+        reportingEnabled: true,
+        apiBaseUrl: base,
+        targetBaseUrlHosts: [primaryTargetHost, secondaryTargetHost],
+        sampleRateSuccess: 1,
+        sampleRateFailure: 1,
+        minPluginVersion: "0.1.0",
+        statusWindows: ["5m", "15m", "60m"]
+      });
+      return;
+    }
+
+    if (req.method === "POST" && req.url === "/v1/report") {
+      const chunks: Buffer[] = [];
+      req.on("data", (chunk) => chunks.push(chunk));
+      req.on("end", () => {
+        received.push(JSON.parse(Buffer.concat(chunks).toString("utf8")));
+        respondJson(res, { ok: true });
+      });
+      return;
+    }
+
+    res.writeHead(404);
+    res.end();
+  });
+
+  await listen(server);
+  const stateDir = await mkdtemp(join(tmpdir(), "router-vitals-unparsed-switch-"));
+
+  try {
+    const commonEnv = {
+      ...process.env,
+      ROUTER_VITALS_STATE_DIR: stateDir,
+      ROUTER_VITALS_CONFIG_URL: `http://127.0.0.1:${serverPort(server)}/config.json`,
+      ANTHROPIC_BASE_URL: primaryTargetBaseUrl
+    };
+    const sessionId = "session-unparsed-switch";
+    const transcript = join(stateDir, "session-unparsed-switch.jsonl");
+    const records = [
+      createModelSwitchCommandRecord(),
+      createUserModelSetOutputRecord("Set model to \u001b[1mMystery 1.0\u001b[22m and saved as your default for new sessions")
+    ];
+
+    await runHook("SessionStart", { session_id: sessionId, transcript_path: transcript, model: "claude-fable-5[1m]" }, commonEnv);
+    await writeTranscriptRecords(transcript, records);
+    await runHook("UserPromptSubmit", { session_id: sessionId, transcript_path: transcript }, commonEnv);
+
+    records.push(createSyntheticAssistantErrorRecord(429));
+    await writeTranscriptRecords(transcript, records);
+    await runHook("StopFailure", {
+      session_id: sessionId,
+      transcript_path: transcript,
+      status_code: 429,
+      message: "rate_limit"
+    }, commonEnv);
+
+    assert.equal(received.length, 1);
+    assert.equal(received[0]!.modelClass, "unknown");
+
+    const statePath = join(stateDir, PLUGIN_ID, "state.json");
+    const state = JSON.parse(await readFile(statePath, "utf8"));
+    const sessions = Object.values(state.sessions) as Array<Record<string, unknown>>;
+    assert.equal(sessions.length, 1);
+    assert.equal("modelClass" in sessions[0]!, false);
+  } finally {
+    server.close();
+    await rm(stateDir, { recursive: true, force: true });
+  }
+});
+
 test("plugin hook emits low-frequency update reminders", async () => {
   const server = createServer((req, res) => {
     if (req.method === "GET" && req.url === "/config.json") {
@@ -668,6 +812,17 @@ function createAssistantModelRecord(model: string, timestamp?: string): Record<s
     message: {
       role: "assistant",
       model
+    }
+  };
+}
+
+function createUserTextRecord(text: string): Record<string, unknown> {
+  return {
+    type: "user",
+    timestamp: new Date().toISOString(),
+    message: {
+      role: "user",
+      content: text
     }
   };
 }

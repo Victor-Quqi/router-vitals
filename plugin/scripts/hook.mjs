@@ -4,7 +4,7 @@ import { appendHookDebugRecord } from "./lib/debug.mjs";
 import { PLUGIN_VERSION, bucketAssistantStart, classifyError, classifyModel, createErrorHint, createTimeBucket, extractErrorStatusCode, hashLocalSessionId, matchTargetBaseUrl, normalizeTargetHost, pickSampleRate, shouldSample, validateReportPayload } from "./lib/policy.mjs";
 import { getDailyAnonymousId, hasReachedDailyReportLimit, incrementContribution, loadState, recordPluginUpdateReminder, saveState, shouldRemindPluginUpdate } from "./lib/state.mjs";
 import { summarizeHookInput, summarizePayload, summarizeTurnState } from "./lib/hook-debug-summary.mjs";
-import { getTranscriptSize, inspectTranscript } from "./lib/hook-transcript.mjs";
+import { getTranscriptPath, getTranscriptSize, inspectTranscript } from "./lib/hook-transcript.mjs";
 import { resolveModelClass, resolvePromptStartModelClass } from "./lib/hook-model-resolution.mjs";
 import { postReport, recordLastDecision as recordDecision, summarizePostResult } from "./lib/report.mjs";
 import { runCodexHook } from "./lib/codex-flow.mjs";
@@ -37,7 +37,7 @@ async function main() {
         return;
     }
     if (eventName === "SessionEnd") {
-        delete state.sessions[sessionKey];
+        recordSessionEnd(state, sessionKey);
         await writeHookDebug(sessionKey, "session_end", {
             sessionAfter: summarizeTurnState(state.sessions[sessionKey])
         });
@@ -81,31 +81,57 @@ async function readHookInput() {
     }
 }
 function recordSessionStart(state, sessionKey, input) {
-    const modelClass = classifyModel(input);
+    const directModelClass = classifyModel(input);
+    const transcriptKey = getTranscriptKey(input);
+    const previousSession = state.sessions[sessionKey];
+    const previousModelClass = previousSession?.modelClass && previousSession.modelClass !== "unknown"
+        ? previousSession.modelClass
+        : "unknown";
+    const modelClass = directModelClass === "unknown" && canUseSessionFallback(previousSession, transcriptKey)
+        ? previousModelClass
+        : directModelClass;
     state.sessions[sessionKey] = {
         modelClass,
         promptCount: 0,
+        ...(transcriptKey ? { transcriptKey } : {}),
         updatedAtMs: Date.now()
     };
     return modelClass;
 }
+function recordSessionEnd(state, sessionKey) {
+    const session = state.sessions[sessionKey];
+    if (!session?.modelClass || session.modelClass === "unknown" || !session.transcriptKey) {
+        delete state.sessions[sessionKey];
+        return;
+    }
+    state.sessions[sessionKey] = {
+        modelClass: session.modelClass,
+        ...(session.transcriptKey ? { transcriptKey: session.transcriptKey } : {}),
+        ...(typeof session.promptCount === "number" ? { promptCount: session.promptCount } : {}),
+        updatedAtMs: Date.now()
+    };
+}
 async function recordPromptStart(state, sessionKey, input) {
     const match = matchTargetBaseUrl(process.env.ANTHROPIC_BASE_URL);
     const transcriptStartOffset = await getTranscriptSize(input);
+    const transcriptKey = getTranscriptKey(input);
     const sessionBefore = state.sessions[sessionKey];
-    const resolution = await resolvePromptStartModelClass(input, sessionBefore, transcriptStartOffset);
+    const sessionForResolution = canUseSessionFallback(sessionBefore, transcriptKey) ? sessionBefore : undefined;
+    const resolution = await resolvePromptStartModelClass(input, sessionForResolution, transcriptStartOffset);
     const modelClass = resolution.modelClass;
-    const promptCount = (sessionBefore?.promptCount ?? 0) + 1;
-    state.sessions[sessionKey] = {
-        ...(sessionBefore?.modelClass ? { modelClass: sessionBefore.modelClass } : {}),
+    const promptCount = (sessionForResolution?.promptCount ?? 0) + 1;
+    const nextSession = {
         ...(modelClass !== "unknown" ? { modelClass } : {}),
+        ...(transcriptKey ? { transcriptKey } : {}),
         promptCount,
         updatedAtMs: Date.now()
     };
+    state.sessions[sessionKey] = nextSession;
     state.pending[sessionKey] = {
         startedAtMs: Date.now(),
         targetMatched: match.matched === true,
         ...(transcriptStartOffset !== null ? { transcriptStartOffset } : {}),
+        ...(transcriptKey ? { transcriptKey } : {}),
         ...(modelClass !== "unknown" ? { modelClass } : {})
     };
     return {
@@ -160,9 +186,12 @@ async function reportCompletion({ eventName, input, state, config, sessionKey })
     debug.transcript = transcript;
     debug.modelResolution = modelResolution;
     if (modelClass !== "unknown") {
+        const transcriptKey = getTranscriptKey(input);
+        const session = state.sessions[sessionKey];
         state.sessions[sessionKey] = {
+            ...session,
             modelClass,
-            ...(state.sessions[sessionKey]?.promptCount !== undefined ? { promptCount: state.sessions[sessionKey].promptCount } : {}),
+            ...(transcriptKey ? { transcriptKey } : {}),
             updatedAtMs: Date.now()
         };
     }
@@ -228,6 +257,17 @@ function getTurnStartedAtMs(turns) {
             return turn.startedAtMs;
     }
     return null;
+}
+function getTranscriptKey(input) {
+    const transcriptPath = getTranscriptPath(input);
+    return transcriptPath ? hashLocalSessionId(transcriptPath) : undefined;
+}
+function canUseSessionFallback(session, transcriptKey) {
+    if (!session)
+        return false;
+    if (!transcriptKey)
+        return !session.transcriptKey;
+    return session.transcriptKey === transcriptKey || (!session.transcriptKey && session.promptCount === 0);
 }
 async function writeHookDebug(sessionKey, stage, data) {
     await appendHookDebugRecord({

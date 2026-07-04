@@ -37,6 +37,7 @@ import {
   summarizeTurnState
 } from "./lib/hook-debug-summary.mjs";
 import {
+  getTranscriptPath,
   getTranscriptSize,
   inspectTranscript,
   type HookInput,
@@ -121,7 +122,7 @@ async function main() {
   }
 
   if (eventName === "SessionEnd") {
-    delete state.sessions[sessionKey];
+    recordSessionEnd(state, sessionKey);
     await writeHookDebug(sessionKey, "session_end", {
       sessionAfter: summarizeTurnState(state.sessions[sessionKey])
     });
@@ -165,32 +166,60 @@ async function readHookInput(): Promise<HookInput> {
 }
 
 function recordSessionStart(state: PluginState, sessionKey: string, input: HookInput): ModelClass {
-  const modelClass = classifyModel(input);
+  const directModelClass = classifyModel(input);
+  const transcriptKey = getTranscriptKey(input);
+  const previousSession = state.sessions[sessionKey];
+  const previousModelClass = previousSession?.modelClass && previousSession.modelClass !== "unknown"
+    ? previousSession.modelClass
+    : "unknown";
+  const modelClass = directModelClass === "unknown" && canUseSessionFallback(previousSession, transcriptKey)
+    ? previousModelClass
+    : directModelClass;
   state.sessions[sessionKey] = {
     modelClass,
     promptCount: 0,
+    ...(transcriptKey ? { transcriptKey } : {}),
     updatedAtMs: Date.now()
   };
   return modelClass;
 }
 
+function recordSessionEnd(state: PluginState, sessionKey: string): void {
+  const session = state.sessions[sessionKey];
+  if (!session?.modelClass || session.modelClass === "unknown" || !session.transcriptKey) {
+    delete state.sessions[sessionKey];
+    return;
+  }
+
+  state.sessions[sessionKey] = {
+    modelClass: session.modelClass,
+    ...(session.transcriptKey ? { transcriptKey: session.transcriptKey } : {}),
+    ...(typeof session.promptCount === "number" ? { promptCount: session.promptCount } : {}),
+    updatedAtMs: Date.now()
+  };
+}
+
 async function recordPromptStart(state: PluginState, sessionKey: string, input: HookInput): Promise<PromptStartDebug> {
   const match = matchTargetBaseUrl(process.env.ANTHROPIC_BASE_URL);
   const transcriptStartOffset = await getTranscriptSize(input);
+  const transcriptKey = getTranscriptKey(input);
   const sessionBefore = state.sessions[sessionKey];
-  const resolution = await resolvePromptStartModelClass(input, sessionBefore, transcriptStartOffset);
+  const sessionForResolution = canUseSessionFallback(sessionBefore, transcriptKey) ? sessionBefore : undefined;
+  const resolution = await resolvePromptStartModelClass(input, sessionForResolution, transcriptStartOffset);
   const modelClass = resolution.modelClass;
-  const promptCount = (sessionBefore?.promptCount ?? 0) + 1;
-  state.sessions[sessionKey] = {
-    ...(sessionBefore?.modelClass ? { modelClass: sessionBefore.modelClass } : {}),
+  const promptCount = (sessionForResolution?.promptCount ?? 0) + 1;
+  const nextSession: TurnState = {
     ...(modelClass !== "unknown" ? { modelClass } : {}),
+    ...(transcriptKey ? { transcriptKey } : {}),
     promptCount,
     updatedAtMs: Date.now()
   };
+  state.sessions[sessionKey] = nextSession;
   state.pending[sessionKey] = {
     startedAtMs: Date.now(),
     targetMatched: match.matched === true,
     ...(transcriptStartOffset !== null ? { transcriptStartOffset } : {}),
+    ...(transcriptKey ? { transcriptKey } : {}),
     ...(modelClass !== "unknown" ? { modelClass } : {})
   };
   return {
@@ -256,9 +285,12 @@ async function reportCompletion({
   debug.transcript = transcript;
   debug.modelResolution = modelResolution;
   if (modelClass !== "unknown") {
+    const transcriptKey = getTranscriptKey(input);
+    const session = state.sessions[sessionKey];
     state.sessions[sessionKey] = {
+      ...session,
       modelClass,
-      ...(state.sessions[sessionKey]?.promptCount !== undefined ? { promptCount: state.sessions[sessionKey].promptCount } : {}),
+      ...(transcriptKey ? { transcriptKey } : {}),
       updatedAtMs: Date.now()
     };
   }
@@ -325,6 +357,17 @@ function getTurnStartedAtMs(turns: Array<TurnState | undefined>): number | null 
     if (typeof turn?.startedAtMs === "number" && Number.isFinite(turn.startedAtMs)) return turn.startedAtMs;
   }
   return null;
+}
+
+function getTranscriptKey(input: HookInput): string | undefined {
+  const transcriptPath = getTranscriptPath(input);
+  return transcriptPath ? hashLocalSessionId(transcriptPath) : undefined;
+}
+
+function canUseSessionFallback(session: TurnState | undefined, transcriptKey: string | undefined): boolean {
+  if (!session) return false;
+  if (!transcriptKey) return !session.transcriptKey;
+  return session.transcriptKey === transcriptKey || (!session.transcriptKey && session.promptCount === 0);
 }
 
 async function writeHookDebug(sessionKey: string, stage: string, data: Record<string, unknown>): Promise<void> {

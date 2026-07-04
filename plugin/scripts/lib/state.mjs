@@ -198,6 +198,9 @@ function normalizeTurnState(value) {
     if (typeof value.transcriptStartOffset === "number" && Number.isFinite(value.transcriptStartOffset)) {
         result.transcriptStartOffset = value.transcriptStartOffset;
     }
+    if (typeof value.transcriptKey === "string" && /^[a-f0-9]{24}$/.test(value.transcriptKey)) {
+        result.transcriptKey = value.transcriptKey;
+    }
     if (typeof value.updatedAtMs === "number" && Number.isFinite(value.updatedAtMs))
         result.updatedAtMs = value.updatedAtMs;
     if (typeof value.targetMatched === "boolean")

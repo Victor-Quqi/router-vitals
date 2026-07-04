@@ -32,6 +32,7 @@ export interface AnonymousState {
 export interface TurnState {
   startedAtMs?: number;
   transcriptStartOffset?: number;
+  transcriptKey?: string;
   targetMatched?: boolean;
   turnId?: string;
   modelClass?: ModelClass;
@@ -264,6 +265,9 @@ function normalizeTurnState(value: unknown): TurnState | null {
   if (typeof value.startedAtMs === "number" && Number.isFinite(value.startedAtMs)) result.startedAtMs = value.startedAtMs;
   if (typeof value.transcriptStartOffset === "number" && Number.isFinite(value.transcriptStartOffset)) {
     result.transcriptStartOffset = value.transcriptStartOffset;
+  }
+  if (typeof value.transcriptKey === "string" && /^[a-f0-9]{24}$/.test(value.transcriptKey)) {
+    result.transcriptKey = value.transcriptKey;
   }
   if (typeof value.updatedAtMs === "number" && Number.isFinite(value.updatedAtMs)) result.updatedAtMs = value.updatedAtMs;
   if (typeof value.targetMatched === "boolean") result.targetMatched = value.targetMatched;

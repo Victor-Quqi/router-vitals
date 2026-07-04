@@ -1,6 +1,6 @@
 {
   "name": "anyrouter-status-monitor",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Anonymous community status monitor for Any Router Codex usage.",
   "hooks": "./hooks/codex-hooks.json",
   "displayName": "Any Router Status Monitor",
