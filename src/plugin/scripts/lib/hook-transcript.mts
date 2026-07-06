@@ -1,9 +1,13 @@
 import { createReadStream } from "node:fs";
-import { stat } from "node:fs/promises";
+import { readdir, stat } from "node:fs/promises";
+import { dirname, join } from "node:path";
 import { createInterface } from "node:readline";
 import { classifyModel, type ModelClass } from "./policy.mjs";
 
 const TRANSCRIPT_MODEL_LOOKBACK_BYTES = 256 * 1024;
+const PROJECT_MODEL_SWITCH_LOOKBACK_MS = 14 * 24 * 60 * 60 * 1000;
+const PROJECT_MODEL_SWITCH_MAX_FILES = 80;
+const PROJECT_MODEL_SWITCH_MAX_FILE_BYTES = 16 * 1024 * 1024;
 
 export type HookInput = Record<string, any>;
 
@@ -18,6 +22,14 @@ export interface PromptTranscriptInspection {
   modelClass: ModelClass;
   modelSetOutputs: ModelSetOutputObservation[];
   hasUnparsedModelSetOutput: boolean;
+}
+
+export interface ProjectModelSwitchInspection {
+  inspected: boolean;
+  modelClass: ModelClass;
+  timestampMs: number | null;
+  transcriptPath: string | null;
+  textPreview: string | null;
 }
 
 export interface ModelCandidateObservation {
@@ -126,6 +138,48 @@ export async function inspectPromptStartTranscript(
   return result;
 }
 
+export async function inspectRecentProjectModelSwitch(
+  input: HookInput,
+  beforeMs = Date.now()
+): Promise<ProjectModelSwitchInspection> {
+  const result: ProjectModelSwitchInspection = {
+    inspected: false,
+    modelClass: "unknown",
+    timestampMs: null,
+    transcriptPath: null,
+    textPreview: null
+  };
+  if (!isTaskNotificationInput(input)) return result;
+
+  const transcriptPath = getTranscriptPath(input);
+  if (!transcriptPath) return result;
+
+  result.inspected = true;
+  try {
+    const candidates = await listRecentProjectTranscripts(dirname(transcriptPath), beforeMs);
+    for (const path of candidates) {
+      const modelSwitch = await inspectModelSwitchesInFile(path, beforeMs);
+      if (!modelSwitch) continue;
+      if (result.timestampMs === null || modelSwitch.timestampMs > result.timestampMs) {
+        result.modelClass = modelSwitch.modelClass;
+        result.timestampMs = modelSwitch.timestampMs;
+        result.transcriptPath = path;
+        result.textPreview = modelSwitch.textPreview;
+      }
+    }
+  } catch {
+    return {
+      inspected: false,
+      modelClass: "unknown",
+      timestampMs: null,
+      transcriptPath: null,
+      textPreview: null
+    };
+  }
+
+  return result;
+}
+
 export async function inspectTranscript(
   input: HookInput,
   turnStartedAtMs: number | null,
@@ -193,6 +247,73 @@ export function collectModelCandidates(value: unknown, prefix: string): ModelCan
   }
 
   return result;
+}
+
+async function listRecentProjectTranscripts(projectDir: string, beforeMs: number): Promise<string[]> {
+  const cutoffMs = beforeMs - PROJECT_MODEL_SWITCH_LOOKBACK_MS;
+  const entries = await readdir(projectDir, { withFileTypes: true });
+  const files: Array<{ path: string; mtimeMs: number }> = [];
+
+  for (const entry of entries) {
+    if (!entry.isFile() || !entry.name.endsWith(".jsonl")) continue;
+    const path = join(projectDir, entry.name);
+    try {
+      const info = await stat(path);
+      if (!info.isFile()) continue;
+      if (info.size > PROJECT_MODEL_SWITCH_MAX_FILE_BYTES) continue;
+      if (info.mtimeMs < cutoffMs) continue;
+      files.push({ path, mtimeMs: info.mtimeMs });
+    } catch {
+      continue;
+    }
+  }
+
+  return files
+    .sort((left, right) => right.mtimeMs - left.mtimeMs)
+    .slice(0, PROJECT_MODEL_SWITCH_MAX_FILES)
+    .map((file) => file.path);
+}
+
+async function inspectModelSwitchesInFile(
+  path: string,
+  beforeMs: number
+): Promise<{ modelClass: ModelClass; timestampMs: number; textPreview: string } | null> {
+  let latest: { modelClass: ModelClass; timestampMs: number; textPreview: string } | null = null;
+  const stream = createReadStream(path, { encoding: "utf8" });
+  const lines = createInterface({ input: stream, crlfDelay: Infinity });
+
+  try {
+    for await (const line of lines) {
+      if (!line.includes("Set model to")) continue;
+      const raw = line.trim();
+      if (!raw) continue;
+
+      let record: unknown;
+      try {
+        record = JSON.parse(raw);
+      } catch {
+        continue;
+      }
+
+      const modelSetOutput = inspectModelSetOutput(record);
+      if (!modelSetOutput || modelSetOutput.modelClass === "unknown") continue;
+      if (!modelSetOutput.textPreview.toLowerCase().includes("saved as your default for new sessions")) continue;
+      const timestampMs = modelSetOutput.timestampMs;
+      if (timestampMs === null || timestampMs > beforeMs + 1000) continue;
+      if (!latest || timestampMs > latest.timestampMs) {
+        latest = {
+          modelClass: modelSetOutput.modelClass,
+          timestampMs,
+          textPreview: modelSetOutput.textPreview
+        };
+      }
+    }
+  } finally {
+    lines.close();
+    stream.destroy();
+  }
+
+  return latest;
 }
 
 function collectModelCandidatesFromRecord(
@@ -274,6 +395,13 @@ function inspectModelSetOutput(value: unknown): ModelSetOutputObservation | null
     hasAnsi: hasAnsiControlSequence(text),
     textPreview: previewText(text)
   };
+}
+
+function isTaskNotificationInput(input: HookInput): boolean {
+  const prompt = input.prompt;
+  return typeof prompt === "string"
+    && prompt.includes("<task-notification>")
+    && prompt.includes("<tool-use-id>");
 }
 
 function getRecordTimestampMs(value: unknown): number | null {

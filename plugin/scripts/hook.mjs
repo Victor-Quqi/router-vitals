@@ -142,6 +142,7 @@ async function recordPromptStart(state, sessionKey, input) {
         promptSource: resolution.source,
         directInputModelClass: resolution.directInputModelClass,
         promptTranscript: resolution.transcript,
+        projectModelSwitch: resolution.projectModelSwitch,
         pendingAfter: summarizeTurnState(state.pending[sessionKey]),
         sessionAfter: summarizeTurnState(state.sessions[sessionKey])
     };

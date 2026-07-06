@@ -1,5 +1,5 @@
 import { MODEL_CLASSES, classifyModel } from "./policy.mjs";
-import { inspectPromptStartTranscript } from "./hook-transcript.mjs";
+import { inspectRecentProjectModelSwitch, inspectPromptStartTranscript } from "./hook-transcript.mjs";
 export function resolveModelClass(input, transcript, ...fallbacks) {
     const direct = classifyModel(input, { includeEnv: false });
     const fallbackModelClasses = fallbacks
@@ -50,16 +50,36 @@ export async function resolvePromptStartModelClass(input, session, transcriptSta
         modelSetOutputs: [],
         hasUnparsedModelSetOutput: false
     };
+    const emptyProjectModelSwitch = {
+        inspected: false,
+        modelClass: "unknown",
+        timestampMs: null,
+        transcriptPath: null,
+        textPreview: null
+    };
     if (direct !== "unknown") {
         return {
             modelClass: direct,
             source: "direct_input",
             directInputModelClass: direct,
-            transcript: emptyTranscript
+            transcript: emptyTranscript,
+            projectModelSwitch: emptyProjectModelSwitch
         };
     }
     const transcript = await inspectPromptStartTranscript(input, transcriptStartOffset);
+    const projectModelSwitch = transcript.modelClass === "unknown" && !transcript.hasUnparsedModelSetOutput
+        ? await inspectRecentProjectModelSwitch(input)
+        : emptyProjectModelSwitch;
     if (!transcript.inspected) {
+        if (projectModelSwitch.modelClass !== "unknown") {
+            return {
+                modelClass: projectModelSwitch.modelClass,
+                source: "project_model_switch",
+                directInputModelClass: direct,
+                transcript,
+                projectModelSwitch
+            };
+        }
         const sessionModelClass = session?.modelClass;
         const firstPromptSessionModelClass = session?.promptCount === 0 && sessionModelClass && sessionModelClass !== "unknown"
             ? sessionModelClass
@@ -69,14 +89,16 @@ export async function resolvePromptStartModelClass(input, session, transcriptSta
                 modelClass: firstPromptSessionModelClass,
                 source: "session",
                 directInputModelClass: direct,
-                transcript
+                transcript,
+                projectModelSwitch
             };
         }
         return {
             modelClass: "unknown",
             source: "unknown",
             directInputModelClass: direct,
-            transcript
+            transcript,
+            projectModelSwitch
         };
     }
     if (transcript.modelClass !== "unknown") {
@@ -84,7 +106,8 @@ export async function resolvePromptStartModelClass(input, session, transcriptSta
             modelClass: transcript.modelClass,
             source: "prompt_transcript",
             directInputModelClass: direct,
-            transcript
+            transcript,
+            projectModelSwitch
         };
     }
     if (transcript.hasUnparsedModelSetOutput) {
@@ -92,7 +115,17 @@ export async function resolvePromptStartModelClass(input, session, transcriptSta
             modelClass: "unknown",
             source: "unparsed_model_set_output",
             directInputModelClass: direct,
-            transcript
+            transcript,
+            projectModelSwitch
+        };
+    }
+    if (projectModelSwitch.modelClass !== "unknown") {
+        return {
+            modelClass: projectModelSwitch.modelClass,
+            source: "project_model_switch",
+            directInputModelClass: direct,
+            transcript,
+            projectModelSwitch
         };
     }
     const sessionModelClass = session?.modelClass && session.modelClass !== "unknown" ? session.modelClass : "unknown";
@@ -101,13 +134,15 @@ export async function resolvePromptStartModelClass(input, session, transcriptSta
             modelClass: sessionModelClass,
             source: "session",
             directInputModelClass: direct,
-            transcript
+            transcript,
+            projectModelSwitch
         };
     }
     return {
         modelClass: "unknown",
         source: "unknown",
         directInputModelClass: direct,
-        transcript
+        transcript,
+        projectModelSwitch
     };
 }

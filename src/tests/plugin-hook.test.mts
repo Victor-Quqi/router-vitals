@@ -547,6 +547,111 @@ test("plugin hook restores known model across same-transcript session resume", a
   }
 });
 
+test("plugin hook uses the current model switch for task notification failures", async () => {
+  const received: Array<Record<string, any>> = [];
+  const server = createServer((req, res) => {
+    if (req.method === "GET" && req.url === "/config.json") {
+      const base = `http://127.0.0.1:${serverPort(server)}`;
+      respondJson(res, {
+        reportingEnabled: true,
+        apiBaseUrl: base,
+        targetBaseUrlHosts: [primaryTargetHost, secondaryTargetHost],
+        sampleRateSuccess: 1,
+        sampleRateFailure: 1,
+        minPluginVersion: "0.1.0",
+        statusWindows: ["5m", "15m", "60m"]
+      });
+      return;
+    }
+
+    if (req.method === "POST" && req.url === "/v1/report") {
+      const chunks: Buffer[] = [];
+      req.on("data", (chunk) => chunks.push(chunk));
+      req.on("end", () => {
+        received.push(JSON.parse(Buffer.concat(chunks).toString("utf8")));
+        respondJson(res, { ok: true });
+      });
+      return;
+    }
+
+    res.writeHead(404);
+    res.end();
+  });
+
+  await listen(server);
+  const stateDir = await mkdtemp(join(tmpdir(), "router-vitals-task-notification-"));
+
+  try {
+    const commonEnv = {
+      ...process.env,
+      ROUTER_VITALS_DEBUG_HOOK: "1",
+      ROUTER_VITALS_STATE_DIR: stateDir,
+      ROUTER_VITALS_CONFIG_URL: `http://127.0.0.1:${serverPort(server)}/config.json`,
+      ANTHROPIC_BASE_URL: primaryTargetBaseUrl
+    };
+    const sessionId = "session-task-notification";
+    const activeTranscript = join(stateDir, "active.jsonl");
+    const notificationTranscript = join(stateDir, "notification.jsonl");
+    const nowMs = Date.now();
+    const taskPrompt = [
+      "<task-notification>",
+      "<task-id>background-task</task-id>",
+      "<tool-use-id>toolu_task_notification_model</tool-use-id>",
+      "<status>completed</status>",
+      "</task-notification>"
+    ].join("\n");
+    const notificationRecords: Array<Record<string, unknown>> = [
+      {
+        type: "user",
+        timestamp: new Date(nowMs).toISOString(),
+        origin: { kind: "task-notification" },
+        promptSource: "system",
+        message: {
+          role: "user",
+          content: taskPrompt
+        }
+      }
+    ];
+
+    await writeTranscriptRecords(activeTranscript, [
+      createUserModelSetOutputRecord("Set model to Haiku 4.5 and saved as your default for new sessions", new Date(nowMs - 5000).toISOString()),
+      createAssistantModelRecord("claude-haiku-4-5-20251001", new Date(nowMs - 4000).toISOString()),
+      createUserModelSetOutputRecord("Set model to Opus 4.8 (1M context) and saved as your default for new sessions", new Date(nowMs - 2000).toISOString())
+    ]);
+    await writeTranscriptRecords(notificationTranscript, notificationRecords);
+    await runHook("UserPromptSubmit", {
+      session_id: sessionId,
+      transcript_path: notificationTranscript,
+      prompt: taskPrompt
+    }, commonEnv);
+
+    notificationRecords.push(createSyntheticAssistantErrorRecord(429));
+    await writeTranscriptRecords(notificationTranscript, notificationRecords);
+    await runHook("StopFailure", {
+      session_id: sessionId,
+      transcript_path: notificationTranscript,
+      status_code: 429,
+      message: "rate_limit"
+    }, commonEnv);
+
+    assert.equal(received.length, 1);
+    assert.equal(received[0]!.modelClass, "opus");
+    assert.equal(received[0]!.errorType, "rate_limited");
+
+    const debugPath = join(stateDir, PLUGIN_ID, "debug-hook.jsonl");
+    const debugRecords = (await readFile(debugPath, "utf8"))
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line));
+    const promptDebug = debugRecords.find((record) => record.eventName === "UserPromptSubmit" && record.stage === "prompt_start");
+    assert.equal(promptDebug.data.promptSource, "project_model_switch");
+    assert.equal(promptDebug.data.projectModelSwitch.modelClass, "opus");
+  } finally {
+    server.close();
+    await rm(stateDir, { recursive: true, force: true });
+  }
+});
+
 test("plugin hook clears stale model after an unparsed model switch", async () => {
   const received: Array<Record<string, any>> = [];
   const server = createServer((req, res) => {
@@ -838,19 +943,19 @@ function createModelSwitchCommandRecord(): Record<string, unknown> {
   };
 }
 
-function createModelSetOutputRecord(text: string): Record<string, unknown> {
+function createModelSetOutputRecord(text: string, timestamp = new Date().toISOString()): Record<string, unknown> {
   return {
     type: "system",
     subtype: "local_command",
-    timestamp: new Date().toISOString(),
+    timestamp,
     content: `<local-command-stdout>${text}</local-command-stdout>`
   };
 }
 
-function createUserModelSetOutputRecord(text: string): Record<string, unknown> {
+function createUserModelSetOutputRecord(text: string, timestamp = new Date().toISOString()): Record<string, unknown> {
   return {
     type: "user",
-    timestamp: new Date().toISOString(),
+    timestamp,
     message: {
       role: "user",
       content: `<local-command-stdout>${text}</local-command-stdout>`

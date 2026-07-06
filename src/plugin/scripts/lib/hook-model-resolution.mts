@@ -5,14 +5,16 @@ import {
 } from "./policy.mjs";
 import type { TurnState } from "./state.mjs";
 import {
+  inspectRecentProjectModelSwitch,
   inspectPromptStartTranscript,
   type HookInput,
+  type ProjectModelSwitchInspection,
   type PromptTranscriptInspection,
   type TranscriptInspection
 } from "./hook-transcript.mjs";
 
 export type ModelResolutionSource = "direct_input" | "turn_transcript" | "fallback" | "unknown";
-export type PromptModelSource = "direct_input" | "prompt_transcript" | "unparsed_model_set_output" | "session" | "unknown";
+export type PromptModelSource = "direct_input" | "prompt_transcript" | "project_model_switch" | "unparsed_model_set_output" | "session" | "unknown";
 
 export interface ModelResolution {
   modelClass: ModelClass;
@@ -27,6 +29,7 @@ export interface PromptModelResolution {
   source: PromptModelSource;
   directInputModelClass: ModelClass;
   transcript: PromptTranscriptInspection;
+  projectModelSwitch: ProjectModelSwitchInspection;
 }
 
 export function resolveModelClass(
@@ -91,17 +94,39 @@ export async function resolvePromptStartModelClass(
     modelSetOutputs: [],
     hasUnparsedModelSetOutput: false
   };
+  const emptyProjectModelSwitch: ProjectModelSwitchInspection = {
+    inspected: false,
+    modelClass: "unknown",
+    timestampMs: null,
+    transcriptPath: null,
+    textPreview: null
+  };
   if (direct !== "unknown") {
     return {
       modelClass: direct,
       source: "direct_input",
       directInputModelClass: direct,
-      transcript: emptyTranscript
+      transcript: emptyTranscript,
+      projectModelSwitch: emptyProjectModelSwitch
     };
   }
 
   const transcript = await inspectPromptStartTranscript(input, transcriptStartOffset);
+  const projectModelSwitch = transcript.modelClass === "unknown" && !transcript.hasUnparsedModelSetOutput
+    ? await inspectRecentProjectModelSwitch(input)
+    : emptyProjectModelSwitch;
+
   if (!transcript.inspected) {
+    if (projectModelSwitch.modelClass !== "unknown") {
+      return {
+        modelClass: projectModelSwitch.modelClass,
+        source: "project_model_switch",
+        directInputModelClass: direct,
+        transcript,
+        projectModelSwitch
+      };
+    }
+
     const sessionModelClass = session?.modelClass;
     const firstPromptSessionModelClass = session?.promptCount === 0 && sessionModelClass && sessionModelClass !== "unknown"
       ? sessionModelClass
@@ -111,7 +136,8 @@ export async function resolvePromptStartModelClass(
         modelClass: firstPromptSessionModelClass,
         source: "session",
         directInputModelClass: direct,
-        transcript
+        transcript,
+        projectModelSwitch
       };
     }
 
@@ -119,7 +145,8 @@ export async function resolvePromptStartModelClass(
       modelClass: "unknown",
       source: "unknown",
       directInputModelClass: direct,
-      transcript
+      transcript,
+      projectModelSwitch
     };
   }
 
@@ -128,7 +155,8 @@ export async function resolvePromptStartModelClass(
       modelClass: transcript.modelClass,
       source: "prompt_transcript",
       directInputModelClass: direct,
-      transcript
+      transcript,
+      projectModelSwitch
     };
   }
 
@@ -137,7 +165,18 @@ export async function resolvePromptStartModelClass(
       modelClass: "unknown",
       source: "unparsed_model_set_output",
       directInputModelClass: direct,
-      transcript
+      transcript,
+      projectModelSwitch
+    };
+  }
+
+  if (projectModelSwitch.modelClass !== "unknown") {
+    return {
+      modelClass: projectModelSwitch.modelClass,
+      source: "project_model_switch",
+      directInputModelClass: direct,
+      transcript,
+      projectModelSwitch
     };
   }
 
@@ -147,7 +186,8 @@ export async function resolvePromptStartModelClass(
       modelClass: sessionModelClass,
       source: "session",
       directInputModelClass: direct,
-      transcript
+      transcript,
+      projectModelSwitch
     };
   }
 
@@ -155,6 +195,7 @@ export async function resolvePromptStartModelClass(
     modelClass: "unknown",
     source: "unknown",
     directInputModelClass: direct,
-    transcript
+    transcript,
+    projectModelSwitch
   };
 }

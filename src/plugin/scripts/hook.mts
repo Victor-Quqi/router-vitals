@@ -41,6 +41,7 @@ import {
   getTranscriptSize,
   inspectTranscript,
   type HookInput,
+  type ProjectModelSwitchInspection,
   type PromptTranscriptInspection,
   type TranscriptInspection
 } from "./lib/hook-transcript.mjs";
@@ -65,6 +66,7 @@ interface PromptStartDebug {
   promptSource: PromptModelSource;
   directInputModelClass: ModelClass;
   promptTranscript: PromptTranscriptInspection;
+  projectModelSwitch: ProjectModelSwitchInspection;
   pendingAfter: ReturnType<typeof summarizeTurnState>;
   sessionAfter: ReturnType<typeof summarizeTurnState>;
 }
@@ -230,6 +232,7 @@ async function recordPromptStart(state: PluginState, sessionKey: string, input: 
     promptSource: resolution.source,
     directInputModelClass: resolution.directInputModelClass,
     promptTranscript: resolution.transcript,
+    projectModelSwitch: resolution.projectModelSwitch,
     pendingAfter: summarizeTurnState(state.pending[sessionKey]),
     sessionAfter: summarizeTurnState(state.sessions[sessionKey])
   };
