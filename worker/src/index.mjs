@@ -1,6 +1,6 @@
 import { DEFAULT_REMOTE_CONFIG, SERVER_DAILY_REPORT_SAMPLE_RATE, normalizeClient, normalizeTargetHost, validateReportPayload } from "../../shared/policy.mjs";
 import { createPlatformResponseBodyCache } from "./runtime-cache.mjs";
-import { createSqlReportStore } from "./storage.mjs";
+import { createSqlReportStore, getShanghaiDayKey } from "./storage.mjs";
 import { buildStatusFromRows, getStatusWindowSpec, parseStatusWindow } from "./status.mjs";
 const JSON_HEADERS = {
     "content-type": "application/json; charset=utf-8",
@@ -8,6 +8,7 @@ const JSON_HEADERS = {
     "access-control-allow-methods": "GET,POST,OPTIONS",
     "access-control-allow-headers": "content-type"
 };
+const DEFAULT_IP_HASH_SALT = "router-vitals-ip-report-count-v1";
 export default {
     async fetch(request, env) {
         return handleRequest(request, env);
@@ -64,9 +65,18 @@ export async function handleReport(request, env, runtime = createRuntimeServices
     if (!targetHost)
         return json({ error: "invalid_payload", details: ["invalid targetHost"] }, 400);
     const nowMs = Date.now();
-    const dailyDecision = await store.reserveDailyReportSlot(payload.anonymousId, nowMs);
+    const sourceIp = getSourceIp(request);
+    const ipDecisionPromise = sourceIp
+        ? hashReportIp(sourceIp, getShanghaiDayKey(nowMs), env.IP_HASH_SALT).then((ipHash) => store.reserveIpReportSlot(ipHash, nowMs))
+        : Promise.resolve("accept");
+    const [dailyDecision, ipDecision] = await Promise.all([
+        store.reserveDailyReportSlot(payload.anonymousId, nowMs),
+        ipDecisionPromise
+    ]);
     const random = runtime.random ?? Math.random;
-    if (dailyDecision === "drop" || (dailyDecision === "sample" && random() >= SERVER_DAILY_REPORT_SAMPLE_RATE)) {
+    if (dailyDecision === "drop" ||
+        ipDecision === "drop" ||
+        ((dailyDecision === "sample" || ipDecision === "sample") && random() >= SERVER_DAILY_REPORT_SAMPLE_RATE)) {
         return new Response(null, { status: 204, headers: JSON_HEADERS });
     }
     await store.recordReport({
@@ -138,6 +148,15 @@ function getStatusCacheTtlMs(windowValue) {
     if (windowValue === "30d")
         return 10 * 60_000;
     return 20_000;
+}
+function getSourceIp(request) {
+    const value = request.headers.get("cf-connecting-ip")?.trim();
+    return value || null;
+}
+async function hashReportIp(ip, day, salt) {
+    const input = `${salt || DEFAULT_IP_HASH_SALT}:${day}:${ip}`;
+    const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(input));
+    return Array.from(new Uint8Array(digest).slice(0, 16), (byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 function statusCacheHeaders(ttlMs) {
     return { "cache-control": `public, max-age=${Math.max(0, Math.floor(ttlMs / 1000))}` };

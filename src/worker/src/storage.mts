@@ -1,6 +1,9 @@
 import {
   SERVER_DAILY_REPORT_HARD_LIMIT,
   SERVER_DAILY_REPORT_SOFT_LIMIT,
+  SERVER_IP_DAILY_REPORT_HARD_LIMIT,
+  SERVER_IP_DAILY_REPORT_SOFT_LIMIT,
+  SERVER_IP_MINUTE_REPORT_LIMIT,
   STATUS_ASSISTANT_START_COLUMNS,
   type Client,
   type ErrorType,
@@ -38,6 +41,7 @@ export interface RetentionOptions {
 
 export interface ReportStore {
   reserveDailyReportSlot(anonymousId: string, nowMs: number): Promise<DailyReportDecision>;
+  reserveIpReportSlot(ipHash: string, nowMs: number): Promise<DailyReportDecision>;
   recordReport(record: ReportRecord): Promise<void>;
   queryAggregates(sinceMinute: number, targetHost: StatusTargetHost, client: StatusClient): Promise<{ results?: AggregateRow[] }>;
   queryModelAggregates(sinceMinute: number, targetHost: StatusTargetHost, client: StatusClient): Promise<{ results?: ModelAggregateRow[] }>;
@@ -70,6 +74,9 @@ export function createSqlReportStore(db: SqlDatabase): ReportStore {
   return {
     reserveDailyReportSlot(anonymousId: string, nowMs: number): Promise<DailyReportDecision> {
       return reserveDailyReportSlot(db, anonymousId, nowMs);
+    },
+    reserveIpReportSlot(ipHash: string, nowMs: number): Promise<DailyReportDecision> {
+      return reserveIpReportSlot(db, ipHash, nowMs);
     },
     recordReport(record: ReportRecord): Promise<void> {
       return recordReport(db, record);
@@ -348,6 +355,7 @@ async function purgeExpiredData(db: SqlDatabase, nowMs: number, options: Retenti
 
   await db.batch([
     db.prepare("DELETE FROM daily_report_counts WHERE updated_at < ?").bind(retentionCutoff),
+    db.prepare("DELETE FROM ip_report_counts WHERE updated_at < ?").bind(retentionCutoff),
     db.prepare("DELETE FROM target_model_error_observations WHERE minute < ?").bind(detailCutoffMinute),
     db.prepare("DELETE FROM target_minute_aggregates WHERE minute < ?").bind(aggregateCutoffMinute),
     db.prepare("DELETE FROM target_model_minute_aggregates WHERE minute < ?").bind(aggregateCutoffMinute)
@@ -378,6 +386,30 @@ async function reserveDailyReportSlot(db: SqlDatabase, anonymousId: string, nowM
   return "accept";
 }
 
-function getShanghaiDayKey(nowMs: number): string {
+async function reserveIpReportSlot(db: SqlDatabase, ipHash: string, nowMs: number): Promise<DailyReportDecision> {
+  const day = getShanghaiDayKey(nowMs);
+  const minute = Math.floor(nowMs / 60000);
+
+  const result = await db.prepare(`
+    INSERT INTO ip_report_counts (day, ip_hash, count, minute, minute_count, updated_at)
+    VALUES (?, ?, 1, ?, 1, ?)
+    ON CONFLICT(day, ip_hash) DO UPDATE SET
+      count = count + 1,
+      minute_count = CASE WHEN minute = excluded.minute THEN minute_count + 1 ELSE 1 END,
+      minute = excluded.minute,
+      updated_at = excluded.updated_at
+    RETURNING count, minute_count
+  `).bind(day, ipHash, minute, nowMs).all<{ count: number; minute_count: number }>();
+
+  const row = result.results?.[0];
+  const count = Number(row?.count ?? 1);
+  const minuteCount = Number(row?.minute_count ?? 1);
+  if (minuteCount > SERVER_IP_MINUTE_REPORT_LIMIT) return "drop";
+  if (count > SERVER_IP_DAILY_REPORT_HARD_LIMIT) return "drop";
+  if (count > SERVER_IP_DAILY_REPORT_SOFT_LIMIT) return "sample";
+  return "accept";
+}
+
+export function getShanghaiDayKey(nowMs: number): string {
   return new Date(nowMs + SHANGHAI_UTC_OFFSET_MS).toISOString().slice(0, 10);
 }

@@ -9,6 +9,7 @@ import {
 import { createPlatformResponseBodyCache, type ResponseBodyCache } from "./runtime-cache.mjs";
 import {
   createSqlReportStore,
+  getShanghaiDayKey,
   type ReportStore,
   type SqlDatabase,
   type StatusClient,
@@ -28,6 +29,7 @@ interface WorkerEnv {
   DB?: SqlDatabase;
   ASSETS?: AssetFetcher;
   ERROR_DETAIL_RETENTION_DAYS?: string | number;
+  IP_HASH_SALT?: string;
 }
 
 interface ScheduledContext {
@@ -46,6 +48,8 @@ const JSON_HEADERS: Record<string, string> = {
   "access-control-allow-methods": "GET,POST,OPTIONS",
   "access-control-allow-headers": "content-type"
 };
+
+const DEFAULT_IP_HASH_SALT = "router-vitals-ip-report-count-v1";
 
 export default {
   async fetch(request: Request, env: WorkerEnv): Promise<Response> {
@@ -110,9 +114,20 @@ export async function handleReport(
   if (!targetHost) return json({ error: "invalid_payload", details: ["invalid targetHost"] }, 400);
 
   const nowMs = Date.now();
-  const dailyDecision = await store.reserveDailyReportSlot(payload.anonymousId, nowMs);
+  const sourceIp = getSourceIp(request);
+  const ipDecisionPromise = sourceIp
+    ? hashReportIp(sourceIp, getShanghaiDayKey(nowMs), env.IP_HASH_SALT).then((ipHash) => store.reserveIpReportSlot(ipHash, nowMs))
+    : Promise.resolve<"accept">("accept");
+  const [dailyDecision, ipDecision] = await Promise.all([
+    store.reserveDailyReportSlot(payload.anonymousId, nowMs),
+    ipDecisionPromise
+  ]);
   const random = runtime.random ?? Math.random;
-  if (dailyDecision === "drop" || (dailyDecision === "sample" && random() >= SERVER_DAILY_REPORT_SAMPLE_RATE)) {
+  if (
+    dailyDecision === "drop" ||
+    ipDecision === "drop" ||
+    ((dailyDecision === "sample" || ipDecision === "sample") && random() >= SERVER_DAILY_REPORT_SAMPLE_RATE)
+  ) {
     return new Response(null, { status: 204, headers: JSON_HEADERS });
   }
 
@@ -194,6 +209,17 @@ function getStatusCacheTtlMs(windowValue: string): number {
   if (windowValue === "7d") return 5 * 60_000;
   if (windowValue === "30d") return 10 * 60_000;
   return 20_000;
+}
+
+function getSourceIp(request: Request): string | null {
+  const value = request.headers.get("cf-connecting-ip")?.trim();
+  return value || null;
+}
+
+async function hashReportIp(ip: string, day: string, salt: string | undefined): Promise<string> {
+  const input = `${salt || DEFAULT_IP_HASH_SALT}:${day}:${ip}`;
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(input));
+  return Array.from(new Uint8Array(digest).slice(0, 16), (byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
 function statusCacheHeaders(ttlMs: number): Record<string, string> {

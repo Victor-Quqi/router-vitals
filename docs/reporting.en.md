@@ -14,6 +14,8 @@ All of these must hold:
 - The turn passes success/failure sampling.
 - The local daily report cap has not been reached.
 
+The server also has abuse protection: in addition to the anonymous-ID daily cap, it applies daily and per-minute limits by source IP. IPs are stored only as salted hashes for short-term counting; raw IPs are not stored. The hash includes the Shanghai calendar day, so it rotates daily and cannot be linked across days.
+
 Any Router targets:
 
 - Main endpoint

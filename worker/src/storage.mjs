@@ -1,4 +1,4 @@
-import { SERVER_DAILY_REPORT_HARD_LIMIT, SERVER_DAILY_REPORT_SOFT_LIMIT, STATUS_ASSISTANT_START_COLUMNS } from "../../shared/policy.mjs";
+import { SERVER_DAILY_REPORT_HARD_LIMIT, SERVER_DAILY_REPORT_SOFT_LIMIT, SERVER_IP_DAILY_REPORT_HARD_LIMIT, SERVER_IP_DAILY_REPORT_SOFT_LIMIT, SERVER_IP_MINUTE_REPORT_LIMIT, STATUS_ASSISTANT_START_COLUMNS } from "../../shared/policy.mjs";
 const ASSISTANT_START_COLUMNS = Object.freeze(Object.fromEntries(STATUS_ASSISTANT_START_COLUMNS));
 const ERROR_COLUMNS = Object.freeze({
     none: "err_none",
@@ -15,6 +15,9 @@ export function createSqlReportStore(db) {
     return {
         reserveDailyReportSlot(anonymousId, nowMs) {
             return reserveDailyReportSlot(db, anonymousId, nowMs);
+        },
+        reserveIpReportSlot(ipHash, nowMs) {
+            return reserveIpReportSlot(db, ipHash, nowMs);
         },
         recordReport(record) {
             return recordReport(db, record);
@@ -198,6 +201,7 @@ async function purgeExpiredData(db, nowMs, options) {
     const aggregateCutoffMinute = Math.floor(retentionCutoff / 60000);
     await db.batch([
         db.prepare("DELETE FROM daily_report_counts WHERE updated_at < ?").bind(retentionCutoff),
+        db.prepare("DELETE FROM ip_report_counts WHERE updated_at < ?").bind(retentionCutoff),
         db.prepare("DELETE FROM target_model_error_observations WHERE minute < ?").bind(detailCutoffMinute),
         db.prepare("DELETE FROM target_minute_aggregates WHERE minute < ?").bind(aggregateCutoffMinute),
         db.prepare("DELETE FROM target_model_minute_aggregates WHERE minute < ?").bind(aggregateCutoffMinute)
@@ -226,6 +230,30 @@ async function reserveDailyReportSlot(db, anonymousId, nowMs) {
         return "sample";
     return "accept";
 }
-function getShanghaiDayKey(nowMs) {
+async function reserveIpReportSlot(db, ipHash, nowMs) {
+    const day = getShanghaiDayKey(nowMs);
+    const minute = Math.floor(nowMs / 60000);
+    const result = await db.prepare(`
+    INSERT INTO ip_report_counts (day, ip_hash, count, minute, minute_count, updated_at)
+    VALUES (?, ?, 1, ?, 1, ?)
+    ON CONFLICT(day, ip_hash) DO UPDATE SET
+      count = count + 1,
+      minute_count = CASE WHEN minute = excluded.minute THEN minute_count + 1 ELSE 1 END,
+      minute = excluded.minute,
+      updated_at = excluded.updated_at
+    RETURNING count, minute_count
+  `).bind(day, ipHash, minute, nowMs).all();
+    const row = result.results?.[0];
+    const count = Number(row?.count ?? 1);
+    const minuteCount = Number(row?.minute_count ?? 1);
+    if (minuteCount > SERVER_IP_MINUTE_REPORT_LIMIT)
+        return "drop";
+    if (count > SERVER_IP_DAILY_REPORT_HARD_LIMIT)
+        return "drop";
+    if (count > SERVER_IP_DAILY_REPORT_SOFT_LIMIT)
+        return "sample";
+    return "accept";
+}
+export function getShanghaiDayKey(nowMs) {
     return new Date(nowMs + SHANGHAI_UTC_OFFSET_MS).toISOString().slice(0, 10);
 }

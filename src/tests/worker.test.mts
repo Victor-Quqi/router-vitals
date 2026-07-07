@@ -2,8 +2,18 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import worker, { handleReport, handleRequest } from "../worker/src/index.mjs";
 import { createMemoryResponseBodyCache } from "../worker/src/runtime-cache.mjs";
+import { createSqlReportStore, type SqlDatabase, type SqlPreparedStatement } from "../worker/src/storage.mjs";
 import { buildStatusFromRows } from "../worker/src/status.mjs";
-import { PLUGIN_VERSION, SERVER_DAILY_REPORT_HARD_LIMIT, SERVER_DAILY_REPORT_SAMPLE_RATE, SERVER_DAILY_REPORT_SOFT_LIMIT, STATUS_MODEL_ORDER, TARGET_HOSTS } from "../shared/policy.mjs";
+import {
+  PLUGIN_VERSION,
+  SERVER_DAILY_REPORT_HARD_LIMIT,
+  SERVER_DAILY_REPORT_SAMPLE_RATE,
+  SERVER_DAILY_REPORT_SOFT_LIMIT,
+  SERVER_IP_DAILY_REPORT_HARD_LIMIT,
+  SERVER_IP_MINUTE_REPORT_LIMIT,
+  STATUS_MODEL_ORDER,
+  TARGET_HOSTS
+} from "../shared/policy.mjs";
 
 const primaryTargetHost = TARGET_HOSTS[0]!;
 const secondaryTargetHost = TARGET_HOSTS[1]!;
@@ -113,6 +123,51 @@ test("worker drops all reports over the anonymous daily hard limit before report
 
   assert.equal(response.status, 204);
   assert.equal(db.reportBatches.length, 0);
+});
+
+test("worker drops same-IP reports across anonymous IDs over the IP hard limit", async () => {
+  const db = ipDailyHardLimitDb();
+  const nowMs = Date.UTC(2026, 0, 1, 0, 0, 0);
+  const originalNow = Date.now;
+
+  Date.now = () => nowMs;
+  try {
+    const runtime = { random: () => SERVER_DAILY_REPORT_SAMPLE_RATE - 0.01 };
+    const accepted = await handleReport(reportRequest("anon_ipHardFirstabcdefghijkl", true, "203.0.113.10"), { DB: db }, runtime);
+    const dropped = await handleReport(reportRequest("anon_ipHardSecondabcdefghijk", true, "203.0.113.10"), { DB: db }, runtime);
+
+    assert.equal(accepted.status, 200);
+    assert.equal(dropped.status, 204);
+    assert.equal(db.reportBatches.length, 1);
+    assert.equal(db.ipHashes.length, 2);
+    assert.equal(db.ipHashes[0], db.ipHashes[1]);
+  } finally {
+    Date.now = originalNow;
+  }
+});
+
+test("worker IP minute limit resets on the next minute", async () => {
+  const store = createSqlReportStore(ipSlotDb());
+  const nowMs = Date.UTC(2026, 0, 1, 0, 0, 0);
+
+  for (let index = 0; index < SERVER_IP_MINUTE_REPORT_LIMIT; index += 1) {
+    assert.equal(await store.reserveIpReportSlot("ip-hash-a", nowMs), "accept");
+  }
+
+  assert.equal(await store.reserveIpReportSlot("ip-hash-a", nowMs), "drop");
+  assert.equal(await store.reserveIpReportSlot("ip-hash-a", nowMs + 60000), "accept");
+});
+
+test("worker IP report limits are isolated by IP hash", async () => {
+  const store = createSqlReportStore(ipSlotDb());
+  const nowMs = Date.UTC(2026, 0, 1, 0, 0, 0);
+
+  for (let index = 0; index < SERVER_IP_MINUTE_REPORT_LIMIT; index += 1) {
+    assert.equal(await store.reserveIpReportSlot("ip-hash-a", nowMs), "accept");
+  }
+
+  assert.equal(await store.reserveIpReportSlot("ip-hash-a", nowMs), "drop");
+  assert.equal(await store.reserveIpReportSlot("ip-hash-b", nowMs), "accept");
 });
 
 test("worker daily report limit uses the Shanghai calendar day", async () => {
@@ -269,6 +324,7 @@ test("scheduled purge caps all retained D1 tables at 90 days", async () => {
 
   assert.deepEqual(calls.map((call) => call.query), [
     "DELETE FROM daily_report_counts WHERE updated_at < ?",
+    "DELETE FROM ip_report_counts WHERE updated_at < ?",
     "DELETE FROM target_model_error_observations WHERE minute < ?",
     "DELETE FROM target_minute_aggregates WHERE minute < ?",
     "DELETE FROM target_model_minute_aggregates WHERE minute < ?"
@@ -278,9 +334,10 @@ test("scheduled purge caps all retained D1 tables at 90 days", async () => {
   const cutoffMs = nowMs - ninetyDaysMs;
   const cutoffMinute = Math.floor(cutoffMs / 60000);
   assert.equal(calls[0]!.values[0], cutoffMs);
-  assert.equal(calls[1]!.values[0], cutoffMinute);
+  assert.equal(calls[1]!.values[0], cutoffMs);
   assert.equal(calls[2]!.values[0], cutoffMinute);
   assert.equal(calls[3]!.values[0], cutoffMinute);
+  assert.equal(calls[4]!.values[0], cutoffMinute);
 });
 
 test("status aggregation returns insufficient data under sample floor", () => {
@@ -535,10 +592,13 @@ function statusDb() {
   };
 }
 
-function reportRequest(anonymousId: string, ok = true): Request {
+function reportRequest(anonymousId: string, ok = true, sourceIp?: string): Request {
+  const headers: Record<string, string> = { "content-type": "application/json" };
+  if (sourceIp) headers["cf-connecting-ip"] = sourceIp;
+
   return new Request("https://api.example.test/v1/report", {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    headers,
     body: JSON.stringify({
       ok,
       errorType: ok ? "none" : "server_error",
@@ -582,6 +642,94 @@ function dailyLimitedDb(count: number) {
     }
   };
   return db;
+}
+
+function ipDailyHardLimitDb() {
+  let ipCount = SERVER_IP_DAILY_REPORT_HARD_LIMIT - 1;
+  const db = {
+    ipHashes: [] as unknown[],
+    reportBatches: [] as string[][],
+    prepare(query: string) {
+      let values: unknown[] = [];
+      const statement = {
+        query,
+        bind(...boundValues: unknown[]) {
+          values = boundValues;
+          return statement;
+        },
+        async all<T = Record<string, unknown>>() {
+          if (query.includes("daily_report_counts")) return { results: [{ count: 1 }] as T[] };
+          if (query.includes("ip_report_counts")) {
+            ipCount += 1;
+            db.ipHashes.push(values[1]);
+            return { results: [{ count: ipCount, minute_count: 1 }] as T[] };
+          }
+          return { results: [] as T[] };
+        },
+        async run() {
+          return {};
+        }
+      };
+      return statement;
+    },
+    async batch(statements: Array<{ run(): Promise<unknown> }>) {
+      db.reportBatches.push(statements.map(readStatementQuery));
+      return Promise.all(statements.map((statement) => statement.run()));
+    }
+  };
+  return db;
+}
+
+interface IpCountRow {
+  count: number;
+  minute: number;
+  minuteCount: number;
+  updatedAt: number;
+}
+
+function ipSlotDb(): SqlDatabase & { ipRows: Map<string, IpCountRow> } {
+  const ipRows = new Map<string, IpCountRow>();
+  return {
+    ipRows,
+    prepare(query: string): SqlPreparedStatement {
+      let values: unknown[] = [];
+      const statement: SqlPreparedStatement = {
+        bind(...boundValues: unknown[]): SqlPreparedStatement {
+          values = boundValues;
+          return statement;
+        },
+        async all<T = Record<string, unknown>>(): Promise<{ results?: T[] }> {
+          if (query.includes("daily_report_counts")) return { results: [{ count: 1 }] as T[] };
+          if (!query.includes("ip_report_counts")) return { results: [] as T[] };
+
+          const day = String(values[0]);
+          const ipHash = String(values[1]);
+          const minute = Number(values[2]);
+          const updatedAt = Number(values[3]);
+          const key = `${day}:${ipHash}`;
+          const current = ipRows.get(key);
+          const next: IpCountRow = current
+            ? {
+                count: current.count + 1,
+                minute,
+                minuteCount: current.minute === minute ? current.minuteCount + 1 : 1,
+                updatedAt
+              }
+            : { count: 1, minute, minuteCount: 1, updatedAt };
+          ipRows.set(key, next);
+
+          return { results: [{ count: next.count, minute_count: next.minuteCount }] as T[] };
+        },
+        async run(): Promise<unknown> {
+          return {};
+        }
+      };
+      return statement;
+    },
+    async batch(statements: SqlPreparedStatement[]): Promise<unknown[]> {
+      return Promise.all(statements.map((statement) => statement.run()));
+    }
+  };
 }
 
 function normalizeSqlTable(query: string): string {
