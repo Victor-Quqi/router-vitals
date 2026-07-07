@@ -36,6 +36,10 @@ import { MARKETPLACE_NAME, PLUGIN_FULL_ID, SITE_NAME } from "./site-config.mjs";
 
 type CodexHookEventName = "SessionStart" | "UserPromptSubmit" | "Stop";
 
+const CROSS_SESSION_SETTLE_MAX_PER_EVENT = 2;
+const SETTLE_OWNER_GRACE_MS = 60_000;
+const SETTLE_REPORT_MAX_LAG_MS = 15 * 60_000;
+
 type CodexSkipReason =
   | "pending_not_target_matched"
   | "reporting_disabled"
@@ -44,6 +48,7 @@ type CodexSkipReason =
   | "local_daily_limit"
   | "turn_evidence_missing"
   | "turn_aborted"
+  | "pending_expired"
   | "sampled_out"
   | "payload_invalid";
 
@@ -71,6 +76,7 @@ export async function runCodexHook(eventName: string, input: HookInput): Promise
   // whatever turn is still pending for this session before recording its own.
   const settlement = await settlePendingTurn(eventName, input, state, sessionKey);
   if (settlement) await writeCodexDebug(eventName, sessionKey, "settlement", settlement as unknown as Record<string, unknown>);
+  await settleStaleCrossSessionPendings(eventName, state, sessionKey);
 
   if (eventName === "SessionStart") {
     state.sessions[sessionKey] = {
@@ -82,6 +88,7 @@ export async function runCodexHook(eventName: string, input: HookInput): Promise
 
   if (eventName === "UserPromptSubmit") {
     const target = await resolveCurrentTarget(input);
+    const transcriptPath = getTranscriptPath(input);
     const transcriptStartOffset = await getTranscriptSize(input);
     const modelClass = classifyModel({ model: input.model }, { includeEnv: false });
     const session = state.sessions[sessionKey];
@@ -94,6 +101,7 @@ export async function runCodexHook(eventName: string, input: HookInput): Promise
       startedAtMs: Date.now(),
       targetMatched: target.matched === true,
       ...(typeof input.turn_id === "string" && input.turn_id !== "" ? { turnId: input.turn_id } : {}),
+      ...(transcriptPath ? { transcriptPath } : {}),
       ...(transcriptStartOffset !== null ? { transcriptStartOffset } : {}),
       ...(modelClass !== "unknown" ? { modelClass } : {})
     };
@@ -134,6 +142,97 @@ async function settlePendingTurn(
   if (!pending) return null;
   delete state.pending[sessionKey];
 
+  return settlePreparedPendingTurn({
+    eventName,
+    state,
+    ownerSessionKey: sessionKey,
+    pending,
+    resolveTarget: (config) => resolveCurrentTarget(input, config),
+    inspectTurn: () => inspectCodexTurnSettled(eventName, input, pending),
+    resolveModelClass: (turn) => resolveCodexModelClass(turn, input, pending)
+  });
+}
+
+async function settleStaleCrossSessionPendings(
+  eventName: CodexHookEventName,
+  state: PluginState,
+  currentSessionKey: string
+): Promise<void> {
+  const candidates = Object.entries(state.pending)
+    .filter(([ownerSessionKey, pending]) => {
+      if (ownerSessionKey === currentSessionKey) return false;
+      return Boolean(pending.transcriptPath);
+    })
+    .sort((left, right) => (left[1].startedAtMs ?? 0) - (right[1].startedAtMs ?? 0))
+    .slice(0, CROSS_SESSION_SETTLE_MAX_PER_EVENT);
+
+  for (const [ownerSessionKey, pending] of candidates) {
+    try {
+      const settlement = await settleCrossSessionPendingTurn(eventName, state, ownerSessionKey, pending);
+      await writeCodexDebug(eventName, currentSessionKey, "cross_settlement", {
+        ownerSessionKey,
+        ...(settlement as unknown as Record<string, unknown>)
+      });
+    } catch (error) {
+      await writeCodexDebug(eventName, currentSessionKey, "cross_settlement", {
+        ownerSessionKey,
+        error: error instanceof Error ? error.message : String(error)
+      });
+    }
+  }
+}
+
+async function settleCrossSessionPendingTurn(
+  eventName: CodexHookEventName,
+  state: PluginState,
+  ownerSessionKey: string,
+  pending: TurnState
+): Promise<CodexSettlementDebug> {
+  const transcriptPath = pending.transcriptPath ?? null;
+  const turn = await inspectCodexTurn(transcriptPath, pending.turnId ?? null, pending.transcriptStartOffset);
+  if (!turn.found) return { hadPending: true, skipped: "turn_evidence_missing", turn };
+  if (!turn.completed && !turn.aborted) return { hadPending: true, skipped: null, turn };
+  if (turn.lastActivityAtMs !== null && Date.now() - turn.lastActivityAtMs < SETTLE_OWNER_GRACE_MS) {
+    return { hadPending: true, skipped: null, turn };
+  }
+
+  delete state.pending[ownerSessionKey];
+  return settlePreparedPendingTurn({
+    eventName,
+    state,
+    ownerSessionKey,
+    pending,
+    resolveTarget: async (config) => {
+      const meta = await readCodexSessionMeta(transcriptPath);
+      const configSnapshot = await readCodexConfigSnapshot();
+      return resolveCodexTarget({
+        sessionProviderId: meta?.modelProvider ?? null,
+        config: configSnapshot,
+        targetHosts: config.targetBaseUrlHosts
+      });
+    },
+    inspectTurn: async () => turn,
+    resolveModelClass: (settledTurn) => resolveCrossSessionModelClass(settledTurn, pending)
+  });
+}
+
+async function settlePreparedPendingTurn({
+  eventName,
+  state,
+  ownerSessionKey,
+  pending,
+  resolveTarget,
+  inspectTurn,
+  resolveModelClass
+}: {
+  eventName: CodexHookEventName;
+  state: PluginState;
+  ownerSessionKey: string;
+  pending: TurnState;
+  resolveTarget: (config: RemoteConfig) => Promise<CodexTargetMatch>;
+  inspectTurn: () => Promise<CodexTurnInspection>;
+  resolveModelClass: (turn: CodexTurnInspection) => ModelClass;
+}): Promise<CodexSettlementDebug> {
   const debug: CodexSettlementDebug = { hadPending: true, skipped: null };
   const skip = (reason: CodexSkipReason, extra: { modelClass?: ModelClass; targetHost?: ReturnType<typeof normalizeTargetHost> } = {}): CodexSettlementDebug => {
     recordLastDecision(state, eventName, {
@@ -150,26 +249,30 @@ async function settlePendingTurn(
   const config = await loadRemoteConfig();
   if (config.reportingEnabled === false) return skip("reporting_disabled");
 
-  const target = await resolveCurrentTarget(input, config);
+  const target = await resolveTarget(config);
   debug.target = target;
   if (!target.matched) return skip("current_target_not_matched");
   const targetHost = normalizeTargetHost(target.host);
   if (!targetHost) return skip("target_host_invalid");
   if (hasReachedDailyReportLimit(state)) return skip("local_daily_limit", { targetHost });
 
-  const turn = await inspectCodexTurnSettled(eventName, input, pending);
+  const turn = await inspectTurn();
   debug.turn = turn;
   if (!turn.found) return skip("turn_evidence_missing", { targetHost });
   if (turn.aborted) return skip("turn_aborted", { targetHost });
+  // Missing timestamps keep the previous settlement behavior for malformed rollout rows.
+  if (turn.lastActivityAtMs !== null && Date.now() - turn.lastActivityAtMs > SETTLE_REPORT_MAX_LAG_MS) {
+    return skip("pending_expired", { targetHost });
+  }
 
   const ok = turn.hasModelOutput;
   const sampleRate = pickSampleRate(ok, config);
   if (!shouldSample(sampleRate)) return skip("sampled_out", { targetHost });
 
-  const modelClass = resolveCodexModelClass(turn, input, pending);
+  const modelClass = resolveModelClass(turn);
   if (modelClass !== "unknown") {
-    state.sessions[sessionKey] = {
-      ...state.sessions[sessionKey],
+    state.sessions[ownerSessionKey] = {
+      ...state.sessions[ownerSessionKey],
       modelClass,
       updatedAtMs: Date.now()
     };
@@ -254,6 +357,12 @@ function resolveCodexModelClass(turn: CodexTurnInspection, input: HookInput, pen
   if (fromTurn !== "unknown") return fromTurn;
   const fromInput = classifyModel({ model: input.model }, { includeEnv: false });
   if (fromInput !== "unknown") return fromInput;
+  return pending.modelClass ?? "unknown";
+}
+
+function resolveCrossSessionModelClass(turn: CodexTurnInspection, pending: TurnState): ModelClass {
+  const fromTurn = classifyModel({ model: turn.model }, { includeEnv: false });
+  if (fromTurn !== "unknown") return fromTurn;
   return pending.modelClass ?? "unknown";
 }
 

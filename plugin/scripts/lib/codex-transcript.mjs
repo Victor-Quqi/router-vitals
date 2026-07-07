@@ -54,6 +54,7 @@ export async function inspectCodexTurn(transcriptPath, turnId, startOffset) {
         hasModelOutput: false,
         taskStartedAtMs: null,
         firstOutputAtMs: null,
+        lastActivityAtMs: null,
         timeToFirstTokenMs: null,
         durationMs: null,
         errorMessages: []
@@ -94,18 +95,21 @@ export async function inspectCodexTurn(transcriptPath, turnId, startOffset) {
             const inTurnWindow = !turnId || result.found || recordTurnId === turnId;
             if (record.type === "turn_context") {
                 result.found = true;
+                markLastActivity(result, timestampMs);
                 result.model = readString(payload.model) ?? result.model;
                 continue;
             }
             if (record.type === "event_msg") {
                 if (payloadType === "task_started") {
                     result.found = true;
+                    markLastActivity(result, timestampMs);
                     if (timestampMs !== null)
                         result.taskStartedAtMs = timestampMs;
                     continue;
                 }
                 if (!inTurnWindow)
                     continue;
+                markLastActivity(result, timestampMs);
                 if (payloadType === "task_complete") {
                     result.found = true;
                     result.completed = true;
@@ -131,6 +135,7 @@ export async function inspectCodexTurn(transcriptPath, turnId, startOffset) {
                 continue;
             }
             if (record.type === "response_item" && payloadType && inTurnWindow) {
+                markLastActivity(result, timestampMs);
                 const isAssistantMessage = payloadType === "message" && readString(payload.role) === "assistant";
                 if (isAssistantMessage || MODEL_OUTPUT_RESPONSE_ITEM_TYPES.has(payloadType)) {
                     markModelOutput(result, timestampMs);
@@ -142,6 +147,10 @@ export async function inspectCodexTurn(transcriptPath, turnId, startOffset) {
     catch {
         return result;
     }
+}
+function markLastActivity(result, timestampMs) {
+    if (timestampMs !== null)
+        result.lastActivityAtMs = timestampMs;
 }
 function markModelOutput(result, timestampMs) {
     result.hasModelOutput = true;

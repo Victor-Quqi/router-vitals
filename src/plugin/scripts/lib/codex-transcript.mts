@@ -31,6 +31,7 @@ export interface CodexTurnInspection {
   hasModelOutput: boolean;
   taskStartedAtMs: number | null;
   firstOutputAtMs: number | null;
+  lastActivityAtMs: number | null;
   timeToFirstTokenMs: number | null;
   durationMs: number | null;
   errorMessages: string[];
@@ -79,6 +80,7 @@ export async function inspectCodexTurn(
     hasModelOutput: false,
     taskStartedAtMs: null,
     firstOutputAtMs: null,
+    lastActivityAtMs: null,
     timeToFirstTokenMs: null,
     durationMs: null,
     errorMessages: []
@@ -119,6 +121,7 @@ export async function inspectCodexTurn(
 
       if (record.type === "turn_context") {
         result.found = true;
+        markLastActivity(result, timestampMs);
         result.model = readString(payload.model) ?? result.model;
         continue;
       }
@@ -126,10 +129,12 @@ export async function inspectCodexTurn(
       if (record.type === "event_msg") {
         if (payloadType === "task_started") {
           result.found = true;
+          markLastActivity(result, timestampMs);
           if (timestampMs !== null) result.taskStartedAtMs = timestampMs;
           continue;
         }
         if (!inTurnWindow) continue;
+        markLastActivity(result, timestampMs);
         if (payloadType === "task_complete") {
           result.found = true;
           result.completed = true;
@@ -155,6 +160,7 @@ export async function inspectCodexTurn(
       }
 
       if (record.type === "response_item" && payloadType && inTurnWindow) {
+        markLastActivity(result, timestampMs);
         const isAssistantMessage = payloadType === "message" && readString(payload.role) === "assistant";
         if (isAssistantMessage || MODEL_OUTPUT_RESPONSE_ITEM_TYPES.has(payloadType)) {
           markModelOutput(result, timestampMs);
@@ -166,6 +172,10 @@ export async function inspectCodexTurn(
   } catch {
     return result;
   }
+}
+
+function markLastActivity(result: CodexTurnInspection, timestampMs: number | null): void {
+  if (timestampMs !== null) result.lastActivityAtMs = timestampMs;
 }
 
 function markModelOutput(result: CodexTurnInspection, timestampMs: number | null): void {

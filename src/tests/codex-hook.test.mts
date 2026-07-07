@@ -1,15 +1,15 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { appendFile, mkdtemp, writeFile } from "node:fs/promises";
+import { appendFile, mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { createServer, type Server, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { TARGET_HOSTS, classifyModel } from "../plugin/scripts/lib/policy.mjs";
+import { TARGET_HOSTS, classifyModel, hashLocalSessionId } from "../plugin/scripts/lib/policy.mjs";
 import { parseCodexConfigSnapshot, resolveCodexTarget } from "../plugin/scripts/lib/codex-target.mjs";
 import { inspectCodexTurn, readCodexSessionMeta } from "../plugin/scripts/lib/codex-transcript.mjs";
-import { MARKETPLACE_NAME, PLUGIN_FULL_ID } from "../shared/site-config.mjs";
+import { MARKETPLACE_NAME, PLUGIN_FULL_ID, PLUGIN_ID } from "../shared/site-config.mjs";
 
 const hookPath = resolve("plugin/scripts/hook.mjs");
 const primaryTargetHost = TARGET_HOSTS[0]!;
@@ -111,6 +111,7 @@ test("codex turn inspection reads success, failure, and abort evidence", async (
   assert.equal(okTurn.timeToFirstTokenMs, 3500);
   assert.equal(okTurn.model, "gpt-5.5");
   assert.equal(okTurn.aborted, false);
+  assert.equal(okTurn.lastActivityAtMs, baseMs + 6100);
 
   const failTurn = await inspectCodexTurn(path, "t-fail", 0);
   assert.equal(failTurn.found, true);
@@ -118,11 +119,13 @@ test("codex turn inspection reads success, failure, and abort evidence", async (
   assert.equal(failTurn.completed, true);
   assert.equal(failTurn.timeToFirstTokenMs, null);
   assert.equal(failTurn.errorMessages.length, 1);
+  assert.equal(failTurn.lastActivityAtMs, baseMs + 15001);
 
   const abortTurn = await inspectCodexTurn(path, "t-abort", 0);
   assert.equal(abortTurn.found, true);
   assert.equal(abortTurn.aborted, true);
   assert.equal(abortTurn.abortReason, "interrupted");
+  assert.equal(abortTurn.lastActivityAtMs, baseMs + 21000);
 });
 
 test("codex turn inspection rewinds past offsets taken after the turn markers", async () => {
@@ -148,6 +151,7 @@ test("codex turn inspection rewinds past offsets taken after the turn markers", 
   assert.equal(turn.completed, true);
   assert.equal(turn.timeToFirstTokenMs, 3500);
   assert.notEqual(turn.taskStartedAtMs, null);
+  assert.equal(turn.lastActivityAtMs, baseMs + 6100);
 });
 
 test("codex hook reports settled turns only for matched providers", async () => {
@@ -195,7 +199,7 @@ test("codex hook reports settled turns only for matched providers", async () => 
     ROUTER_VITALS_CONFIG_URL: `http://127.0.0.1:${serverPort(server)}/config.json`,
     CODEX_HOME: codexHome
   };
-  const baseMs = Date.now() - 60000;
+  const baseMs = Date.now() - 3 * 60 * 1000;
   const baseInput = { session_id: "codex-session", transcript_path: transcript, cwd: stateDir, model: "gpt-5.5" };
 
   try {
@@ -286,6 +290,296 @@ test("codex hook reports settled turns only for matched providers", async () => 
   }
 });
 
+test("codex hook cross-settles a stale pending turn from another session", async () => {
+  const received: Array<Record<string, any>> = [];
+  const server = createCodexReportServer(received);
+  await listen(server);
+
+  const stateDir = await mkdtemp(join(tmpdir(), "router-vitals-codex-cross-"));
+  const codexHome = await mkdtemp(join(tmpdir(), "codex-home-cross-"));
+  await writeTargetCodexConfig(codexHome);
+  const env = codexEnv(stateDir, codexHome, server);
+  const ownerSessionId = "codex-cross-owner";
+  const ownerSessionKey = hashLocalSessionId(ownerSessionId);
+  const ownerTranscript = join(stateDir, "rollout-cross-owner.jsonl");
+  const baseMs = Date.now() - 3 * 60 * 1000;
+
+  try {
+    await writeFile(ownerTranscript, rolloutLine(baseMs, "session_meta", {
+      session_id: ownerSessionId,
+      model_provider: providerId
+    }) + "\n", "utf8");
+    await runCodexHook("UserPromptSubmit", {
+      session_id: ownerSessionId,
+      transcript_path: ownerTranscript,
+      cwd: stateDir,
+      model: "unclassified-model",
+      turn_id: "turn-stale",
+      prompt: "hi"
+    }, env);
+
+    let state = await readPluginState(stateDir);
+    assert.equal(state.pending[ownerSessionKey]?.transcriptPath, ownerTranscript);
+
+    await appendRollout(ownerTranscript, [
+      rolloutLine(baseMs + 1000, "event_msg", { type: "task_started", turn_id: "turn-stale" }),
+      rolloutLine(baseMs + 1000, "turn_context", { turn_id: "turn-stale", model: "unclassified-model" }),
+      rolloutLine(baseMs + 2000, "event_msg", { type: "task_complete", turn_id: "turn-stale", duration_ms: 1000 })
+    ]);
+    await agePending(stateDir, ownerSessionKey, 6 * 60 * 1000);
+
+    await triggerCodexSessionStart("codex-cross-trigger", stateDir, codexHome, server);
+
+    assert.equal(received.length, 1);
+    assert.equal(received[0]!.ok, false);
+    assert.equal(received[0]!.errorType, "unknown");
+    assert.equal(received[0]!.client, "codex");
+    assert.equal(received[0]!.modelClass, "unknown");
+
+    state = await readPluginState(stateDir);
+    assert.equal(state.pending[ownerSessionKey], undefined);
+  } finally {
+    server.close();
+  }
+});
+
+test("codex hook keeps cross-session pending while rollout turn is still running", async () => {
+  const received: Array<Record<string, any>> = [];
+  const server = createCodexReportServer(received);
+  await listen(server);
+
+  const stateDir = await mkdtemp(join(tmpdir(), "router-vitals-codex-running-"));
+  const codexHome = await mkdtemp(join(tmpdir(), "codex-home-running-"));
+  await writeTargetCodexConfig(codexHome);
+  const ownerSessionId = "codex-running-owner";
+  const ownerSessionKey = hashLocalSessionId(ownerSessionId);
+  const ownerTranscript = join(stateDir, "rollout-running-owner.jsonl");
+  const startedAtMs = Date.now() - 6 * 60 * 1000;
+
+  try {
+    await writeFile(ownerTranscript, [
+      rolloutLine(startedAtMs, "session_meta", { session_id: ownerSessionId, model_provider: providerId }),
+      rolloutLine(startedAtMs + 1000, "event_msg", { type: "task_started", turn_id: "turn-running" }),
+      rolloutLine(startedAtMs + 1000, "turn_context", { turn_id: "turn-running", model: "gpt-5.5" })
+    ].join("\n") + "\n", "utf8");
+    await writePluginState(stateDir, {
+      pending: {
+        [ownerSessionKey]: stalePending(ownerTranscript, "turn-running", startedAtMs)
+      }
+    });
+
+    await triggerCodexSessionStart("codex-running-trigger", stateDir, codexHome, server);
+
+    assert.equal(received.length, 0);
+    const state = await readPluginState(stateDir);
+    assert.equal(Boolean(state.pending[ownerSessionKey]), true);
+  } finally {
+    server.close();
+  }
+});
+
+test("codex hook leaves legacy pending without transcript path untouched", async () => {
+  const received: Array<Record<string, any>> = [];
+  const server = createCodexReportServer(received);
+  await listen(server);
+
+  const stateDir = await mkdtemp(join(tmpdir(), "router-vitals-codex-legacy-"));
+  const codexHome = await mkdtemp(join(tmpdir(), "codex-home-legacy-"));
+  await writeTargetCodexConfig(codexHome);
+  const ownerSessionKey = hashLocalSessionId("codex-legacy-owner");
+  const startedAtMs = Date.now() - 6 * 60 * 1000;
+
+  try {
+    await writePluginState(stateDir, {
+      pending: {
+        [ownerSessionKey]: {
+          startedAtMs,
+          targetMatched: true,
+          turnId: "turn-legacy",
+          modelClass: "gpt-5.5"
+        }
+      }
+    });
+
+    await triggerCodexSessionStart("codex-legacy-trigger", stateDir, codexHome, server);
+
+    assert.equal(received.length, 0);
+    const state = await readPluginState(stateDir);
+    assert.equal(Boolean(state.pending[ownerSessionKey]), true);
+    assert.equal(state.pending[ownerSessionKey]?.transcriptPath, undefined);
+  } finally {
+    server.close();
+  }
+});
+
+test("codex hook processes at most two stale cross-session pending turns per event", async () => {
+  const received: Array<Record<string, any>> = [];
+  const server = createCodexReportServer(received);
+  await listen(server);
+
+  const stateDir = await mkdtemp(join(tmpdir(), "router-vitals-codex-cross-limit-"));
+  const codexHome = await mkdtemp(join(tmpdir(), "codex-home-cross-limit-"));
+  await writeTargetCodexConfig(codexHome);
+  const baseMs = Date.now() - 10 * 60 * 1000;
+  const pending: Record<string, unknown> = {};
+  const ownerKeys: string[] = [];
+
+  try {
+    for (let index = 0; index < 3; index += 1) {
+      const sessionId = `codex-limit-owner-${index}`;
+      const sessionKey = hashLocalSessionId(sessionId);
+      const turnId = `turn-limit-${index}`;
+      const transcript = join(stateDir, `rollout-limit-${index}.jsonl`);
+      const startedAtMs = baseMs + index * 1000;
+      ownerKeys.push(sessionKey);
+      await writeFile(transcript, [
+        rolloutLine(startedAtMs, "session_meta", { session_id: sessionId, model_provider: providerId }),
+        rolloutLine(startedAtMs + 100, "event_msg", { type: "task_started", turn_id: turnId }),
+        rolloutLine(startedAtMs + 200, "event_msg", { type: "task_complete", turn_id: turnId, duration_ms: 100 })
+      ].join("\n") + "\n", "utf8");
+      pending[sessionKey] = stalePending(transcript, turnId, startedAtMs);
+    }
+    await writePluginState(stateDir, { pending });
+
+    await triggerCodexSessionStart("codex-limit-trigger", stateDir, codexHome, server);
+
+    assert.equal(received.length, 2);
+    const state = await readPluginState(stateDir);
+    assert.equal(Boolean(state.pending[ownerKeys[0]!]), false);
+    assert.equal(Boolean(state.pending[ownerKeys[1]!]), false);
+    assert.equal(Boolean(state.pending[ownerKeys[2]!]), true);
+  } finally {
+    server.close();
+  }
+});
+
+test("codex hook leaves recently finished cross-session pending for the owner Stop hook", async () => {
+  const received: Array<Record<string, any>> = [];
+  const server = createCodexReportServer(received);
+  await listen(server);
+
+  const stateDir = await mkdtemp(join(tmpdir(), "router-vitals-codex-grace-"));
+  const codexHome = await mkdtemp(join(tmpdir(), "codex-home-grace-"));
+  await writeTargetCodexConfig(codexHome);
+  const ownerSessionId = "codex-grace-owner";
+  const ownerSessionKey = hashLocalSessionId(ownerSessionId);
+  const transcript = join(stateDir, "rollout-grace-owner.jsonl");
+  const startedAtMs = Date.now() - 10 * 60 * 1000;
+  const completedAtMs = Date.now() - 10_000;
+
+  try {
+    await writeFile(transcript, [
+      rolloutLine(startedAtMs, "session_meta", { session_id: ownerSessionId, model_provider: providerId }),
+      rolloutLine(startedAtMs + 100, "event_msg", { type: "task_started", turn_id: "turn-grace" }),
+      rolloutLine(completedAtMs, "event_msg", { type: "task_complete", turn_id: "turn-grace", duration_ms: 100 })
+    ].join("\n") + "\n", "utf8");
+    await writePluginState(stateDir, {
+      pending: {
+        [ownerSessionKey]: stalePending(transcript, "turn-grace", startedAtMs)
+      }
+    });
+
+    await triggerCodexSessionStart("codex-grace-trigger", stateDir, codexHome, server);
+
+    assert.equal(received.length, 0);
+    const state = await readPluginState(stateDir);
+    assert.equal(Boolean(state.pending[ownerSessionKey]), true);
+  } finally {
+    server.close();
+  }
+});
+
+test("codex hook consumes expired cross-session pending without reporting it", async () => {
+  const received: Array<Record<string, any>> = [];
+  const server = createCodexReportServer(received);
+  await listen(server);
+
+  const stateDir = await mkdtemp(join(tmpdir(), "router-vitals-codex-expired-"));
+  const codexHome = await mkdtemp(join(tmpdir(), "codex-home-expired-"));
+  await writeTargetCodexConfig(codexHome);
+  const ownerSessionId = "codex-expired-owner";
+  const ownerSessionKey = hashLocalSessionId(ownerSessionId);
+  const transcript = join(stateDir, "rollout-expired-owner.jsonl");
+  const startedAtMs = Date.now() - 20 * 60 * 1000;
+
+  try {
+    await writeFile(transcript, [
+      rolloutLine(startedAtMs, "session_meta", { session_id: ownerSessionId, model_provider: providerId }),
+      rolloutLine(startedAtMs + 100, "event_msg", { type: "task_started", turn_id: "turn-expired" }),
+      rolloutLine(startedAtMs + 200, "event_msg", { type: "task_complete", turn_id: "turn-expired", duration_ms: 100 })
+    ].join("\n") + "\n", "utf8");
+    await writePluginState(stateDir, {
+      pending: {
+        [ownerSessionKey]: stalePending(transcript, "turn-expired", startedAtMs)
+      }
+    });
+
+    await triggerCodexSessionStart("codex-expired-trigger", stateDir, codexHome, server);
+
+    assert.equal(received.length, 0);
+    const state = await readPluginState(stateDir);
+    assert.equal(state.pending[ownerSessionKey], undefined);
+    assert.equal(state.lastDecision?.reason, "pending_expired");
+  } finally {
+    server.close();
+  }
+});
+
+test("codex hook reports long-running turns based on last activity time", async () => {
+  const received: Array<Record<string, any>> = [];
+  const server = createCodexReportServer(received);
+  await listen(server);
+
+  const stateDir = await mkdtemp(join(tmpdir(), "router-vitals-codex-long-turn-"));
+  const codexHome = await mkdtemp(join(tmpdir(), "codex-home-long-turn-"));
+  await writeTargetCodexConfig(codexHome);
+  const env = codexEnv(stateDir, codexHome, server);
+  const sessionId = "codex-long-turn";
+  const sessionKey = hashLocalSessionId(sessionId);
+  const transcript = join(stateDir, "rollout-long-turn.jsonl");
+  const startedAtMs = Date.now() - 40 * 60 * 1000;
+  const completedAtMs = Date.now() - 1000;
+
+  try {
+    await writeFile(transcript, rolloutLine(startedAtMs - 1000, "session_meta", {
+      session_id: sessionId,
+      model_provider: providerId
+    }) + "\n", "utf8");
+    await runCodexHook("UserPromptSubmit", {
+      session_id: sessionId,
+      transcript_path: transcript,
+      cwd: stateDir,
+      model: "gpt-5.5",
+      turn_id: "turn-long",
+      prompt: "long job"
+    }, env);
+    await agePending(stateDir, sessionKey, 40 * 60 * 1000);
+    await appendRollout(transcript, [
+      rolloutLine(startedAtMs, "event_msg", { type: "task_started", turn_id: "turn-long" }),
+      rolloutLine(startedAtMs, "turn_context", { turn_id: "turn-long", model: "gpt-5.5" }),
+      rolloutLine(completedAtMs - 1000, "response_item", { type: "reasoning", id: "rs_long" }),
+      rolloutLine(completedAtMs, "event_msg", { type: "task_complete", turn_id: "turn-long", duration_ms: 40 * 60 * 1000 })
+    ]);
+
+    await runCodexHook("Stop", {
+      session_id: sessionId,
+      transcript_path: transcript,
+      cwd: stateDir,
+      model: "gpt-5.5",
+      turn_id: "turn-long"
+    }, env);
+
+    assert.equal(received.length, 1);
+    assert.equal(received[0]!.ok, true);
+    assert.equal(received[0]!.client, "codex");
+    assert.equal(received[0]!.errorType, "none");
+    const state = await readPluginState(stateDir);
+    assert.equal(state.pending[sessionKey], undefined);
+  } finally {
+    server.close();
+  }
+});
+
 test("codex hook emits low-frequency update reminders via Stop systemMessage", async () => {
   const server = createServer((req, res) => {
     if (req.method === "GET" && req.url === "/config.json") {
@@ -332,6 +626,103 @@ test("codex hook emits low-frequency update reminders via Stop systemMessage", a
     server.close();
   }
 });
+
+function createCodexReportServer(received: Array<Record<string, any>>): Server {
+  const server = createServer((req, res) => {
+    if (req.method === "GET" && req.url === "/config.json") {
+      respondJson(res, {
+        reportingEnabled: true,
+        apiBaseUrl: `http://127.0.0.1:${serverPort(server)}`,
+        targetBaseUrlHosts: [primaryTargetHost, secondaryTargetHost],
+        sampleRateSuccess: 1,
+        sampleRateFailure: 1,
+        minPluginVersion: "0.1.0",
+        statusWindows: ["60m"]
+      });
+      return;
+    }
+    if (req.method === "POST" && req.url === "/v1/report") {
+      const chunks: Buffer[] = [];
+      req.on("data", (chunk) => chunks.push(chunk));
+      req.on("end", () => {
+        received.push(JSON.parse(Buffer.concat(chunks).toString("utf8")));
+        respondJson(res, { ok: true });
+      });
+      return;
+    }
+    res.writeHead(404);
+    res.end();
+  });
+  return server;
+}
+
+async function writeTargetCodexConfig(codexHome: string): Promise<void> {
+  await writeFile(join(codexHome, "config.toml"), [
+    'model = "gpt-5.5"',
+    `model_provider = "${providerId}"`,
+    `[model_providers.${providerId}]`,
+    `base_url = "${targetBaseUrl}"`
+  ].join("\n") + "\n", "utf8");
+}
+
+function codexEnv(stateDir: string, codexHome: string, server: Server): NodeJS.ProcessEnv {
+  return {
+    ...process.env,
+    ROUTER_VITALS_STATE_DIR: stateDir,
+    ROUTER_VITALS_CONFIG_URL: `http://127.0.0.1:${serverPort(server)}/config.json`,
+    CODEX_HOME: codexHome
+  };
+}
+
+async function triggerCodexSessionStart(
+  sessionId: string,
+  stateDir: string,
+  codexHome: string,
+  server: Server
+): Promise<void> {
+  const transcript = join(stateDir, `rollout-${sessionId}.jsonl`);
+  await writeFile(transcript, rolloutLine(Date.now(), "session_meta", {
+    session_id: sessionId,
+    model_provider: providerId
+  }) + "\n", "utf8");
+  await runCodexHook("SessionStart", {
+    session_id: sessionId,
+    transcript_path: transcript,
+    cwd: stateDir,
+    model: "gpt-5.5"
+  }, codexEnv(stateDir, codexHome, server));
+}
+
+function stalePending(transcriptPath: string, turnId: string, startedAtMs: number): Record<string, unknown> {
+  return {
+    startedAtMs,
+    targetMatched: true,
+    turnId,
+    transcriptPath,
+    transcriptStartOffset: 0,
+    modelClass: "gpt-5.5"
+  };
+}
+
+async function agePending(stateDir: string, sessionKey: string, ageMs: number): Promise<void> {
+  const state = await readPluginState(stateDir);
+  assert.ok(state.pending[sessionKey]);
+  state.pending[sessionKey].startedAtMs = Date.now() - ageMs;
+  await writePluginState(stateDir, state);
+}
+
+async function readPluginState(stateDir: string): Promise<Record<string, any>> {
+  return JSON.parse(await readFile(pluginStatePath(stateDir), "utf8"));
+}
+
+async function writePluginState(stateDir: string, state: Record<string, unknown>): Promise<void> {
+  await mkdir(join(stateDir, PLUGIN_ID), { recursive: true });
+  await writeFile(pluginStatePath(stateDir), `${JSON.stringify(state, null, 2)}\n`, "utf8");
+}
+
+function pluginStatePath(stateDir: string): string {
+  return join(stateDir, PLUGIN_ID, "state.json");
+}
 
 function rolloutLine(timestampMs: number, type: string, payload: Record<string, unknown>): string {
   return JSON.stringify({ timestamp: new Date(timestampMs).toISOString(), type, payload });

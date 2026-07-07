@@ -198,6 +198,8 @@ function normalizeTurnState(value) {
     if (typeof value.transcriptStartOffset === "number" && Number.isFinite(value.transcriptStartOffset)) {
         result.transcriptStartOffset = value.transcriptStartOffset;
     }
+    if (typeof value.transcriptPath === "string" && value.transcriptPath !== "")
+        result.transcriptPath = value.transcriptPath;
     if (typeof value.transcriptKey === "string" && /^[a-f0-9]{24}$/.test(value.transcriptKey)) {
         result.transcriptKey = value.transcriptKey;
     }
