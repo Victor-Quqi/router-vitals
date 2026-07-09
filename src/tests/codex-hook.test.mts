@@ -7,7 +7,9 @@ import { createServer, type Server, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { TARGET_HOSTS, classifyModel, hashLocalSessionId } from "../plugin/scripts/lib/policy.mjs";
+import { readCodexTurnLogErrors } from "../plugin/scripts/lib/codex-log-errors.mjs";
 import { parseCodexConfigSnapshot, resolveCodexTarget } from "../plugin/scripts/lib/codex-target.mjs";
 import { CodexTurnTailer, inspectCodexTurn, readCodexSessionMeta } from "../plugin/scripts/lib/codex-transcript.mjs";
 import { MARKETPLACE_NAME, PLUGIN_FULL_ID, PLUGIN_ID } from "../shared/site-config.mjs";
@@ -174,6 +176,28 @@ test("codex turn tailer reads only appended terminal records", async () => {
   ]);
   assert.equal(await tailer.poll(path, "t-tail"), "completed");
   assert.equal(tailer.currentOffset, Buffer.byteLength(await readFile(path, "utf8"), "utf8"));
+});
+
+test("codex log error lookup is scoped by session and turn time", async () => {
+  const codexHome = await mkdtemp(join(tmpdir(), "codex-home-log-errors-"));
+  const baseMs = Date.now();
+  const database = createCodexLogDatabase(codexHome);
+  try {
+    insertCodexLog(database, "session-target", baseMs + 100, "Turn error: unexpected status 404 Not Found: model unavailable");
+    insertCodexLog(database, "session-other", baseMs + 100, "Turn error: unexpected status 429 Too Many Requests");
+    insertCodexLog(database, "session-target", baseMs - 1_000, "Turn error: unexpected status 503 Service Unavailable");
+    insertCodexLog(database, "session-target", baseMs + 2_000, "Turn error: unexpected status 401 Unauthorized");
+    insertCodexLog(database, "session-target", baseMs + 200, "turn completed");
+  } finally {
+    database.close();
+  }
+
+  const messages = readCodexTurnLogErrors({
+    sessionId: "session-target",
+    startedAtMs: baseMs,
+    endedAtMs: baseMs + 1_000
+  }, { CODEX_HOME: codexHome });
+  assert.deepEqual(messages, ["unexpected status 404 Not Found: model unavailable"]);
 });
 
 test("codex hook reports settled turns only for matched providers", async () => {
@@ -369,6 +393,67 @@ test("codex watcher reports a failed turn without a later hook", async () => {
       model: "gpt-5.5"
     }, env);
     assert.equal(received.length, 1);
+  } finally {
+    server.close();
+  }
+});
+
+test("codex watcher recovers missing rollout error details from local logs", async () => {
+  const received: Array<Record<string, any>> = [];
+  const server = createCodexReportServer(received);
+  await listen(server);
+
+  const stateDir = await mkdtemp(join(tmpdir(), "router-vitals-codex-log-fallback-"));
+  const codexHome = await mkdtemp(join(tmpdir(), "codex-home-log-fallback-"));
+  await writeTargetCodexConfig(codexHome);
+  const sessionId = "codex-log-fallback";
+  const sessionKey = hashLocalSessionId(sessionId);
+  const transcript = join(stateDir, "rollout-log-fallback.jsonl");
+  const baseMs = Date.now();
+  const env = {
+    ...codexEnv(stateDir, codexHome, server),
+    ROUTER_VITALS_TEST_DISABLE_CODEX_WATCHER: "0"
+  };
+
+  try {
+    await writeFile(transcript, [
+      rolloutLine(baseMs, "session_meta", { session_id: sessionId, model_provider: providerId }),
+      rolloutLine(baseMs + 1, "event_msg", { type: "task_started", turn_id: "turn-log-fallback" }),
+      rolloutLine(baseMs + 2, "turn_context", { turn_id: "turn-log-fallback", model: "gpt-5.5" })
+    ].join("\n") + "\n", "utf8");
+
+    await runCodexHook("UserPromptSubmit", {
+      session_id: sessionId,
+      transcript_path: transcript,
+      cwd: stateDir,
+      model: "gpt-5.5",
+      turn_id: "turn-log-fallback",
+      prompt: "retry"
+    }, env);
+
+    const database = createCodexLogDatabase(codexHome);
+    try {
+      insertCodexLog(
+        database,
+        sessionId,
+        baseMs + 100,
+        `span: Turn error: unexpected status 404 Not Found: {"error":"当前 API 不支持所选模型 gpt-5.6-sol"}, url: ${targetResponsesUrl}`
+      );
+    } finally {
+      database.close();
+    }
+    await appendRollout(transcript, [
+      rolloutLine(baseMs + 101, "event_msg", { type: "task_complete", turn_id: "turn-log-fallback", duration_ms: 100 })
+    ]);
+
+    await waitFor(async () => received.length === 1);
+    await waitFor(async () => (await readPluginState(stateDir)).pending[sessionKey] === undefined);
+    assert.equal(received[0]!.ok, false);
+    assert.equal(received[0]!.errorType, "unknown");
+    assert.equal(received[0]!.errorStatusCode, 404);
+    assert.equal(typeof received[0]!.errorHint, "string");
+    assert.match(received[0]!.errorHint, /当前 API 不支持所选模型 gpt-5\.6-sol/);
+    assert.equal(received[0]!.errorHint.includes(primaryTargetHost), false);
   } finally {
     server.close();
   }
@@ -824,6 +909,40 @@ function createCodexReportServer(received: Array<Record<string, any>>): Server {
     res.end();
   });
   return server;
+}
+
+function createCodexLogDatabase(codexHome: string): DatabaseSync {
+  const database = new DatabaseSync(join(codexHome, "logs_2.sqlite"));
+  database.exec(`
+    CREATE TABLE logs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      ts INTEGER NOT NULL,
+      ts_nanos INTEGER NOT NULL,
+      level TEXT NOT NULL,
+      target TEXT NOT NULL,
+      feedback_log_body TEXT,
+      module_path TEXT,
+      file TEXT,
+      line INTEGER,
+      thread_id TEXT,
+      process_uuid TEXT,
+      estimated_bytes INTEGER NOT NULL DEFAULT 0
+    );
+    CREATE INDEX idx_logs_thread_id_ts ON logs(thread_id, ts DESC, ts_nanos DESC, id DESC);
+  `);
+  return database;
+}
+
+function insertCodexLog(database: DatabaseSync, sessionId: string, timestampMs: number, body: string): void {
+  database.prepare(`
+    INSERT INTO logs (ts, ts_nanos, level, target, feedback_log_body, thread_id)
+    VALUES (?, ?, 'INFO', 'codex_core::session::turn', ?, ?)
+  `).run(
+    Math.floor(timestampMs / 1000),
+    Math.floor(timestampMs % 1000) * 1_000_000,
+    body,
+    sessionId
+  );
 }
 
 async function writeTargetCodexConfig(codexHome: string): Promise<void> {

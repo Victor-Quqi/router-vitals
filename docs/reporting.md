@@ -29,7 +29,7 @@ Any Router 入口：
 
 不会提交：真实 URL、prompt、response、token、cookie、key、账号、`session_id`、文件路径、完整日志、精确时间戳。
 
-为避免 Claude Code 会话内切换模型后串到旧模型，插件会在本机读取 hook 输入里的 transcript 文件，只提取模型归类和响应开始所需的元数据：本轮 assistant 记录中的模型字段、prompt 前 `/model` 本地命令成功输出里的模型名、首条 assistant 记录时间；后台任务完成通知缺少这些证据时，会在同一 Claude 项目目录的近期 transcript 中只查找 `/model` 成功输出，用来归到通知触发时的当前模型。不会提交 transcript 路径或内容。Codex 侧同样只从本会话记录提取元数据（成败、报错摘要、模型名、响应耗时）。状态页的首次响应 P50 只统计最终成功的轮次。这个区间不是底层 API TTFT；Claude Code 侧包含自动重试等用户实际等待，Codex 侧用客户端自测的首 token 耗时，两者口径不同。
+为避免 Claude Code 会话内切换模型后串到旧模型，插件会在本机读取 hook 输入里的 transcript 文件，只提取模型归类和响应开始所需的元数据：本轮 assistant 记录中的模型字段、prompt 前 `/model` 本地命令成功输出里的模型名、首条 assistant 记录时间；后台任务完成通知缺少这些证据时，会在同一 Claude 项目目录的近期 transcript 中只查找 `/model` 成功输出，用来归到通知触发时的当前模型。不会提交 transcript 路径或内容。Codex 侧从本会话记录提取成败、模型和响应耗时；本会话记录缺少错误详情时，只读取本机 Codex 诊断日志里与该会话和轮次时间匹配的最终错误。状态页的首次响应 P50 只统计最终成功的轮次。这个区间不是底层 API TTFT；Claude Code 侧包含自动重试等用户实际等待，Codex 侧用客户端自测的首 token 耗时，两者口径不同。
 
 Codex 还要求非托管 hooks 审查信任后才运行：装完插件启动 Codex 会话时，按 hook 变化提示批准本插件 hooks；也可在会话里执行 `/hooks` 手动管理信任。轮次判定与结算的实现细节见 [codex-monitoring.md](codex-monitoring.md)。
 

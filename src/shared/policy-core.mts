@@ -1,6 +1,6 @@
 import { SITE_CONFIG, SITE_ENDPOINTS } from "./site-config.mjs";
 
-export const PLUGIN_VERSION = "0.3.4";
+export const PLUGIN_VERSION = "0.3.5";
 
 export const TARGET_HOSTS = Object.freeze(SITE_ENDPOINTS.map((endpoint) => endpoint.host));
 

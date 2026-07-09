@@ -16,6 +16,8 @@
 
 ## 安装
 
+要求 Node.js 24 或更高版本。
+
 ### Claude Code
 
 在 Claude Code 里运行：

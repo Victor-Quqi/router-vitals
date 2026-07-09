@@ -7,6 +7,7 @@ import { PLUGIN_VERSION, bucketAssistantStart, classifyError, classifyModel, cre
 import { getDailyAnonymousId, hasReachedDailyReportLimit, incrementContribution, loadState, recordPluginUpdateReminder, shouldRemindPluginUpdate, withLockedState } from "./state.mjs";
 import { getTranscriptPath, getTranscriptSize } from "./hook-transcript.mjs";
 import { CodexTurnTailer, inspectCodexTurn, readCodexSessionMeta } from "./codex-transcript.mjs";
+import { readCodexTurnLogErrors } from "./codex-log-errors.mjs";
 import { readCodexConfigSnapshot, resolveCodexTarget } from "./codex-target.mjs";
 import { postReport, recordLastDecision, summarizePostResult } from "./report.mjs";
 import { MARKETPLACE_NAME, PLUGIN_FULL_ID, SITE_NAME } from "./site-config.mjs";
@@ -210,12 +211,18 @@ async function settlePreparedPendingTurn({ eventName, state, ownerSessionKey, pe
         };
     }
     const anonymousId = await getDailyAnonymousId(state);
-    const errorEvidence = turn.errorMessages.length > 0 ? { message: turn.errorMessages.join(" ") } : null;
+    const errorEvidence = ok
+        ? { messages: [], source: "none" }
+        : await resolveCodexErrorEvidence(turn, pending);
+    debug.errorEvidenceSource = errorEvidence.source;
+    const classifiedError = errorEvidence.messages.length > 0 ? { message: errorEvidence.messages.join(" ") } : null;
     const payload = {
         ok,
-        errorType: ok ? "none" : errorEvidence ? classifyError(errorEvidence) : "unknown",
-        errorStatusCode: ok || !errorEvidence ? null : extractErrorStatusCode(errorEvidence),
-        errorHint: ok || turn.errorMessages.length === 0 ? null : createErrorHint({ error: { message: turn.errorMessages[0] } }),
+        errorType: ok ? "none" : classifiedError ? classifyError(classifiedError) : "unknown",
+        errorStatusCode: ok || !classifiedError ? null : extractErrorStatusCode(classifiedError),
+        errorHint: ok || errorEvidence.messages.length === 0
+            ? null
+            : createErrorHint({ error: { message: errorEvidence.messages[0] } }),
         client: "codex",
         modelClass,
         assistantStartBucket: bucketAssistantStart(ok ? resolveAssistantStartDelayMs(turn, pending) : null),
@@ -249,6 +256,19 @@ async function settlePreparedPendingTurn({ eventName, state, ownerSessionKey, pe
         });
     }
     return debug;
+}
+async function resolveCodexErrorEvidence(turn, pending, nowMs = Date.now()) {
+    if (turn.errorMessages.length > 0) {
+        return { messages: turn.errorMessages, source: "rollout" };
+    }
+    const transcriptPath = pending.transcriptPath ?? null;
+    const meta = await readCodexSessionMeta(transcriptPath);
+    const messages = readCodexTurnLogErrors({
+        sessionId: meta?.sessionId ?? null,
+        startedAtMs: turn.taskStartedAtMs ?? pending.startedAtMs,
+        endedAtMs: turn.completed || turn.aborted ? turn.lastActivityAtMs ?? nowMs : nowMs
+    });
+    return messages.length > 0 ? { messages, source: "logs" } : { messages: [], source: "none" };
 }
 export async function runCodexWatcher(sessionKey, settlementId) {
     const initialState = await loadState();

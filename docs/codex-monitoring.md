@@ -41,7 +41,19 @@ rollout（`$CODEX_HOME/sessions/**/rollout-*.jsonl`）每行 `{timestamp, type, 
 - `event_msg:task_started` / `task_complete`：轮次边界；`task_complete` 带 `duration_ms` 和 `time_to_first_token_ms`（客户端自测 TTFT，响应开始区间优先用它）。
 - `event_msg:turn_aborted`（`reason: "interrupted"`）：用户中断，跳过不上报。
 - `event_msg:error`：`message` 内含上游报错原文（HTTP 状态码、request id、URL），走既有 `classifyError` / `extractErrorStatusCode` / `sanitizeErrorHint` 管线。
-- 成败判据是**轮内有无模型输出证据**（`agent_message` 事件，或 `reasoning` / `function_call` / `custom_tool_call` / `web_search_call` / assistant `message` 类 response_item），不依赖 error 事件——实测 0.142.5 下 exec 与 TUI 的错误轮（401、网络拒绝、上游 high demand）rollout 均只写一条无输出的 `task_complete`，不写 error 事件（0.117 / 0.128 时代会写）。error 事件缺失时错误分类退化为 `unknown`，未来版本若恢复该事件则分类自动变富。
+- 成败判据是**轮内有无模型输出证据**（`agent_message` 事件，或 `reasoning` / `function_call` / `custom_tool_call` / `web_search_call` / assistant `message` 类 response_item），不依赖 error 事件——实测 0.142.5 下 exec 与 TUI 的错误轮（401、网络拒绝、上游 high demand）rollout 均只写一条无输出的 `task_complete`，不写 error 事件（0.117 / 0.128 时代会写）。
+
+## 本地错误日志证据
+
+rollout 没有 `event_msg:error` 时，`codex-log-errors.mts` 使用 Node 24 内置 SQLite 只读查询 `$CODEX_HOME/logs_2.sqlite`：
+
+- `thread_id` 必须等于原 rollout `session_meta.session_id`。
+- `ts` 限定在本轮开始至结束所在的秒级时间桶，最长查询窗口 24 小时。
+- `target` 固定为 `codex_core::session::turn`，正文必须含 `Turn error:`；按时间倒序最多读取 5 条，每条只截取 marker 后 4096 字符。
+- 数据库以只读模式打开，busy timeout 为 100ms。表、索引、字段或记录格式不匹配时返回无证据。
+- 原始日志不写入插件 state，不直接进入 payload。状态码、分类和摘要统一经过既有提取与脱敏管线。
+
+`logs_2.sqlite` 与 rollout 都属于 Codex 内部格式。当前逻辑以 rollout error 为第一证据源，本地错误日志只补充缺失详情；两处都没有错误时分类退化为 `unknown`。
 
 ## 目标判定
 
@@ -50,7 +62,7 @@ rollout（`$CODEX_HOME/sessions/**/rollout-*.jsonl`）每行 `{timestamp, type, 
 ## 已知限制
 
 - 失败轮通常在 rollout 写入结束标记后的一个 watcher 轮询周期内上报。watcher 未启动或提前退出时，本机之后任意 Codex hook 事件会恢复结算；结束超过 15 分钟的遗留 pending 会清除不上报。如果原 rollout 被删除或归档导致证据不可读，该 pending 无法结算，7 天后由本地 state GC 丢弃。
-- 已在真实 AnyRouter 上游实测：成功轮 Stop 结算与上报 payload 构造正确；故障轮（high demand）无 error 事件，失败判定走"无输出证据"，错误分类退化为 `unknown`。TUI 错误轮已实测（0.142.5）：同样无 error 事件、无 Stop。watcher 路径已用带 429 error 证据的合成 rollout 做集成验证；真实上游不写 error 时仍只能归为 `unknown`。
+- 已在真实 AnyRouter 上游实测：成功轮 Stop 结算与上报 payload 构造正确；TUI 错误轮无 rollout error、无 Stop，但 `logs_2.sqlite` 的同会话 `Turn error:` 记录包含完整 404、错误正文和 URL。watcher 路径分别覆盖 rollout 429 和本地日志 404 集成测试；两种证据都缺失时归为 `unknown`。
 - Codex 的插件市场自动刷新存在运行中缓存路径失效问题，跟踪见 [openai/codex#31383](https://github.com/openai/codex/issues/31383)。ready 握手保护已经载入的 watcher；自动刷新导致当前进程不再触发 hooks 时，未开始的新轮次无法记录，也不会上报。
 - Codex 侧更新提醒走 `Stop` hook 的 `systemMessage`（与 Claude 侧同频率）。更新是固定两步（已用 git 市场实测）：`codex plugin marketplace upgrade router-vitals` 刷新市场快照，`codex plugin add anyrouter-status-monitor@router-vitals` 从快照装进插件实际运行的版本化缓存——只 `add` 会装回旧快照版本，只 `upgrade` 不动缓存（此时 `codex plugin list` 显示的是快照版本，有误导性）。提醒文案不用 `&&`（PowerShell 5.1 不支持）。statusLine 无对应扩展点。
 - Codex 信任模型按 hook 定义 hash 记录，插件每次更新 hooks 定义后，新会话会提示 hook 有变化，用户可批准当前插件或全部信任；`/hooks` 作为手动管理入口。

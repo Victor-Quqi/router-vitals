@@ -16,6 +16,8 @@ Thanks to the [LINUX DO](https://linux.do/) community for the support.
 
 ## Install
 
+Requires Node.js 24 or later.
+
 ### Claude Code
 
 Run inside Claude Code:

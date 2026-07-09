@@ -38,6 +38,7 @@ import {
   readCodexSessionMeta,
   type CodexTurnInspection
 } from "./codex-transcript.mjs";
+import { readCodexTurnLogErrors } from "./codex-log-errors.mjs";
 import { readCodexConfigSnapshot, resolveCodexTarget, type CodexTargetMatch } from "./codex-target.mjs";
 import { postReport, recordLastDecision, summarizePostResult } from "./report.mjs";
 import { MARKETPLACE_NAME, PLUGIN_FULL_ID, SITE_NAME } from "./site-config.mjs";
@@ -57,6 +58,7 @@ const WATCHER_MAX_LIFETIME_MS = 24 * 60 * 60_000;
 const WATCHER_READY_TIMEOUT_MS = 2_000;
 
 type CodexSettlementSource = CodexHookEventName | "CodexWatcher";
+type CodexErrorEvidenceSource = "rollout" | "logs" | "none";
 
 interface CodexWatcherLaunch {
   sessionKey: string;
@@ -88,6 +90,7 @@ interface CodexSettlementDebug {
   payload?: Record<string, unknown>;
   posted?: boolean;
   postResult?: Record<string, unknown>;
+  errorEvidenceSource?: CodexErrorEvidenceSource;
 }
 
 export async function runCodexHook(eventName: string, input: HookInput): Promise<void> {
@@ -312,12 +315,18 @@ async function settlePreparedPendingTurn({
   }
 
   const anonymousId = await getDailyAnonymousId(state);
-  const errorEvidence = turn.errorMessages.length > 0 ? { message: turn.errorMessages.join(" ") } : null;
+  const errorEvidence = ok
+    ? { messages: [] as string[], source: "none" as const }
+    : await resolveCodexErrorEvidence(turn, pending);
+  debug.errorEvidenceSource = errorEvidence.source;
+  const classifiedError = errorEvidence.messages.length > 0 ? { message: errorEvidence.messages.join(" ") } : null;
   const payload: ReportPayload = {
     ok,
-    errorType: ok ? "none" : errorEvidence ? classifyError(errorEvidence) : "unknown",
-    errorStatusCode: ok || !errorEvidence ? null : extractErrorStatusCode(errorEvidence),
-    errorHint: ok || turn.errorMessages.length === 0 ? null : createErrorHint({ error: { message: turn.errorMessages[0] } }),
+    errorType: ok ? "none" : classifiedError ? classifyError(classifiedError) : "unknown",
+    errorStatusCode: ok || !classifiedError ? null : extractErrorStatusCode(classifiedError),
+    errorHint: ok || errorEvidence.messages.length === 0
+      ? null
+      : createErrorHint({ error: { message: errorEvidence.messages[0] } }),
     client: "codex",
     modelClass,
     assistantStartBucket: bucketAssistantStart(ok ? resolveAssistantStartDelayMs(turn, pending) : null),
@@ -351,6 +360,25 @@ async function settlePreparedPendingTurn({
     });
   }
   return debug;
+}
+
+async function resolveCodexErrorEvidence(
+  turn: CodexTurnInspection,
+  pending: PendingTurn,
+  nowMs = Date.now()
+): Promise<{ messages: string[]; source: CodexErrorEvidenceSource }> {
+  if (turn.errorMessages.length > 0) {
+    return { messages: turn.errorMessages, source: "rollout" };
+  }
+
+  const transcriptPath = pending.transcriptPath ?? null;
+  const meta = await readCodexSessionMeta(transcriptPath);
+  const messages = readCodexTurnLogErrors({
+    sessionId: meta?.sessionId ?? null,
+    startedAtMs: turn.taskStartedAtMs ?? pending.startedAtMs,
+    endedAtMs: turn.completed || turn.aborted ? turn.lastActivityAtMs ?? nowMs : nowMs
+  });
+  return messages.length > 0 ? { messages, source: "logs" } : { messages: [], source: "none" };
 }
 
 export async function runCodexWatcher(sessionKey: string, settlementId: string): Promise<void> {
