@@ -3,7 +3,7 @@ import {
   classifyModel,
   type ModelClass
 } from "./policy.mjs";
-import type { TurnState } from "./state.mjs";
+import type { SessionState } from "./state.mjs";
 import {
   inspectRecentProjectModelSwitch,
   inspectPromptStartTranscript,
@@ -32,10 +32,14 @@ export interface PromptModelResolution {
   projectModelSwitch: ProjectModelSwitchInspection;
 }
 
+interface ModelClassState {
+  modelClass?: ModelClass;
+}
+
 export function resolveModelClass(
   input: HookInput,
   transcript: TranscriptInspection,
-  ...fallbacks: Array<TurnState | undefined>
+  ...fallbacks: Array<ModelClassState | undefined>
 ): ModelResolution {
   const direct = classifyModel(input, { includeEnv: false });
   const fallbackModelClasses = fallbacks
@@ -84,7 +88,7 @@ export function resolveModelClass(
 
 export async function resolvePromptStartModelClass(
   input: HookInput,
-  session: TurnState | undefined,
+  session: SessionState | undefined,
   transcriptStartOffset: number | null
 ): Promise<PromptModelResolution> {
   const direct = classifyModel(input, { includeEnv: false });

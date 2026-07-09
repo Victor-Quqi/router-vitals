@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { getStatePath, loadState } from "../plugin/scripts/lib/state.mjs";
+import { getStateLockPath, getStatePath, loadState, withLockedState } from "../plugin/scripts/lib/state.mjs";
 import { TARGET_HOSTS, getTodayKey } from "../shared/policy.mjs";
 import { PLUGIN_ID } from "../shared/site-config.mjs";
 
@@ -49,7 +49,7 @@ test("loadState reads Claude plugin data state", async () => {
 
   await mkdir(dirname(pluginStatePath), { recursive: true });
   await writeFile(pluginStatePath, JSON.stringify({
-    version: 1,
+    version: 2,
     contributions: { "2099-01-01": 3 }
   }), "utf8");
 
@@ -69,6 +69,28 @@ test("loadState reads Claude plugin data state", async () => {
   }
 });
 
+test("loadState discards an older state schema", async () => {
+  const stateDir = await mkdtemp(join(tmpdir(), "router-vitals-state-v1-"));
+  const statePath = join(stateDir, PLUGIN_ID, "state.json");
+  await mkdir(dirname(statePath), { recursive: true });
+  await writeFile(statePath, JSON.stringify({
+    version: 1,
+    contributions: { "2099-01-01": 3 },
+    pending: { old: { startedAtMs: Date.now(), targetMatched: true } }
+  }), "utf8");
+
+  try {
+    await withEnv({ ROUTER_VITALS_STATE_DIR: stateDir }, async () => {
+      const state = await loadState();
+      assert.equal(state.version, 2);
+      assert.deepEqual(state.contributions, {});
+      assert.deepEqual(state.pending, {});
+    });
+  } finally {
+    await rm(stateDir, { recursive: true, force: true });
+  }
+});
+
 test("loadState prunes stale local counters and turn state", async () => {
   const stateDir = await mkdtemp(join(tmpdir(), "router-vitals-state-"));
   const statePath = join(stateDir, PLUGIN_ID, "state.json");
@@ -78,18 +100,30 @@ test("loadState prunes stale local counters and turn state", async () => {
 
   await mkdir(dirname(statePath), { recursive: true });
   await writeFile(statePath, JSON.stringify({
-    version: 1,
+    version: 2,
     contributions: {
       "2000-01-01": 1,
       [today]: 2
     },
     pending: {
-      fresh: { startedAtMs: freshMs, targetMatched: true, modelClass: "sonnet" },
-      stale: { startedAtMs: staleMs, targetMatched: true, modelClass: "opus" }
+      fresh: {
+        client: "claude-code",
+        settlementId: "11111111-1111-4111-8111-111111111111",
+        startedAtMs: freshMs,
+        targetMatched: true,
+        modelClass: "sonnet"
+      },
+      stale: {
+        client: "codex",
+        settlementId: "22222222-2222-4222-8222-222222222222",
+        startedAtMs: staleMs,
+        targetMatched: true,
+        modelClass: "opus"
+      }
     },
     sessions: {
-      fresh: { updatedAtMs: freshMs, modelClass: "sonnet" },
-      stale: { updatedAtMs: staleMs, modelClass: "opus" }
+      fresh: { updatedAtMs: freshMs, promptCount: 1, modelClass: "sonnet" },
+      stale: { updatedAtMs: staleMs, promptCount: 2, modelClass: "opus" }
     },
     updateReminder: {
       latestPluginVersion: "9.9.9",
@@ -146,6 +180,28 @@ test("loadState prunes stale local counters and turn state", async () => {
         postStatusCode: 503
       });
       assert.equal(state.lastPayload, null);
+    });
+  } finally {
+    await rm(stateDir, { recursive: true, force: true });
+  }
+});
+
+test("withLockedState serializes concurrent state updates", async () => {
+  const stateDir = await mkdtemp(join(tmpdir(), "router-vitals-state-lock-"));
+  const today = getTodayKey();
+
+  try {
+    await withEnv({ ROUTER_VITALS_STATE_DIR: stateDir }, async () => {
+      await Promise.all(Array.from({ length: 12 }, () => withLockedState(async (state) => {
+        const count = state.contributions[today] ?? 0;
+        await new Promise((resolve) => setTimeout(resolve, 5));
+        state.contributions[today] = count + 1;
+      })));
+
+      const state = await loadState();
+      assert.equal(state.contributions[today], 12);
+      await writeFile(getStateLockPath(), "free", { flag: "wx" });
+      await rm(getStateLockPath(), { force: true });
     });
   } finally {
     await rm(stateDir, { recursive: true, force: true });

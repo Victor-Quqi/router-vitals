@@ -1,84 +1,109 @@
+import { fork } from "node:child_process";
+import { randomUUID } from "node:crypto";
+import { fileURLToPath } from "node:url";
 import { loadRemoteConfig } from "./config.mjs";
 import { appendHookDebugRecord } from "./debug.mjs";
 import { PLUGIN_VERSION, bucketAssistantStart, classifyError, classifyModel, createErrorHint, createTimeBucket, extractErrorStatusCode, hashLocalSessionId, normalizeTargetHost, pickSampleRate, shouldSample, validateReportPayload } from "./policy.mjs";
-import { getDailyAnonymousId, hasReachedDailyReportLimit, incrementContribution, loadState, recordPluginUpdateReminder, saveState, shouldRemindPluginUpdate } from "./state.mjs";
+import { getDailyAnonymousId, hasReachedDailyReportLimit, incrementContribution, loadState, recordPluginUpdateReminder, shouldRemindPluginUpdate, withLockedState } from "./state.mjs";
 import { getTranscriptPath, getTranscriptSize } from "./hook-transcript.mjs";
-import { inspectCodexTurn, readCodexSessionMeta } from "./codex-transcript.mjs";
+import { CodexTurnTailer, inspectCodexTurn, readCodexSessionMeta } from "./codex-transcript.mjs";
 import { readCodexConfigSnapshot, resolveCodexTarget } from "./codex-target.mjs";
 import { postReport, recordLastDecision, summarizePostResult } from "./report.mjs";
 import { MARKETPLACE_NAME, PLUGIN_FULL_ID, SITE_NAME } from "./site-config.mjs";
 const CROSS_SESSION_SETTLE_MAX_PER_EVENT = 2;
-const SETTLE_OWNER_GRACE_MS = 60_000;
 const SETTLE_REPORT_MAX_LAG_MS = 15 * 60_000;
+const WATCHER_FAST_WINDOW_MS = 10_000;
+const WATCHER_MEDIUM_WINDOW_MS = 5 * 60_000;
+const WATCHER_FAST_POLL_MS = 200;
+const WATCHER_MEDIUM_POLL_MS = 1_000;
+const WATCHER_SLOW_POLL_MS = 5_000;
+const WATCHER_STATE_CHECK_MS = 1_000;
+const WATCHER_MAX_IDLE_MS = 30 * 60_000;
+const WATCHER_MAX_LIFETIME_MS = 24 * 60 * 60_000;
+const WATCHER_READY_TIMEOUT_MS = 2_000;
 export async function runCodexHook(eventName, input) {
     if (eventName !== "SessionStart" && eventName !== "UserPromptSubmit" && eventName !== "Stop")
         return;
-    const state = await loadState();
     const sessionKey = hashLocalSessionId(input.session_id);
-    await writeCodexDebug(eventName, sessionKey, "received", {
-        turnId: typeof input.turn_id === "string" ? input.turn_id : null,
-        model: typeof input.model === "string" ? input.model : null
+    const result = await withLockedState(async (state) => {
+        let watcher = null;
+        let systemMessage = null;
+        await writeCodexDebug(eventName, sessionKey, "received", {
+            turnId: typeof input.turn_id === "string" ? input.turn_id : null,
+            model: typeof input.model === "string" ? input.model : null
+        });
+        // A watcher handles normal failed-turn settlement. Hooks also consume any
+        // remaining pending turn so crashes and terminated watcher processes heal
+        // on the next Codex lifecycle event.
+        const settlement = await settlePendingTurn(eventName, input, state, sessionKey);
+        if (settlement) {
+            await writeCodexDebug(eventName, sessionKey, "settlement", settlement);
+        }
+        await settleStaleCrossSessionPendings(eventName, state, sessionKey);
+        if (eventName === "SessionStart") {
+            const modelClass = classifyModel({ model: input.model }, { includeEnv: false });
+            state.sessions[sessionKey] = {
+                ...(modelClass !== "unknown" ? { modelClass } : {}),
+                promptCount: 0,
+                updatedAtMs: Date.now()
+            };
+        }
+        if (eventName === "UserPromptSubmit") {
+            const target = await resolveCurrentTarget(input);
+            const transcriptPath = getTranscriptPath(input);
+            const transcriptStartOffset = await getTranscriptSize(input);
+            const modelClass = classifyModel({ model: input.model }, { includeEnv: false });
+            const session = state.sessions[sessionKey];
+            const settlementId = randomUUID();
+            state.sessions[sessionKey] = {
+                ...(modelClass !== "unknown" ? { modelClass } : session?.modelClass ? { modelClass: session.modelClass } : {}),
+                promptCount: (session?.promptCount ?? 0) + 1,
+                updatedAtMs: Date.now()
+            };
+            state.pending[sessionKey] = {
+                client: "codex",
+                settlementId,
+                startedAtMs: Date.now(),
+                targetMatched: target.matched === true,
+                ...(typeof input.turn_id === "string" && input.turn_id !== "" ? { turnId: input.turn_id } : {}),
+                ...(transcriptPath ? { transcriptPath } : {}),
+                ...(transcriptStartOffset !== null ? { transcriptStartOffset } : {}),
+                ...(modelClass !== "unknown" ? { modelClass } : {})
+            };
+            if (target.matched && transcriptPath)
+                watcher = { sessionKey, settlementId };
+            await writeCodexDebug(eventName, sessionKey, "prompt_start", {
+                targetMatched: target.matched,
+                providerId: target.providerId,
+                transcriptStartOffset,
+                modelClass,
+                watcherScheduled: watcher !== null
+            });
+        }
+        if (eventName === "Stop") {
+            const config = await loadRemoteConfig();
+            if (shouldRemindPluginUpdate(state, config.latestPluginVersion)) {
+                recordPluginUpdateReminder(state, config.latestPluginVersion);
+                systemMessage = `${SITE_NAME} Status Monitor 插件有新版 ${config.latestPluginVersion}。在终端依次运行 codex plugin marketplace upgrade ${MARKETPLACE_NAME} 和 codex plugin add ${PLUGIN_FULL_ID}。更新后新会话按 hook 变化提示信任。`;
+            }
+        }
+        return { watcher, systemMessage };
     });
-    // Failed Codex turns end without a Stop hook, so every event first settles
-    // whatever turn is still pending for this session before recording its own.
-    const settlement = await settlePendingTurn(eventName, input, state, sessionKey);
-    if (settlement)
-        await writeCodexDebug(eventName, sessionKey, "settlement", settlement);
-    await settleStaleCrossSessionPendings(eventName, state, sessionKey);
-    if (eventName === "SessionStart") {
-        state.sessions[sessionKey] = {
-            modelClass: classifyModel({ model: input.model }, { includeEnv: false }),
-            promptCount: 0,
-            updatedAtMs: Date.now()
-        };
-    }
-    if (eventName === "UserPromptSubmit") {
-        const target = await resolveCurrentTarget(input);
-        const transcriptPath = getTranscriptPath(input);
-        const transcriptStartOffset = await getTranscriptSize(input);
-        const modelClass = classifyModel({ model: input.model }, { includeEnv: false });
-        const session = state.sessions[sessionKey];
-        state.sessions[sessionKey] = {
-            ...(modelClass !== "unknown" ? { modelClass } : session?.modelClass ? { modelClass: session.modelClass } : {}),
-            promptCount: (session?.promptCount ?? 0) + 1,
-            updatedAtMs: Date.now()
-        };
-        state.pending[sessionKey] = {
-            startedAtMs: Date.now(),
-            targetMatched: target.matched === true,
-            ...(typeof input.turn_id === "string" && input.turn_id !== "" ? { turnId: input.turn_id } : {}),
-            ...(transcriptPath ? { transcriptPath } : {}),
-            ...(transcriptStartOffset !== null ? { transcriptStartOffset } : {}),
-            ...(modelClass !== "unknown" ? { modelClass } : {})
-        };
-        await writeCodexDebug(eventName, sessionKey, "prompt_start", {
-            targetMatched: target.matched,
-            providerId: target.providerId,
-            transcriptStartOffset,
-            modelClass
+    if (result.systemMessage)
+        console.log(JSON.stringify({ systemMessage: result.systemMessage }));
+    if (result.watcher) {
+        const launch = await launchCodexWatcher(result.watcher);
+        await writeCodexDebug(eventName, result.watcher.sessionKey, "watcher_launch", {
+            settlementId: result.watcher.settlementId,
+            ...launch
         });
     }
-    // Codex has no statusLine surface, so update reminders ride the Stop hook's
-    // systemMessage output at the same low frequency as the Claude Code path.
-    // Both commands are required in order: `upgrade` refreshes the marketplace
-    // snapshot, `add` installs from it into the versioned cache plugins run
-    // from (verified against a git marketplace). No `&&`: PowerShell 5.1
-    // doesn't support it.
-    if (eventName === "Stop") {
-        const config = await loadRemoteConfig();
-        if (shouldRemindPluginUpdate(state, config.latestPluginVersion)) {
-            recordPluginUpdateReminder(state, config.latestPluginVersion);
-            console.log(JSON.stringify({
-                systemMessage: `${SITE_NAME} Status Monitor 插件有新版 ${config.latestPluginVersion}。在终端依次运行 codex plugin marketplace upgrade ${MARKETPLACE_NAME} 和 codex plugin add ${PLUGIN_FULL_ID}。更新后新会话按 hook 变化提示信任。`
-            }));
-        }
-    }
-    await saveState(state);
 }
 async function settlePendingTurn(eventName, input, state, sessionKey) {
-    const pending = state.pending[sessionKey];
-    if (!pending)
+    const candidate = state.pending[sessionKey];
+    if (candidate?.client !== "codex")
         return null;
+    const pending = candidate;
     delete state.pending[sessionKey];
     return settlePreparedPendingTurn({
         eventName,
@@ -95,13 +120,17 @@ async function settleStaleCrossSessionPendings(eventName, state, currentSessionK
         .filter(([ownerSessionKey, pending]) => {
         if (ownerSessionKey === currentSessionKey)
             return false;
-        return Boolean(pending.transcriptPath);
+        return pending.client === "codex" && Boolean(pending.transcriptPath);
     })
-        .sort((left, right) => (left[1].startedAtMs ?? 0) - (right[1].startedAtMs ?? 0))
-        .slice(0, CROSS_SESSION_SETTLE_MAX_PER_EVENT);
+        .sort((left, right) => left[1].startedAtMs - right[1].startedAtMs);
+    let settledCount = 0;
     for (const [ownerSessionKey, pending] of candidates) {
+        if (settledCount >= CROSS_SESSION_SETTLE_MAX_PER_EVENT)
+            break;
         try {
             const settlement = await settleCrossSessionPendingTurn(eventName, state, ownerSessionKey, pending);
+            if (!state.pending[ownerSessionKey])
+                settledCount += 1;
             await writeCodexDebug(eventName, currentSessionKey, "cross_settlement", {
                 ownerSessionKey,
                 ...settlement
@@ -122,24 +151,13 @@ async function settleCrossSessionPendingTurn(eventName, state, ownerSessionKey, 
         return { hadPending: true, skipped: "turn_evidence_missing", turn };
     if (!turn.completed && !turn.aborted)
         return { hadPending: true, skipped: null, turn };
-    if (turn.lastActivityAtMs !== null && Date.now() - turn.lastActivityAtMs < SETTLE_OWNER_GRACE_MS) {
-        return { hadPending: true, skipped: null, turn };
-    }
     delete state.pending[ownerSessionKey];
     return settlePreparedPendingTurn({
         eventName,
         state,
         ownerSessionKey,
         pending,
-        resolveTarget: async (config) => {
-            const meta = await readCodexSessionMeta(transcriptPath);
-            const configSnapshot = await readCodexConfigSnapshot();
-            return resolveCodexTarget({
-                sessionProviderId: meta?.modelProvider ?? null,
-                config: configSnapshot,
-                targetHosts: config.targetBaseUrlHosts
-            });
-        },
+        resolveTarget: (config) => resolveStoredTarget(transcriptPath, config),
         inspectTurn: async () => turn,
         resolveModelClass: (settledTurn) => resolveCrossSessionModelClass(settledTurn, pending)
     });
@@ -186,7 +204,7 @@ async function settlePreparedPendingTurn({ eventName, state, ownerSessionKey, pe
     const modelClass = resolveModelClass(turn);
     if (modelClass !== "unknown") {
         state.sessions[ownerSessionKey] = {
-            ...state.sessions[ownerSessionKey],
+            ...(state.sessions[ownerSessionKey] ?? { promptCount: 0, updatedAtMs: Date.now() }),
             modelClass,
             updatedAtMs: Date.now()
         };
@@ -232,6 +250,124 @@ async function settlePreparedPendingTurn({ eventName, state, ownerSessionKey, pe
     }
     return debug;
 }
+export async function runCodexWatcher(sessionKey, settlementId) {
+    const initialState = await loadState();
+    const initialPending = getWatchedPending(initialState, sessionKey, settlementId);
+    if (!initialPending?.transcriptPath)
+        return;
+    const startedAtMs = Date.now();
+    let lastProgressAtMs = startedAtMs;
+    let lastStateCheckAtMs = 0;
+    const tailer = new CodexTurnTailer(initialPending.transcriptStartOffset);
+    while (true) {
+        const beforeOffset = tailer.currentOffset;
+        const terminal = await tailer.poll(initialPending.transcriptPath, initialPending.turnId ?? null);
+        const nowMs = Date.now();
+        if (tailer.currentOffset !== beforeOffset)
+            lastProgressAtMs = nowMs;
+        if (terminal) {
+            const finished = await settleWatchedPendingTurn(sessionKey, settlementId);
+            if (finished)
+                return;
+        }
+        if (nowMs - lastStateCheckAtMs >= WATCHER_STATE_CHECK_MS) {
+            const state = await loadState();
+            if (!getWatchedPending(state, sessionKey, settlementId))
+                return;
+            lastStateCheckAtMs = nowMs;
+        }
+        if (nowMs - lastProgressAtMs >= WATCHER_MAX_IDLE_MS || nowMs - startedAtMs >= WATCHER_MAX_LIFETIME_MS) {
+            await writeCodexDebug("CodexWatcher", sessionKey, "watcher_exit", {
+                settlementId,
+                reason: nowMs - lastProgressAtMs >= WATCHER_MAX_IDLE_MS ? "idle_timeout" : "lifetime_timeout"
+            });
+            return;
+        }
+        await sleep(watcherPollInterval(nowMs - startedAtMs));
+    }
+}
+async function settleWatchedPendingTurn(sessionKey, settlementId) {
+    let finished = false;
+    await withLockedState(async (state) => {
+        const pending = getWatchedPending(state, sessionKey, settlementId);
+        if (!pending) {
+            finished = true;
+            return;
+        }
+        const transcriptPath = pending.transcriptPath ?? null;
+        const turn = await inspectCodexTurn(transcriptPath, pending.turnId ?? null, pending.transcriptStartOffset);
+        if (!turn.completed && !turn.aborted)
+            return;
+        delete state.pending[sessionKey];
+        const settlement = await settlePreparedPendingTurn({
+            eventName: "CodexWatcher",
+            state,
+            ownerSessionKey: sessionKey,
+            pending,
+            resolveTarget: (config) => resolveStoredTarget(transcriptPath, config),
+            inspectTurn: async () => turn,
+            resolveModelClass: (settledTurn) => resolveCrossSessionModelClass(settledTurn, pending)
+        });
+        await writeCodexDebug("CodexWatcher", sessionKey, "settlement", {
+            settlementId,
+            ...settlement
+        });
+        finished = true;
+    });
+    return finished;
+}
+function getWatchedPending(state, sessionKey, settlementId) {
+    const pending = state.pending[sessionKey];
+    if (pending?.client !== "codex" || pending.settlementId !== settlementId)
+        return null;
+    return pending;
+}
+function watcherPollInterval(elapsedMs) {
+    if (elapsedMs < WATCHER_FAST_WINDOW_MS)
+        return WATCHER_FAST_POLL_MS;
+    if (elapsedMs < WATCHER_MEDIUM_WINDOW_MS)
+        return WATCHER_MEDIUM_POLL_MS;
+    return WATCHER_SLOW_POLL_MS;
+}
+async function launchCodexWatcher(watcher) {
+    if (process.env.ROUTER_VITALS_TEST_DISABLE_CODEX_WATCHER === "1") {
+        return { ready: false, reason: "disabled" };
+    }
+    const workerPath = fileURLToPath(new URL("../codex-watch.mjs", import.meta.url));
+    const forkOptions = {
+        detached: true,
+        env: process.env,
+        stdio: ["ignore", "ignore", "ignore", "ipc"],
+        windowsHide: true
+    };
+    let child;
+    try {
+        child = fork(workerPath, [watcher.sessionKey, watcher.settlementId], forkOptions);
+    }
+    catch {
+        return { ready: false, reason: "spawn_error" };
+    }
+    return await new Promise((resolve) => {
+        let done = false;
+        const finish = (result) => {
+            if (done)
+                return;
+            done = true;
+            clearTimeout(timeout);
+            if (child.connected)
+                child.disconnect();
+            child.unref();
+            resolve(result);
+        };
+        const timeout = setTimeout(() => finish({ ready: false, reason: "timeout" }), WATCHER_READY_TIMEOUT_MS);
+        child.once("message", (message) => {
+            if (isRecord(message) && message.type === "ready")
+                finish({ ready: true, reason: "ready" });
+        });
+        child.once("error", () => finish({ ready: false, reason: "spawn_error" }));
+        child.once("exit", () => finish({ ready: false, reason: "early_exit" }));
+    });
+}
 async function resolveCurrentTarget(input, config) {
     const meta = await readCodexSessionMeta(getTranscriptPath(input));
     const configSnapshot = await readCodexConfigSnapshot();
@@ -239,6 +375,15 @@ async function resolveCurrentTarget(input, config) {
         sessionProviderId: meta?.modelProvider ?? null,
         config: configSnapshot,
         ...(config ? { targetHosts: config.targetBaseUrlHosts } : {})
+    });
+}
+async function resolveStoredTarget(transcriptPath, config) {
+    const meta = await readCodexSessionMeta(transcriptPath);
+    const configSnapshot = await readCodexConfigSnapshot();
+    return resolveCodexTarget({
+        sessionProviderId: meta?.modelProvider ?? null,
+        config: configSnapshot,
+        targetHosts: config.targetBaseUrlHosts
     });
 }
 // The Stop hook races the rollout writer: in TUI sessions task_complete can
@@ -258,6 +403,9 @@ async function inspectCodexTurnSettled(eventName, input, pending) {
 }
 function sleep(ms) {
     return new Promise((resolve) => setTimeout(resolve, ms));
+}
+function isRecord(value) {
+    return Boolean(value && typeof value === "object" && !Array.isArray(value));
 }
 function resolveCodexModelClass(turn, input, pending) {
     const fromTurn = classifyModel({ model: turn.model }, { includeEnv: false });

@@ -1,6 +1,6 @@
 # Reporting & Privacy
 
-The plugin works at user-turn granularity with an independent path per client: a turn is marked when it starts and judged when it ends. Failed Codex turns are back-filled by the session's next interaction. The status page also counts turns — one turn maps to one observation event.
+The plugin works at user-turn granularity with an independent path per client: a turn is marked when it starts and judged when it ends. Failed Codex turns are recorded automatically after they end; a later interaction recovers settlement if the local background work was interrupted. The status page also counts turns — one turn maps to one observation event.
 
 > The plugin only makes local checks; it never modifies, forwards, or proxies the requests you send upstream. On Claude Code it uses `ANTHROPIC_BASE_URL` to tell whether you're connected to Any Router; on Codex it reads the provider name from this session's metadata and resolves that provider's `base_url` from your local Codex config (only those two items are extracted — secret fields such as `env_key` are never read). From Any Router's point of view, the requests it receives are identical whether or not this plugin is installed — no extra fingerprint. The plugin's own outbound requests (reporting, config, status) go only to the status Worker, never through Any Router.
 

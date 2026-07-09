@@ -1,4 +1,5 @@
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
+import { open, mkdir, readFile, rename, stat, unlink, writeFile, type FileHandle } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { PLUGIN_ID } from "./site-config.mjs";
@@ -11,34 +12,47 @@ import {
   isPluginVersionNewer,
   normalizeTargetHost,
   validateReportPayload,
+  type Client,
   type ModelClass,
   type ReportPayload,
   type TargetHost
 } from "./policy.mjs";
 
-const STATE_VERSION = 1;
+const STATE_VERSION = 2;
 const STATE_DIR_NAME = PLUGIN_ID;
 const STATE_FILE_NAME = "state.json";
+const STATE_LOCK_FILE_NAME = "state.lock";
 const STATUS_CACHE_FILE_NAME = "status-cache.json";
 const CONTRIBUTION_RETENTION_DAYS = 120;
 const TURN_STATE_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
 const UPDATE_REMINDER_INTERVAL_MS = 24 * 60 * 60 * 1000;
+const STATE_LOCK_RETRY_MS = 40;
+const STATE_LOCK_TIMEOUT_MS = 45_000;
+const STATE_LOCK_STALE_MS = 30_000;
+const STATE_LOCK_HEARTBEAT_MS = 5_000;
 
 export interface AnonymousState {
   day: string;
   id: string;
 }
 
-export interface TurnState {
-  startedAtMs?: number;
+export interface PendingTurn {
+  client: Client;
+  settlementId: string;
+  startedAtMs: number;
+  targetMatched: boolean;
   transcriptStartOffset?: number;
   transcriptPath?: string;
   transcriptKey?: string;
-  targetMatched?: boolean;
   turnId?: string;
   modelClass?: ModelClass;
-  promptCount?: number;
-  updatedAtMs?: number;
+}
+
+export interface SessionState {
+  modelClass?: ModelClass;
+  transcriptKey?: string;
+  promptCount: number;
+  updatedAtMs: number;
 }
 
 export interface UpdateReminderState {
@@ -48,7 +62,7 @@ export interface UpdateReminderState {
 
 export type LastDecisionKind = "reported" | "skipped" | "post_failed";
 
-export type LastDecisionEventName = "Stop" | "StopFailure" | "UserPromptSubmit" | "SessionStart";
+export type LastDecisionEventName = "Stop" | "StopFailure" | "UserPromptSubmit" | "SessionStart" | "CodexWatcher";
 
 export interface LastDecision {
   at: string;
@@ -63,8 +77,8 @@ export interface LastDecision {
 export interface PluginState {
   version: number;
   anonymous: AnonymousState | null;
-  pending: Record<string, TurnState>;
-  sessions: Record<string, TurnState>;
+  pending: Record<string, PendingTurn>;
+  sessions: Record<string, SessionState>;
   contributions: Record<string, number>;
   updateReminder: UpdateReminderState | null;
   lastPayload: ReportPayload | null;
@@ -83,6 +97,10 @@ export function getStatePath(): string {
   return join(getPluginStateDir(), STATE_FILE_NAME);
 }
 
+export function getStateLockPath(): string {
+  return join(getPluginStateDir(), STATE_LOCK_FILE_NAME);
+}
+
 export function getStatusCachePath(): string {
   return join(getPluginStateDir(), STATUS_CACHE_FILE_NAME);
 }
@@ -99,6 +117,18 @@ export async function loadState(): Promise<PluginState> {
     return normalizeState(parsed);
   } catch {
     return normalizeState({});
+  }
+}
+
+export async function withLockedState<T>(run: (state: PluginState) => Promise<T>): Promise<T> {
+  const release = await acquireStateLock();
+  try {
+    const state = await loadState();
+    const result = await run(state);
+    await saveState(state);
+    return result;
+  } finally {
+    await release();
   }
 }
 
@@ -130,7 +160,7 @@ export async function saveStatusCache(cache: StatusCache): Promise<void> {
   await rename(tmpPath, path);
 }
 
-export async function saveState(state: PluginState): Promise<void> {
+async function saveState(state: PluginState): Promise<void> {
   const path = getStatePath();
   await mkdir(dirname(path), { recursive: true });
   const tmpPath = `${path}.${process.pid}.tmp`;
@@ -175,18 +205,33 @@ export function recordPluginUpdateReminder(state: PluginState, latestPluginVersi
 }
 
 function normalizeState(value: unknown, now = new Date()): PluginState {
-  const record = isRecord(value) ? value : {};
+  if (!isRecord(value) || value.version !== STATE_VERSION) return createEmptyState();
+  const record = value;
   const nowMs = now.getTime();
   return {
     version: STATE_VERSION,
     anonymous: normalizeAnonymous(record.anonymous),
-    pending: normalizeTurnMap(record.pending, nowMs),
-    sessions: normalizeTurnMap(record.sessions, nowMs),
+    pending: normalizePendingMap(record.pending, nowMs),
+    sessions: normalizeSessionMap(record.sessions, nowMs),
     contributions: normalizeContributions(record.contributions, now),
     updateReminder: normalizeUpdateReminder(record.updateReminder),
     lastPayload: normalizeLastPayload(record.lastPayload),
     lastReportAt: typeof record.lastReportAt === "string" ? record.lastReportAt : null,
     lastDecision: normalizeLastDecision(record.lastDecision)
+  };
+}
+
+function createEmptyState(): PluginState {
+  return {
+    version: STATE_VERSION,
+    anonymous: null,
+    pending: {},
+    sessions: {},
+    contributions: {},
+    updateReminder: null,
+    lastPayload: null,
+    lastReportAt: null,
+    lastDecision: null
   };
 }
 
@@ -212,7 +257,13 @@ function normalizeUpdateReminder(value: unknown): UpdateReminderState | null {
   };
 }
 
-const LAST_DECISION_EVENT_NAMES: readonly LastDecisionEventName[] = ["Stop", "StopFailure", "UserPromptSubmit", "SessionStart"];
+const LAST_DECISION_EVENT_NAMES: readonly LastDecisionEventName[] = [
+  "Stop",
+  "StopFailure",
+  "UserPromptSubmit",
+  "SessionStart",
+  "CodexWatcher"
+];
 
 function normalizeLastDecision(value: unknown): LastDecision | null {
   if (!isRecord(value)) return null;
@@ -246,24 +297,31 @@ function isReasonCode(value: unknown): value is string {
   return typeof value === "string" && /^[a-z0-9_]{1,64}$/.test(value);
 }
 
-function normalizeTurnMap(value: unknown, nowMs: number): Record<string, TurnState> {
+function normalizePendingMap(value: unknown, nowMs: number): Record<string, PendingTurn> {
   if (!value || typeof value !== "object" || Array.isArray(value)) return {};
-  const result: Record<string, TurnState> = {};
+  const result: Record<string, PendingTurn> = {};
   const cutoffMs = nowMs - TURN_STATE_RETENTION_MS;
   for (const [key, item] of Object.entries(value)) {
-    const turn = normalizeTurnState(item);
-    if (!turn) continue;
-    const updatedAtMs = getTurnUpdatedAtMs(turn);
-    if (updatedAtMs === null || updatedAtMs < cutoffMs) continue;
-    result[key] = turn;
+    const pending = normalizePendingTurn(item);
+    if (!pending || pending.startedAtMs < cutoffMs) continue;
+    result[key] = pending;
   }
   return result;
 }
 
-function normalizeTurnState(value: unknown): TurnState | null {
+function normalizePendingTurn(value: unknown): PendingTurn | null {
   if (!isRecord(value)) return null;
-  const result: TurnState = {};
-  if (typeof value.startedAtMs === "number" && Number.isFinite(value.startedAtMs)) result.startedAtMs = value.startedAtMs;
+  if (value.client !== "claude-code" && value.client !== "codex") return null;
+  if (typeof value.settlementId !== "string" || !isSettlementId(value.settlementId)) return null;
+  if (typeof value.startedAtMs !== "number" || !Number.isFinite(value.startedAtMs)) return null;
+  if (typeof value.targetMatched !== "boolean") return null;
+
+  const result: PendingTurn = {
+    client: value.client,
+    settlementId: value.settlementId,
+    startedAtMs: value.startedAtMs,
+    targetMatched: value.targetMatched
+  };
   if (typeof value.transcriptStartOffset === "number" && Number.isFinite(value.transcriptStartOffset)) {
     result.transcriptStartOffset = value.transcriptStartOffset;
   }
@@ -271,21 +329,40 @@ function normalizeTurnState(value: unknown): TurnState | null {
   if (typeof value.transcriptKey === "string" && /^[a-f0-9]{24}$/.test(value.transcriptKey)) {
     result.transcriptKey = value.transcriptKey;
   }
-  if (typeof value.updatedAtMs === "number" && Number.isFinite(value.updatedAtMs)) result.updatedAtMs = value.updatedAtMs;
-  if (typeof value.targetMatched === "boolean") result.targetMatched = value.targetMatched;
   if (typeof value.turnId === "string" && value.turnId !== "" && value.turnId.length <= 128) result.turnId = value.turnId;
   if (typeof value.modelClass === "string" && MODEL_CLASSES.includes(value.modelClass as ModelClass)) {
     result.modelClass = value.modelClass as ModelClass;
   }
-  if (typeof value.promptCount === "number" && Number.isInteger(value.promptCount) && value.promptCount >= 0) {
-    result.promptCount = value.promptCount;
-  }
-  return Object.keys(result).length > 0 ? result : null;
+  return result;
 }
 
-function getTurnUpdatedAtMs(turn: TurnState): number | null {
-  const values = [turn.updatedAtMs, turn.startedAtMs].filter((value): value is number => typeof value === "number" && Number.isFinite(value));
-  return values.length > 0 ? Math.max(...values) : null;
+function normalizeSessionMap(value: unknown, nowMs: number): Record<string, SessionState> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  const result: Record<string, SessionState> = {};
+  const cutoffMs = nowMs - TURN_STATE_RETENTION_MS;
+  for (const [key, item] of Object.entries(value)) {
+    const session = normalizeSessionState(item);
+    if (!session || session.updatedAtMs < cutoffMs) continue;
+    result[key] = session;
+  }
+  return result;
+}
+
+function normalizeSessionState(value: unknown): SessionState | null {
+  if (!isRecord(value)) return null;
+  if (typeof value.promptCount !== "number" || !Number.isInteger(value.promptCount) || value.promptCount < 0) return null;
+  if (typeof value.updatedAtMs !== "number" || !Number.isFinite(value.updatedAtMs)) return null;
+  const result: SessionState = {
+    promptCount: value.promptCount,
+    updatedAtMs: value.updatedAtMs
+  };
+  if (typeof value.transcriptKey === "string" && /^[a-f0-9]{24}$/.test(value.transcriptKey)) {
+    result.transcriptKey = value.transcriptKey;
+  }
+  if (typeof value.modelClass === "string" && MODEL_CLASSES.includes(value.modelClass as ModelClass)) {
+    result.modelClass = value.modelClass as ModelClass;
+  }
+  return result;
 }
 
 function normalizeContributions(value: unknown, now: Date): Record<string, number> {
@@ -307,6 +384,93 @@ function getRetentionCutoffKey(now: Date): string {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
+
+function isSettlementId(value: string): boolean {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+}
+
+async function acquireStateLock(): Promise<() => Promise<void>> {
+  const lockPath = getStateLockPath();
+  await mkdir(dirname(lockPath), { recursive: true });
+  const startedAtMs = Date.now();
+  const token = `${process.pid}:${randomUUID()}`;
+
+  while (true) {
+    let handle: FileHandle | null = null;
+    try {
+      handle = await open(lockPath, "wx");
+      await handle.writeFile(token, "utf8");
+      const heartbeat = setInterval(() => {
+        void handle?.utimes(new Date(), new Date()).catch(() => undefined);
+      }, STATE_LOCK_HEARTBEAT_MS);
+      heartbeat.unref();
+      return async () => {
+        clearInterval(heartbeat);
+        await handle?.close().catch(() => undefined);
+        await releaseOwnedLock(lockPath, token);
+      };
+    } catch (error) {
+      await handle?.close().catch(() => undefined);
+      if (!isAlreadyExistsError(error)) throw error;
+      await removeStaleLock(lockPath);
+      if (Date.now() - startedAtMs >= STATE_LOCK_TIMEOUT_MS) {
+        throw new Error(`timed out acquiring plugin state lock: ${lockPath}`);
+      }
+      await sleep(STATE_LOCK_RETRY_MS);
+    }
+  }
+}
+
+async function releaseOwnedLock(lockPath: string, token: string): Promise<void> {
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      await removeOwnedLock(lockPath, token);
+      return;
+    } catch {
+      if (attempt < 2) await sleep(STATE_LOCK_RETRY_MS);
+    }
+  }
+}
+
+async function removeStaleLock(lockPath: string): Promise<void> {
+  try {
+    const info = await stat(lockPath);
+    if (Date.now() - info.mtimeMs < STATE_LOCK_STALE_MS) return;
+    await unlink(lockPath);
+  } catch (error) {
+    if (!isNotFoundError(error) && !isPermissionError(error)) throw error;
+  }
+}
+
+async function removeOwnedLock(lockPath: string, token: string): Promise<void> {
+  try {
+    const current = await readFile(lockPath, "utf8");
+    if (current !== token) return;
+    await unlink(lockPath);
+  } catch (error) {
+    if (!isNotFoundError(error)) throw error;
+  }
+}
+
+function isAlreadyExistsError(error: unknown): boolean {
+  return isNodeError(error) && error.code === "EEXIST";
+}
+
+function isNotFoundError(error: unknown): boolean {
+  return isNodeError(error) && error.code === "ENOENT";
+}
+
+function isPermissionError(error: unknown): boolean {
+  return isNodeError(error) && (error.code === "EPERM" || error.code === "EACCES");
+}
+
+function isNodeError(error: unknown): error is NodeJS.ErrnoException {
+  return error instanceof Error;
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function getStateRoot(): string {

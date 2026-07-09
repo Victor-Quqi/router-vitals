@@ -1,17 +1,26 @@
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
+import { open, mkdir, readFile, rename, stat, unlink, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { PLUGIN_ID } from "./site-config.mjs";
 import { LOCAL_DAILY_REPORT_LIMIT, MODEL_CLASSES, PLUGIN_VERSION, createAnonymousId, getTodayKey, isPluginVersionNewer, normalizeTargetHost, validateReportPayload } from "./policy.mjs";
-const STATE_VERSION = 1;
+const STATE_VERSION = 2;
 const STATE_DIR_NAME = PLUGIN_ID;
 const STATE_FILE_NAME = "state.json";
+const STATE_LOCK_FILE_NAME = "state.lock";
 const STATUS_CACHE_FILE_NAME = "status-cache.json";
 const CONTRIBUTION_RETENTION_DAYS = 120;
 const TURN_STATE_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
 const UPDATE_REMINDER_INTERVAL_MS = 24 * 60 * 60 * 1000;
+const STATE_LOCK_RETRY_MS = 40;
+const STATE_LOCK_TIMEOUT_MS = 45_000;
+const STATE_LOCK_STALE_MS = 30_000;
+const STATE_LOCK_HEARTBEAT_MS = 5_000;
 export function getStatePath() {
     return join(getPluginStateDir(), STATE_FILE_NAME);
+}
+export function getStateLockPath() {
+    return join(getPluginStateDir(), STATE_LOCK_FILE_NAME);
 }
 export function getStatusCachePath() {
     return join(getPluginStateDir(), STATUS_CACHE_FILE_NAME);
@@ -28,6 +37,18 @@ export async function loadState() {
     }
     catch {
         return normalizeState({});
+    }
+}
+export async function withLockedState(run) {
+    const release = await acquireStateLock();
+    try {
+        const state = await loadState();
+        const result = await run(state);
+        await saveState(state);
+        return result;
+    }
+    finally {
+        await release();
     }
 }
 export async function loadStatusCache() {
@@ -62,7 +83,7 @@ export async function saveStatusCache(cache) {
     await writeFile(tmpPath, `${JSON.stringify(cache)}\n`, "utf8");
     await rename(tmpPath, path);
 }
-export async function saveState(state) {
+async function saveState(state) {
     const path = getStatePath();
     await mkdir(dirname(path), { recursive: true });
     const tmpPath = `${path}.${process.pid}.tmp`;
@@ -102,18 +123,33 @@ export function recordPluginUpdateReminder(state, latestPluginVersion, nowMs = D
     };
 }
 function normalizeState(value, now = new Date()) {
-    const record = isRecord(value) ? value : {};
+    if (!isRecord(value) || value.version !== STATE_VERSION)
+        return createEmptyState();
+    const record = value;
     const nowMs = now.getTime();
     return {
         version: STATE_VERSION,
         anonymous: normalizeAnonymous(record.anonymous),
-        pending: normalizeTurnMap(record.pending, nowMs),
-        sessions: normalizeTurnMap(record.sessions, nowMs),
+        pending: normalizePendingMap(record.pending, nowMs),
+        sessions: normalizeSessionMap(record.sessions, nowMs),
         contributions: normalizeContributions(record.contributions, now),
         updateReminder: normalizeUpdateReminder(record.updateReminder),
         lastPayload: normalizeLastPayload(record.lastPayload),
         lastReportAt: typeof record.lastReportAt === "string" ? record.lastReportAt : null,
         lastDecision: normalizeLastDecision(record.lastDecision)
+    };
+}
+function createEmptyState() {
+    return {
+        version: STATE_VERSION,
+        anonymous: null,
+        pending: {},
+        sessions: {},
+        contributions: {},
+        updateReminder: null,
+        lastPayload: null,
+        lastReportAt: null,
+        lastDecision: null
     };
 }
 function normalizeAnonymous(value) {
@@ -141,7 +177,13 @@ function normalizeUpdateReminder(value) {
         remindedAtMs: value.remindedAtMs
     };
 }
-const LAST_DECISION_EVENT_NAMES = ["Stop", "StopFailure", "UserPromptSubmit", "SessionStart"];
+const LAST_DECISION_EVENT_NAMES = [
+    "Stop",
+    "StopFailure",
+    "UserPromptSubmit",
+    "SessionStart",
+    "CodexWatcher"
+];
 function normalizeLastDecision(value) {
     if (!isRecord(value))
         return null;
@@ -173,28 +215,36 @@ function normalizeLastDecision(value) {
 function isReasonCode(value) {
     return typeof value === "string" && /^[a-z0-9_]{1,64}$/.test(value);
 }
-function normalizeTurnMap(value, nowMs) {
+function normalizePendingMap(value, nowMs) {
     if (!value || typeof value !== "object" || Array.isArray(value))
         return {};
     const result = {};
     const cutoffMs = nowMs - TURN_STATE_RETENTION_MS;
     for (const [key, item] of Object.entries(value)) {
-        const turn = normalizeTurnState(item);
-        if (!turn)
+        const pending = normalizePendingTurn(item);
+        if (!pending || pending.startedAtMs < cutoffMs)
             continue;
-        const updatedAtMs = getTurnUpdatedAtMs(turn);
-        if (updatedAtMs === null || updatedAtMs < cutoffMs)
-            continue;
-        result[key] = turn;
+        result[key] = pending;
     }
     return result;
 }
-function normalizeTurnState(value) {
+function normalizePendingTurn(value) {
     if (!isRecord(value))
         return null;
-    const result = {};
-    if (typeof value.startedAtMs === "number" && Number.isFinite(value.startedAtMs))
-        result.startedAtMs = value.startedAtMs;
+    if (value.client !== "claude-code" && value.client !== "codex")
+        return null;
+    if (typeof value.settlementId !== "string" || !isSettlementId(value.settlementId))
+        return null;
+    if (typeof value.startedAtMs !== "number" || !Number.isFinite(value.startedAtMs))
+        return null;
+    if (typeof value.targetMatched !== "boolean")
+        return null;
+    const result = {
+        client: value.client,
+        settlementId: value.settlementId,
+        startedAtMs: value.startedAtMs,
+        targetMatched: value.targetMatched
+    };
     if (typeof value.transcriptStartOffset === "number" && Number.isFinite(value.transcriptStartOffset)) {
         result.transcriptStartOffset = value.transcriptStartOffset;
     }
@@ -203,23 +253,44 @@ function normalizeTurnState(value) {
     if (typeof value.transcriptKey === "string" && /^[a-f0-9]{24}$/.test(value.transcriptKey)) {
         result.transcriptKey = value.transcriptKey;
     }
-    if (typeof value.updatedAtMs === "number" && Number.isFinite(value.updatedAtMs))
-        result.updatedAtMs = value.updatedAtMs;
-    if (typeof value.targetMatched === "boolean")
-        result.targetMatched = value.targetMatched;
     if (typeof value.turnId === "string" && value.turnId !== "" && value.turnId.length <= 128)
         result.turnId = value.turnId;
     if (typeof value.modelClass === "string" && MODEL_CLASSES.includes(value.modelClass)) {
         result.modelClass = value.modelClass;
     }
-    if (typeof value.promptCount === "number" && Number.isInteger(value.promptCount) && value.promptCount >= 0) {
-        result.promptCount = value.promptCount;
-    }
-    return Object.keys(result).length > 0 ? result : null;
+    return result;
 }
-function getTurnUpdatedAtMs(turn) {
-    const values = [turn.updatedAtMs, turn.startedAtMs].filter((value) => typeof value === "number" && Number.isFinite(value));
-    return values.length > 0 ? Math.max(...values) : null;
+function normalizeSessionMap(value, nowMs) {
+    if (!value || typeof value !== "object" || Array.isArray(value))
+        return {};
+    const result = {};
+    const cutoffMs = nowMs - TURN_STATE_RETENTION_MS;
+    for (const [key, item] of Object.entries(value)) {
+        const session = normalizeSessionState(item);
+        if (!session || session.updatedAtMs < cutoffMs)
+            continue;
+        result[key] = session;
+    }
+    return result;
+}
+function normalizeSessionState(value) {
+    if (!isRecord(value))
+        return null;
+    if (typeof value.promptCount !== "number" || !Number.isInteger(value.promptCount) || value.promptCount < 0)
+        return null;
+    if (typeof value.updatedAtMs !== "number" || !Number.isFinite(value.updatedAtMs))
+        return null;
+    const result = {
+        promptCount: value.promptCount,
+        updatedAtMs: value.updatedAtMs
+    };
+    if (typeof value.transcriptKey === "string" && /^[a-f0-9]{24}$/.test(value.transcriptKey)) {
+        result.transcriptKey = value.transcriptKey;
+    }
+    if (typeof value.modelClass === "string" && MODEL_CLASSES.includes(value.modelClass)) {
+        result.modelClass = value.modelClass;
+    }
+    return result;
 }
 function normalizeContributions(value, now) {
     if (!value || typeof value !== "object" || Array.isArray(value))
@@ -239,6 +310,92 @@ function getRetentionCutoffKey(now) {
 }
 function isRecord(value) {
     return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
+function isSettlementId(value) {
+    return /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+}
+async function acquireStateLock() {
+    const lockPath = getStateLockPath();
+    await mkdir(dirname(lockPath), { recursive: true });
+    const startedAtMs = Date.now();
+    const token = `${process.pid}:${randomUUID()}`;
+    while (true) {
+        let handle = null;
+        try {
+            handle = await open(lockPath, "wx");
+            await handle.writeFile(token, "utf8");
+            const heartbeat = setInterval(() => {
+                void handle?.utimes(new Date(), new Date()).catch(() => undefined);
+            }, STATE_LOCK_HEARTBEAT_MS);
+            heartbeat.unref();
+            return async () => {
+                clearInterval(heartbeat);
+                await handle?.close().catch(() => undefined);
+                await releaseOwnedLock(lockPath, token);
+            };
+        }
+        catch (error) {
+            await handle?.close().catch(() => undefined);
+            if (!isAlreadyExistsError(error))
+                throw error;
+            await removeStaleLock(lockPath);
+            if (Date.now() - startedAtMs >= STATE_LOCK_TIMEOUT_MS) {
+                throw new Error(`timed out acquiring plugin state lock: ${lockPath}`);
+            }
+            await sleep(STATE_LOCK_RETRY_MS);
+        }
+    }
+}
+async function releaseOwnedLock(lockPath, token) {
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+        try {
+            await removeOwnedLock(lockPath, token);
+            return;
+        }
+        catch {
+            if (attempt < 2)
+                await sleep(STATE_LOCK_RETRY_MS);
+        }
+    }
+}
+async function removeStaleLock(lockPath) {
+    try {
+        const info = await stat(lockPath);
+        if (Date.now() - info.mtimeMs < STATE_LOCK_STALE_MS)
+            return;
+        await unlink(lockPath);
+    }
+    catch (error) {
+        if (!isNotFoundError(error) && !isPermissionError(error))
+            throw error;
+    }
+}
+async function removeOwnedLock(lockPath, token) {
+    try {
+        const current = await readFile(lockPath, "utf8");
+        if (current !== token)
+            return;
+        await unlink(lockPath);
+    }
+    catch (error) {
+        if (!isNotFoundError(error))
+            throw error;
+    }
+}
+function isAlreadyExistsError(error) {
+    return isNodeError(error) && error.code === "EEXIST";
+}
+function isNotFoundError(error) {
+    return isNodeError(error) && error.code === "ENOENT";
+}
+function isPermissionError(error) {
+    return isNodeError(error) && (error.code === "EPERM" || error.code === "EACCES");
+}
+function isNodeError(error) {
+    return error instanceof Error;
+}
+function sleep(ms) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
 }
 function getStateRoot() {
     return (process.env.ROUTER_VITALS_STATE_DIR ||

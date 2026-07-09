@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { appendFile, mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { createServer, type Server, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
@@ -8,7 +9,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { TARGET_HOSTS, classifyModel, hashLocalSessionId } from "../plugin/scripts/lib/policy.mjs";
 import { parseCodexConfigSnapshot, resolveCodexTarget } from "../plugin/scripts/lib/codex-target.mjs";
-import { inspectCodexTurn, readCodexSessionMeta } from "../plugin/scripts/lib/codex-transcript.mjs";
+import { CodexTurnTailer, inspectCodexTurn, readCodexSessionMeta } from "../plugin/scripts/lib/codex-transcript.mjs";
 import { MARKETPLACE_NAME, PLUGIN_FULL_ID, PLUGIN_ID } from "../shared/site-config.mjs";
 
 const hookPath = resolve("plugin/scripts/hook.mjs");
@@ -154,6 +155,27 @@ test("codex turn inspection rewinds past offsets taken after the turn markers", 
   assert.equal(turn.lastActivityAtMs, baseMs + 6100);
 });
 
+test("codex turn tailer reads only appended terminal records", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "codex-rollout-tail-"));
+  const path = join(dir, "rollout-tail.jsonl");
+  const baseMs = Date.now();
+  await writeFile(path, [
+    rolloutLine(baseMs, "session_meta", { session_id: "s-tail", model_provider: providerId }),
+    rolloutLine(baseMs + 1, "event_msg", { type: "task_started", turn_id: "t-tail" }),
+    rolloutLine(baseMs + 2, "turn_context", { turn_id: "t-tail", model: "gpt-5.5" })
+  ].join("\n") + "\n", "utf8");
+  const startOffset = Buffer.byteLength(await readFile(path, "utf8"), "utf8");
+  const tailer = new CodexTurnTailer(startOffset);
+
+  assert.equal(await tailer.poll(path, "t-tail"), null);
+  await appendRollout(path, [
+    rolloutLine(baseMs + 3, "event_msg", { type: "error", message: "请求失败" }),
+    rolloutLine(baseMs + 4, "event_msg", { type: "task_complete", turn_id: "t-tail", duration_ms: 3 })
+  ]);
+  assert.equal(await tailer.poll(path, "t-tail"), "completed");
+  assert.equal(tailer.currentOffset, Buffer.byteLength(await readFile(path, "utf8"), "utf8"));
+});
+
 test("codex hook reports settled turns only for matched providers", async () => {
   const received: Array<Record<string, any>> = [];
   const server = createServer((req, res) => {
@@ -290,6 +312,111 @@ test("codex hook reports settled turns only for matched providers", async () => 
   }
 });
 
+test("codex watcher reports a failed turn without a later hook", async () => {
+  const received: Array<Record<string, any>> = [];
+  const server = createCodexReportServer(received);
+  await listen(server);
+
+  const stateDir = await mkdtemp(join(tmpdir(), "router-vitals-codex-watcher-"));
+  const codexHome = await mkdtemp(join(tmpdir(), "codex-home-watcher-"));
+  await writeTargetCodexConfig(codexHome);
+  const sessionId = "codex-watcher-owner";
+  const sessionKey = hashLocalSessionId(sessionId);
+  const transcript = join(stateDir, "rollout-watcher.jsonl");
+  const baseMs = Date.now();
+  const env = {
+    ...codexEnv(stateDir, codexHome, server),
+    ROUTER_VITALS_TEST_DISABLE_CODEX_WATCHER: "0"
+  };
+
+  try {
+    await writeFile(transcript, [
+      rolloutLine(baseMs, "session_meta", { session_id: sessionId, model_provider: providerId }),
+      rolloutLine(baseMs + 1, "event_msg", { type: "task_started", turn_id: "turn-watched" }),
+      rolloutLine(baseMs + 2, "turn_context", { turn_id: "turn-watched", model: "gpt-5.5" })
+    ].join("\n") + "\n", "utf8");
+
+    await runCodexHook("UserPromptSubmit", {
+      session_id: sessionId,
+      transcript_path: transcript,
+      cwd: stateDir,
+      model: "gpt-5.5",
+      turn_id: "turn-watched",
+      prompt: "retry"
+    }, env);
+
+    await appendRollout(transcript, [
+      rolloutLine(baseMs + 100, "event_msg", {
+        type: "error",
+        message: `unexpected status 429 Too Many Requests, url: ${targetResponsesUrl}`
+      }),
+      rolloutLine(baseMs + 101, "event_msg", { type: "task_complete", turn_id: "turn-watched", duration_ms: 100 })
+    ]);
+
+    await waitFor(async () => received.length === 1);
+    await waitFor(async () => (await readPluginState(stateDir)).pending[sessionKey] === undefined);
+    assert.equal(received[0]!.ok, false);
+    assert.equal(received[0]!.errorType, "rate_limited");
+    assert.equal(received[0]!.errorStatusCode, 429);
+    assert.equal(received[0]!.client, "codex");
+
+    const state = await readPluginState(stateDir);
+    assert.equal(state.lastDecision?.eventName, "CodexWatcher");
+    await runCodexHook("SessionStart", {
+      session_id: sessionId,
+      transcript_path: transcript,
+      cwd: stateDir,
+      model: "gpt-5.5"
+    }, env);
+    assert.equal(received.length, 1);
+  } finally {
+    server.close();
+  }
+});
+
+test("concurrent Codex settlements consume a pending turn once", async () => {
+  const received: Array<Record<string, any>> = [];
+  const server = createCodexReportServer(received);
+  await listen(server);
+
+  const stateDir = await mkdtemp(join(tmpdir(), "router-vitals-codex-concurrent-"));
+  const codexHome = await mkdtemp(join(tmpdir(), "codex-home-concurrent-"));
+  await writeTargetCodexConfig(codexHome);
+  const env = codexEnv(stateDir, codexHome, server);
+  const sessionId = "codex-concurrent";
+  const transcript = join(stateDir, "rollout-concurrent.jsonl");
+  const baseMs = Date.now();
+  const input = {
+    session_id: sessionId,
+    transcript_path: transcript,
+    cwd: stateDir,
+    model: "gpt-5.5",
+    turn_id: "turn-concurrent"
+  };
+
+  try {
+    await writeFile(transcript, [
+      rolloutLine(baseMs, "session_meta", { session_id: sessionId, model_provider: providerId }),
+      rolloutLine(baseMs + 1, "event_msg", { type: "task_started", turn_id: "turn-concurrent" }),
+      rolloutLine(baseMs + 2, "turn_context", { turn_id: "turn-concurrent", model: "gpt-5.5" })
+    ].join("\n") + "\n", "utf8");
+    await runCodexHook("UserPromptSubmit", input, env);
+    await appendRollout(transcript, [
+      rolloutLine(baseMs + 100, "event_msg", { type: "agent_message", message: "done" }),
+      rolloutLine(baseMs + 101, "event_msg", { type: "task_complete", turn_id: "turn-concurrent", duration_ms: 100 })
+    ]);
+
+    await Promise.all([
+      runCodexHook("Stop", input, env),
+      runCodexHook("Stop", input, env)
+    ]);
+
+    assert.equal(received.length, 1);
+  } finally {
+    server.close();
+  }
+});
+
 test("codex hook cross-settles a stale pending turn from another session", async () => {
   const received: Array<Record<string, any>> = [];
   const server = createCodexReportServer(received);
@@ -378,15 +505,59 @@ test("codex hook keeps cross-session pending while rollout turn is still running
   }
 });
 
-test("codex hook leaves legacy pending without transcript path untouched", async () => {
+test("codex hook does not let running turns starve completed cross-session work", async () => {
   const received: Array<Record<string, any>> = [];
   const server = createCodexReportServer(received);
   await listen(server);
 
-  const stateDir = await mkdtemp(join(tmpdir(), "router-vitals-codex-legacy-"));
-  const codexHome = await mkdtemp(join(tmpdir(), "codex-home-legacy-"));
+  const stateDir = await mkdtemp(join(tmpdir(), "router-vitals-codex-starvation-"));
+  const codexHome = await mkdtemp(join(tmpdir(), "codex-home-starvation-"));
   await writeTargetCodexConfig(codexHome);
-  const ownerSessionKey = hashLocalSessionId("codex-legacy-owner");
+  const baseMs = Date.now() - 5 * 60 * 1000;
+  const pending: Record<string, unknown> = {};
+  const ownerKeys: string[] = [];
+
+  try {
+    for (let index = 0; index < 3; index += 1) {
+      const sessionId = `codex-starvation-${index}`;
+      const sessionKey = hashLocalSessionId(sessionId);
+      const turnId = `turn-starvation-${index}`;
+      const transcript = join(stateDir, `rollout-starvation-${index}.jsonl`);
+      const startedAtMs = baseMs + index * 1000;
+      const lines = [
+        rolloutLine(startedAtMs, "session_meta", { session_id: sessionId, model_provider: providerId }),
+        rolloutLine(startedAtMs + 100, "event_msg", { type: "task_started", turn_id: turnId })
+      ];
+      if (index === 2) {
+        lines.push(rolloutLine(startedAtMs + 200, "event_msg", { type: "task_complete", turn_id: turnId, duration_ms: 100 }));
+      }
+      await writeFile(transcript, lines.join("\n") + "\n", "utf8");
+      pending[sessionKey] = stalePending(transcript, turnId, startedAtMs);
+      ownerKeys.push(sessionKey);
+    }
+    await writePluginState(stateDir, { pending });
+
+    await triggerCodexSessionStart("codex-starvation-trigger", stateDir, codexHome, server);
+
+    assert.equal(received.length, 1);
+    const state = await readPluginState(stateDir);
+    assert.ok(state.pending[ownerKeys[0]!]);
+    assert.ok(state.pending[ownerKeys[1]!]);
+    assert.equal(state.pending[ownerKeys[2]!], undefined);
+  } finally {
+    server.close();
+  }
+});
+
+test("codex hook drops malformed pending state", async () => {
+  const received: Array<Record<string, any>> = [];
+  const server = createCodexReportServer(received);
+  await listen(server);
+
+  const stateDir = await mkdtemp(join(tmpdir(), "router-vitals-codex-malformed-"));
+  const codexHome = await mkdtemp(join(tmpdir(), "codex-home-malformed-"));
+  await writeTargetCodexConfig(codexHome);
+  const ownerSessionKey = hashLocalSessionId("codex-malformed-owner");
   const startedAtMs = Date.now() - 6 * 60 * 1000;
 
   try {
@@ -395,18 +566,17 @@ test("codex hook leaves legacy pending without transcript path untouched", async
         [ownerSessionKey]: {
           startedAtMs,
           targetMatched: true,
-          turnId: "turn-legacy",
+          turnId: "turn-malformed",
           modelClass: "gpt-5.5"
         }
       }
     });
 
-    await triggerCodexSessionStart("codex-legacy-trigger", stateDir, codexHome, server);
+    await triggerCodexSessionStart("codex-malformed-trigger", stateDir, codexHome, server);
 
     assert.equal(received.length, 0);
     const state = await readPluginState(stateDir);
-    assert.equal(Boolean(state.pending[ownerSessionKey]), true);
-    assert.equal(state.pending[ownerSessionKey]?.transcriptPath, undefined);
+    assert.equal(state.pending[ownerSessionKey], undefined);
   } finally {
     server.close();
   }
@@ -453,7 +623,7 @@ test("codex hook processes at most two stale cross-session pending turns per eve
   }
 });
 
-test("codex hook leaves recently finished cross-session pending for the owner Stop hook", async () => {
+test("codex hook immediately cross-settles a recently finished turn", async () => {
   const received: Array<Record<string, any>> = [];
   const server = createCodexReportServer(received);
   await listen(server);
@@ -481,9 +651,9 @@ test("codex hook leaves recently finished cross-session pending for the owner St
 
     await triggerCodexSessionStart("codex-grace-trigger", stateDir, codexHome, server);
 
-    assert.equal(received.length, 0);
+    assert.equal(received.length, 1);
     const state = await readPluginState(stateDir);
-    assert.equal(Boolean(state.pending[ownerSessionKey]), true);
+    assert.equal(state.pending[ownerSessionKey], undefined);
   } finally {
     server.close();
   }
@@ -695,6 +865,8 @@ async function triggerCodexSessionStart(
 
 function stalePending(transcriptPath: string, turnId: string, startedAtMs: number): Record<string, unknown> {
   return {
+    client: "codex",
+    settlementId: randomUUID(),
     startedAtMs,
     targetMatched: true,
     turnId,
@@ -717,7 +889,7 @@ async function readPluginState(stateDir: string): Promise<Record<string, any>> {
 
 async function writePluginState(stateDir: string, state: Record<string, unknown>): Promise<void> {
   await mkdir(join(stateDir, PLUGIN_ID), { recursive: true });
-  await writeFile(pluginStatePath(stateDir), `${JSON.stringify(state, null, 2)}\n`, "utf8");
+  await writeFile(pluginStatePath(stateDir), `${JSON.stringify({ ...state, version: 2 }, null, 2)}\n`, "utf8");
 }
 
 function pluginStatePath(stateDir: string): string {
@@ -735,7 +907,10 @@ async function appendRollout(path: string, lines: string[]): Promise<void> {
 async function runCodexHook(eventName: string, input: Record<string, unknown>, env: NodeJS.ProcessEnv): Promise<string> {
   return await new Promise<string>((resolveRun, rejectRun) => {
     const child = spawn(process.execPath, [hookPath, eventName, "--client=codex"], {
-      env,
+      env: {
+        ...env,
+        ROUTER_VITALS_TEST_DISABLE_CODEX_WATCHER: env.ROUTER_VITALS_TEST_DISABLE_CODEX_WATCHER ?? "1"
+      },
       stdio: ["pipe", "pipe", "pipe"]
     });
     const chunks: Buffer[] = [];
@@ -770,4 +945,13 @@ function serverPort(server: Server): number {
   const address = server.address() as AddressInfo | null;
   if (!address) throw new Error("server is not listening");
   return address.port;
+}
+
+async function waitFor(predicate: () => Promise<boolean>, timeoutMs = 5_000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (await predicate()) return;
+    await new Promise((resolveWait) => setTimeout(resolveWait, 50));
+  }
+  assert.fail(`condition not met within ${timeoutMs}ms`);
 }

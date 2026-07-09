@@ -5,7 +5,7 @@ import {
   extractErrorStatusCode,
   type ReportPayload
 } from "./policy.mjs";
-import type { TurnState } from "./state.mjs";
+import type { PendingTurn, SessionState } from "./state.mjs";
 import {
   collectModelCandidates,
   getTranscriptPath,
@@ -25,15 +25,20 @@ export function summarizeHookInput(input: HookInput): Record<string, unknown> {
   };
 }
 
-export function summarizeTurnState(turn: TurnState | undefined): Record<string, unknown> | null {
+export function summarizeTurnState(turn: PendingTurn | SessionState | undefined): Record<string, unknown> | null {
   if (!turn) return null;
   return {
-    ...(typeof turn.startedAtMs === "number" ? { startedAtMs: turn.startedAtMs } : {}),
-    ...(typeof turn.updatedAtMs === "number" ? { updatedAtMs: turn.updatedAtMs } : {}),
-    ...(typeof turn.transcriptStartOffset === "number" ? { transcriptStartOffset: turn.transcriptStartOffset } : {}),
+    ...("startedAtMs" in turn ? { startedAtMs: turn.startedAtMs } : {}),
+    ...("updatedAtMs" in turn ? { updatedAtMs: turn.updatedAtMs } : {}),
+    ...("transcriptStartOffset" in turn && typeof turn.transcriptStartOffset === "number"
+      ? { transcriptStartOffset: turn.transcriptStartOffset }
+      : {}),
+    ...("client" in turn ? { client: turn.client, settlementId: turn.settlementId } : {}),
+    ...("transcriptPath" in turn && turn.transcriptPath ? { transcriptPath: turn.transcriptPath } : {}),
     ...(turn.transcriptKey ? { transcriptKey: turn.transcriptKey } : {}),
-    ...(typeof turn.targetMatched === "boolean" ? { targetMatched: turn.targetMatched } : {}),
-    ...(typeof turn.promptCount === "number" ? { promptCount: turn.promptCount } : {}),
+    ...("targetMatched" in turn ? { targetMatched: turn.targetMatched } : {}),
+    ...("turnId" in turn && turn.turnId ? { turnId: turn.turnId } : {}),
+    ...("promptCount" in turn ? { promptCount: turn.promptCount } : {}),
     ...(turn.modelClass ? { modelClass: turn.modelClass } : {})
   };
 }

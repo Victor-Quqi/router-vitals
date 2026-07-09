@@ -1,8 +1,9 @@
 #!/usr/bin/env node
+import { randomUUID } from "node:crypto";
 import { loadRemoteConfig } from "./lib/config.mjs";
 import { appendHookDebugRecord } from "./lib/debug.mjs";
 import { PLUGIN_VERSION, bucketAssistantStart, classifyError, classifyModel, createErrorHint, createTimeBucket, extractErrorStatusCode, hashLocalSessionId, matchTargetBaseUrl, normalizeTargetHost, pickSampleRate, shouldSample, validateReportPayload } from "./lib/policy.mjs";
-import { getDailyAnonymousId, hasReachedDailyReportLimit, incrementContribution, loadState, recordPluginUpdateReminder, saveState, shouldRemindPluginUpdate } from "./lib/state.mjs";
+import { getDailyAnonymousId, hasReachedDailyReportLimit, incrementContribution, recordPluginUpdateReminder, shouldRemindPluginUpdate, withLockedState } from "./lib/state.mjs";
 import { summarizeHookInput, summarizePayload, summarizeTurnState } from "./lib/hook-debug-summary.mjs";
 import { getTranscriptPath, getTranscriptSize, inspectTranscript } from "./lib/hook-transcript.mjs";
 import { resolveModelClass, resolvePromptStartModelClass } from "./lib/hook-model-resolution.mjs";
@@ -20,51 +21,51 @@ async function main() {
         await runCodexHook(eventName, input);
         return;
     }
-    const state = await loadState();
+    if (eventName !== "SessionStart" && eventName !== "SessionEnd" && eventName !== "UserPromptSubmit" && eventName !== "Stop" && eventName !== "StopFailure") {
+        return;
+    }
     const sessionKey = hashLocalSessionId(input.session_id);
-    await writeHookDebug(sessionKey, "received", {
-        input: summarizeHookInput(input),
-        sessionBefore: summarizeTurnState(state.sessions[sessionKey]),
-        pendingBefore: summarizeTurnState(state.pending[sessionKey])
-    });
-    if (eventName === "SessionStart") {
-        const modelClass = recordSessionStart(state, sessionKey, input);
-        await writeHookDebug(sessionKey, "session_start", {
-            modelClass,
-            sessionAfter: summarizeTurnState(state.sessions[sessionKey])
+    let systemMessage = null;
+    await withLockedState(async (state) => {
+        await writeHookDebug(sessionKey, "received", {
+            input: summarizeHookInput(input),
+            sessionBefore: summarizeTurnState(state.sessions[sessionKey]),
+            pendingBefore: summarizeTurnState(state.pending[sessionKey])
         });
-        await saveState(state);
-        return;
-    }
-    if (eventName === "SessionEnd") {
-        recordSessionEnd(state, sessionKey);
-        await writeHookDebug(sessionKey, "session_end", {
-            sessionAfter: summarizeTurnState(state.sessions[sessionKey])
-        });
-        await saveState(state);
-        return;
-    }
-    if (eventName === "UserPromptSubmit") {
-        const debug = await recordPromptStart(state, sessionKey, input);
-        await writeHookDebug(sessionKey, "prompt_start", debug);
-        await saveState(state);
-        return;
-    }
-    if (eventName === "Stop" || eventName === "StopFailure") {
+        if (eventName === "SessionStart") {
+            const modelClass = recordSessionStart(state, sessionKey, input);
+            await writeHookDebug(sessionKey, "session_start", {
+                modelClass,
+                sessionAfter: summarizeTurnState(state.sessions[sessionKey])
+            });
+            return;
+        }
+        if (eventName === "SessionEnd") {
+            recordSessionEnd(state, sessionKey);
+            await writeHookDebug(sessionKey, "session_end", {
+                sessionAfter: summarizeTurnState(state.sessions[sessionKey])
+            });
+            return;
+        }
+        if (eventName === "UserPromptSubmit") {
+            const debug = await recordPromptStart(state, sessionKey, input);
+            await writeHookDebug(sessionKey, "prompt_start", debug);
+            return;
+        }
+        const completionEventName = eventName;
         const config = await loadRemoteConfig();
-        const updateReminderMessage = createPluginUpdateReminderMessage(state, config);
-        const debug = await reportCompletion({ eventName: eventName, input, state, config, sessionKey });
-        if (updateReminderMessage) {
+        systemMessage = createPluginUpdateReminderMessage(state, config);
+        const debug = await reportCompletion({ eventName: completionEventName, input, state, config, sessionKey });
+        if (systemMessage) {
             debug.updateReminder = {
                 latestPluginVersion: config.latestPluginVersion,
                 emitted: true
             };
         }
         await writeHookDebug(sessionKey, "completion", debug);
-        await saveState(state);
-        if (updateReminderMessage)
-            writeHookSystemMessage(updateReminderMessage);
-    }
+    });
+    if (systemMessage)
+        writeHookSystemMessage(systemMessage);
 }
 async function readHookInput() {
     const chunks = [];
@@ -91,7 +92,7 @@ function recordSessionStart(state, sessionKey, input) {
         ? previousModelClass
         : directModelClass;
     state.sessions[sessionKey] = {
-        modelClass,
+        ...(modelClass !== "unknown" ? { modelClass } : {}),
         promptCount: 0,
         ...(transcriptKey ? { transcriptKey } : {}),
         updatedAtMs: Date.now()
@@ -106,8 +107,8 @@ function recordSessionEnd(state, sessionKey) {
     }
     state.sessions[sessionKey] = {
         modelClass: session.modelClass,
-        ...(session.transcriptKey ? { transcriptKey: session.transcriptKey } : {}),
-        ...(typeof session.promptCount === "number" ? { promptCount: session.promptCount } : {}),
+        transcriptKey: session.transcriptKey,
+        promptCount: session.promptCount,
         updatedAtMs: Date.now()
     };
 }
@@ -128,6 +129,8 @@ async function recordPromptStart(state, sessionKey, input) {
     };
     state.sessions[sessionKey] = nextSession;
     state.pending[sessionKey] = {
+        client: "claude-code",
+        settlementId: randomUUID(),
         startedAtMs: Date.now(),
         targetMatched: match.matched === true,
         ...(transcriptStartOffset !== null ? { transcriptStartOffset } : {}),
@@ -148,8 +151,10 @@ async function recordPromptStart(state, sessionKey, input) {
     };
 }
 async function reportCompletion({ eventName, input, state, config, sessionKey }) {
-    const pending = state.pending[sessionKey];
-    delete state.pending[sessionKey];
+    const candidate = state.pending[sessionKey];
+    const pending = candidate?.client === "claude-code" ? candidate : undefined;
+    if (pending)
+        delete state.pending[sessionKey];
     const debug = {
         pending: summarizeTurnState(pending),
         skipped: null
@@ -190,7 +195,7 @@ async function reportCompletion({ eventName, input, state, config, sessionKey })
         const transcriptKey = getTranscriptKey(input);
         const session = state.sessions[sessionKey];
         state.sessions[sessionKey] = {
-            ...session,
+            ...(session ?? { promptCount: 0, updatedAtMs: Date.now() }),
             modelClass,
             ...(transcriptKey ? { transcriptKey } : {}),
             updatedAtMs: Date.now()

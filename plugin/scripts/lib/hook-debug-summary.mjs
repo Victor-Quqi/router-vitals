@@ -16,12 +16,17 @@ export function summarizeTurnState(turn) {
     if (!turn)
         return null;
     return {
-        ...(typeof turn.startedAtMs === "number" ? { startedAtMs: turn.startedAtMs } : {}),
-        ...(typeof turn.updatedAtMs === "number" ? { updatedAtMs: turn.updatedAtMs } : {}),
-        ...(typeof turn.transcriptStartOffset === "number" ? { transcriptStartOffset: turn.transcriptStartOffset } : {}),
+        ...("startedAtMs" in turn ? { startedAtMs: turn.startedAtMs } : {}),
+        ...("updatedAtMs" in turn ? { updatedAtMs: turn.updatedAtMs } : {}),
+        ...("transcriptStartOffset" in turn && typeof turn.transcriptStartOffset === "number"
+            ? { transcriptStartOffset: turn.transcriptStartOffset }
+            : {}),
+        ...("client" in turn ? { client: turn.client, settlementId: turn.settlementId } : {}),
+        ...("transcriptPath" in turn && turn.transcriptPath ? { transcriptPath: turn.transcriptPath } : {}),
         ...(turn.transcriptKey ? { transcriptKey: turn.transcriptKey } : {}),
-        ...(typeof turn.targetMatched === "boolean" ? { targetMatched: turn.targetMatched } : {}),
-        ...(typeof turn.promptCount === "number" ? { promptCount: turn.promptCount } : {}),
+        ...("targetMatched" in turn ? { targetMatched: turn.targetMatched } : {}),
+        ...("turnId" in turn && turn.turnId ? { turnId: turn.turnId } : {}),
+        ...("promptCount" in turn ? { promptCount: turn.promptCount } : {}),
         ...(turn.modelClass ? { modelClass: turn.modelClass } : {})
     };
 }

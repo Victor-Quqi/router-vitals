@@ -818,7 +818,7 @@ test("plugin hook skips uploads after the local daily contribution limit", async
 
   await mkdir(dirname(statePath), { recursive: true });
   await writeFile(statePath, JSON.stringify({
-    version: 1,
+    version: 2,
     contributions: { [today]: LOCAL_DAILY_REPORT_LIMIT }
   }), "utf8");
 

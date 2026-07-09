@@ -1,5 +1,7 @@
 import { createReadStream } from "node:fs";
+import { open } from "node:fs/promises";
 import { createInterface } from "node:readline";
+import { StringDecoder } from "node:string_decoder";
 
 const MODEL_OUTPUT_RESPONSE_ITEM_TYPES = new Set([
   "reasoning",
@@ -14,6 +16,62 @@ const MODEL_OUTPUT_RESPONSE_ITEM_TYPES = new Set([
 // markers. Rewinding a bounded window recovers them; turn-id gating makes the
 // extra records harmless.
 const TURN_START_REWIND_BYTES = 64 * 1024;
+const TAIL_READ_CHUNK_BYTES = 64 * 1024;
+
+export type CodexTurnTerminalState = "completed" | "aborted";
+
+export class CodexTurnTailer {
+  private offset: number;
+  private partialLine = "";
+  private decoder = new StringDecoder("utf8");
+
+  constructor(startOffset: number | undefined) {
+    this.offset = Number.isFinite(startOffset) && Number(startOffset) > 0 ? Number(startOffset) : 0;
+  }
+
+  get currentOffset(): number {
+    return this.offset;
+  }
+
+  async poll(transcriptPath: string | null, turnId: string | null): Promise<CodexTurnTerminalState | null> {
+    if (!transcriptPath) return null;
+    try {
+      const file = await open(transcriptPath, "r");
+      try {
+        const info = await file.stat();
+        if (info.size < this.offset) {
+          this.offset = 0;
+          this.partialLine = "";
+          this.decoder = new StringDecoder("utf8");
+        }
+
+        while (this.offset < info.size) {
+          const buffer = Buffer.allocUnsafe(Math.min(TAIL_READ_CHUNK_BYTES, info.size - this.offset));
+          const { bytesRead } = await file.read(buffer, 0, buffer.length, this.offset);
+          if (bytesRead === 0) break;
+          this.offset += bytesRead;
+          const terminal = this.consume(this.decoder.write(buffer.subarray(0, bytesRead)), turnId);
+          if (terminal) return terminal;
+        }
+        return parseTerminalLine(this.partialLine, turnId);
+      } finally {
+        await file.close();
+      }
+    } catch {
+      return null;
+    }
+  }
+
+  private consume(chunk: string, turnId: string | null): CodexTurnTerminalState | null {
+    const lines = `${this.partialLine}${chunk}`.split("\n");
+    this.partialLine = lines.pop() ?? "";
+    for (const line of lines) {
+      const terminal = parseTerminalLine(line, turnId);
+      if (terminal) return terminal;
+    }
+    return null;
+  }
+}
 
 export interface CodexSessionMeta {
   sessionId: string | null;
@@ -190,6 +248,17 @@ function parseRecord(raw: string): { timestamp?: unknown; type?: string; payload
   } catch {
     return null;
   }
+}
+
+function parseTerminalLine(raw: string, turnId: string | null): CodexTurnTerminalState | null {
+  const record = parseRecord(raw.trim());
+  if (record?.type !== "event_msg" || !isRecord(record.payload)) return null;
+  const recordTurnId = readString(record.payload.turn_id);
+  if (turnId && recordTurnId !== turnId) return null;
+  const payloadType = readString(record.payload.type);
+  if (payloadType === "task_complete") return "completed";
+  if (payloadType === "turn_aborted") return "aborted";
+  return null;
 }
 
 function parseTimestampMs(value: unknown): number | null {

@@ -18,12 +18,14 @@
 
 Codex 没有 `StopFailure` 和 `SessionEnd`。实测 0.142.5：成功轮的 `Stop` 正常触发，轮次因上游错误终止时 **`Stop` 不触发**（exec 与 TUI 一致）。因此 Codex 路径采用"结算"模型（`codex-flow.mts`）：
 
-- `UserPromptSubmit` 记 pending（`turn_id`、起始时间、transcript 偏移、目标命中、模型类别），并先结算同会话遗留的上一轮 pending。
-- `Stop` 结算当前轮。
+- `UserPromptSubmit` 记 pending（唯一结算 ID、`turn_id`、起始时间、transcript 偏移、目标命中、模型类别），并启动独立 watcher。watcher 增量读取 rollout 后续新增字节，发现本轮 `task_complete` / `turn_aborted` 后立即结算；完整轮次证据只在结算时扫描一次。
+- watcher 启动时与 hook 做 ready 握手，静态依赖全部载入后 hook 才退出。Codex 随后替换插件缓存目录时，已启动 watcher 仍可完成当前轮。
+- `Stop` 结算正常结束的当前轮。watcher、`Stop` 和其他恢复事件共享跨进程状态锁，并以 pending 的唯一结算 ID 确认所有权，同一轮只会被一个结算方消费。
 - `SessionStart`（含 resume）也先结算遗留 pending。实测 resume 保持同一 `session_id` 并续写同一 rollout 文件，`codex exec resume` 也能触发结算。注意 0.142.5 TUI 的 `SessionStart` hook 并非在会话打开时触发，而是延迟到首条用户消息时与其 `UserPromptSubmit` 背靠背触发（新会话与 resume 一致）——因此 resume 对遗留 pending 的补结算发生在用户 resume 后首次发言时，而非 resume 瞬间。
-- 结算时按 pending 的 `turn_id` + 偏移读 rollout 轮次范围（`codex-transcript.mts`），判定结果并上报。pending 同时保存 rollout 绝对路径；同会话下一个事件会沿用当前 transcript 结算，任意后续 Codex hook 事件也会补结算其他会话遗留 pending，每次事件至多处理 2 条。跨会话补结算的轮次证据和 `session_meta.model_provider` 仍读取原会话 rollout，不借用当前会话信息。
-- 跨会话补结算有 60 秒 owner grace：rollout 已出现结束标记但结束未满 60 秒时，外部会话不消费 pending，留给原会话自己的 Stop hook，避免 TUI 下双报。
-- 统一上报时效按轮内最后活动时间算：结束 60 秒到 15 分钟内的跨会话遗留 pending 可补报；超过 15 分钟的 pending 会被清除并记为 `pending_expired`，不上报。状态页按结算时刻入桶，陈年数据宁漏勿假。
+- 任意后续 Codex hook 事件仍会恢复同会话 pending，并补结算其他会话已结束的 pending，每次事件至多消费 2 条。跨会话证据和 `session_meta.model_provider` 始终读取原会话 rollout。
+- watcher 连续 30 分钟看不到 rollout 增长或运行达到 24 小时会退出，pending 保留给后续 hook 恢复。结束标记超过 15 分钟的遗留 pending 会清除并记为 `pending_expired`，不上报。
+
+本地 state schema 当前为 v2，pending 明确区分客户端并要求唯一结算 ID。旧 schema 会整体丢弃；项目尚未运营，不做迁移。
 
 两个已实测确认的写盘时序，解析层都已适配：
 
@@ -47,7 +49,8 @@ rollout（`$CODEX_HOME/sessions/**/rollout-*.jsonl`）每行 `{timestamp, type, 
 
 ## 已知限制
 
-- 失败轮可由本机之后任意 Codex hook 事件补结算，Worker 端按接收分钟聚合，时间桶会滞后；结束超过 15 分钟的遗留 pending 会清除不上报。如果原 rollout 被删除或归档导致证据不可读，该 pending 无法结算，7 天后由本地 state GC 丢弃。
-- 已在真实 AnyRouter 上游实测：成功轮 Stop 结算与上报 payload 构造正确；故障轮（high demand）无 error 事件，失败判定走"无输出证据"，错误分类退化为 `unknown`。TUI 错误轮已实测（0.142.5）：同样无 error 事件、无 Stop，由下一事件结算。TUI 成功轮的 Stop 未单独实测（与 exec 同语义，上线后首条 TUI 数据即可确认）。
+- 失败轮通常在 rollout 写入结束标记后的一个 watcher 轮询周期内上报。watcher 未启动或提前退出时，本机之后任意 Codex hook 事件会恢复结算；结束超过 15 分钟的遗留 pending 会清除不上报。如果原 rollout 被删除或归档导致证据不可读，该 pending 无法结算，7 天后由本地 state GC 丢弃。
+- 已在真实 AnyRouter 上游实测：成功轮 Stop 结算与上报 payload 构造正确；故障轮（high demand）无 error 事件，失败判定走"无输出证据"，错误分类退化为 `unknown`。TUI 错误轮已实测（0.142.5）：同样无 error 事件、无 Stop。watcher 路径已用带 429 error 证据的合成 rollout 做集成验证；真实上游不写 error 时仍只能归为 `unknown`。
+- Codex 的插件市场自动刷新存在运行中缓存路径失效问题，跟踪见 [openai/codex#31383](https://github.com/openai/codex/issues/31383)。ready 握手保护已经载入的 watcher；自动刷新导致当前进程不再触发 hooks 时，未开始的新轮次无法记录，也不会上报。
 - Codex 侧更新提醒走 `Stop` hook 的 `systemMessage`（与 Claude 侧同频率）。更新是固定两步（已用 git 市场实测）：`codex plugin marketplace upgrade router-vitals` 刷新市场快照，`codex plugin add anyrouter-status-monitor@router-vitals` 从快照装进插件实际运行的版本化缓存——只 `add` 会装回旧快照版本，只 `upgrade` 不动缓存（此时 `codex plugin list` 显示的是快照版本，有误导性）。提醒文案不用 `&&`（PowerShell 5.1 不支持）。statusLine 无对应扩展点。
 - Codex 信任模型按 hook 定义 hash 记录，插件每次更新 hooks 定义后，新会话会提示 hook 有变化，用户可批准当前插件或全部信任；`/hooks` 作为手动管理入口。

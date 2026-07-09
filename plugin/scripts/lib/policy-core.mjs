@@ -1,5 +1,5 @@
 import { SITE_CONFIG, SITE_ENDPOINTS } from "./site-config.mjs";
-export const PLUGIN_VERSION = "0.3.3";
+export const PLUGIN_VERSION = "0.3.4";
 export const TARGET_HOSTS = Object.freeze(SITE_ENDPOINTS.map((endpoint) => endpoint.host));
 export const DEFAULT_API_BASE_URL = SITE_CONFIG.defaultApiBaseUrl;
 export const DEFAULT_CONFIG_URL = `${DEFAULT_API_BASE_URL.replace(/\/+$/, "")}/config.json`;

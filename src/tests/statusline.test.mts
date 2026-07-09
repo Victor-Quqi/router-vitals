@@ -21,7 +21,7 @@ test("statusLine prints today's local contribution count", async () => {
 
   await mkdir(dirname(statePath), { recursive: true });
   await writeFile(statePath, JSON.stringify({
-    version: 1,
+    version: 2,
     contributions: { [today]: 2 }
   }), "utf8");
 
@@ -45,7 +45,7 @@ test("statusLine shows a full daily contribution hint", async () => {
 
   await mkdir(dirname(statePath), { recursive: true });
   await writeFile(statePath, JSON.stringify({
-    version: 1,
+    version: 2,
     contributions: { [today]: LOCAL_DAILY_REPORT_LIMIT }
   }), "utf8");
 
@@ -94,7 +94,7 @@ test("statusLine shows recent local report failures", async () => {
 
   await mkdir(dirname(statePath), { recursive: true });
   await writeFile(statePath, JSON.stringify({
-    version: 1,
+    version: 2,
     contributions: { [getTodayKey()]: 2 },
     lastDecision: {
       at: new Date().toISOString(),
